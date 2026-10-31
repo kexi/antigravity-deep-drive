@@ -24,3 +24,4 @@ trust_signals:
 - [009-github-pages-deploy.md](./009-github-pages-deploy.md): GitHub Pages 自動デプロイとサブパス配信・SHA Pinning CI/CD パイプライン
 - [010-sky-shader.md](./010-sky-shader.md): 物理ベース大気散乱・プロシージャル動的雲・星空 空シェーダー (Atmospheric Dynamic Sky Shader)
 - [011-tsdown-minify-ghp-deploy.md](./011-tsdown-minify-ghp-deploy.md): tsdown によるバンドル Minification 最適化と GitHub Pages デプロイパイプライン
+- [012-shader-compile-and-normal-matrix-fix.md](./012-shader-compile-and-normal-matrix-fix.md): Three.js フラグメントシェーダーにおける normalMatrix と metalnessFactor コンパイル不整合の解決

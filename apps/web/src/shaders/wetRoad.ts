@@ -72,9 +72,9 @@ export class WetRoadMaterial extends THREE.MeshStandardMaterial {
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
-        "#include <roughnessmap_fragment>",
+        "#include <metalnessmap_fragment>",
         /* glsl */ `
-        #include <roughnessmap_fragment>
+        #include <metalnessmap_fragment>
         
         if (uRainWetness > 0.01) {
           // 水たまりマスク

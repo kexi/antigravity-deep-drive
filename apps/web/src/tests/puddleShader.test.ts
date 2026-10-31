@@ -48,6 +48,7 @@ describe('PuddleMaterial - Physically Based Rain Puddles & Ripples Shader', () =
         void main() {
           #include <normal_fragment_maps>
           #include <roughnessmap_fragment>
+          #include <metalnessmap_fragment>
         }
       `,
     };

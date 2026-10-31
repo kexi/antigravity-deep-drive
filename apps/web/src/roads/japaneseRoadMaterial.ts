@@ -138,7 +138,7 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
         float crackVal = noiseVoxel.g;
         bumpNormal.xy += vec2(crackVal * 0.35);
 
-        vec3 calcNormal = normalize(normalMatrix * normalize(bumpNormal));
+        vec3 calcNormal = normalize(mat3(viewMatrix) * normalize(bumpNormal));
 
         // 雨天時: 水たまり部分に動的雨滴リップル波紋法線を適用
         if (uRainWetness > 0.01) {
@@ -146,7 +146,7 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
           if (puddleMask > 0.05) {
             vec3 rip = calculatePuddleRipples(vWorldPos.xz, uTime, uRainWetness);
             vec3 perturbedN = vec3(rip.x, rip.z, rip.y);
-            calcNormal = normalize(mix(calcNormal, normalize(normalMatrix * perturbedN), puddleMask * 0.7));
+            calcNormal = normalize(mix(calcNormal, normalize(mat3(viewMatrix) * perturbedN), puddleMask * 0.7));
           }
         }
 
@@ -154,11 +154,11 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
         `,
       );
 
-      // カラーとラフネスの3Dテクスチャ変調
+      // カラー・ラフネス・メタルネスの3Dテクスチャ変調
       shader.fragmentShader = shader.fragmentShader.replace(
-        "#include <roughnessmap_fragment>",
+        "#include <metalnessmap_fragment>",
         /* glsl */ `
-        #include <roughnessmap_fragment>
+        #include <metalnessmap_fragment>
 
         vec3 sampleCoord = vWorldPos * 0.18;
         vec4 voxel = texture(uRoadNoise3D, sampleCoord);

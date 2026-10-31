@@ -177,13 +177,13 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
         /* glsl */ `
         #include <normal_fragment_maps>
 
-        vec3 baseN = normalize(normalMatrix * vWaveNormal);
+        vec3 baseN = normalize(mat3(viewMatrix) * vWaveNormal);
 
         // 雨滴波紋のブレンド
         if (uRainWetness > 0.01) {
           vec3 rip = waterRainRipples(vWorldPosition.xz, uTime, uRainWetness);
           vec3 perturbedN = vec3(rip.x, rip.z, rip.y);
-          baseN = normalize(mix(baseN, normalize(normalMatrix * perturbedN), uRainWetness * 0.5));
+          baseN = normalize(mix(baseN, normalize(mat3(viewMatrix) * perturbedN), uRainWetness * 0.5));
         }
 
         normal = baseN;
@@ -192,9 +192,9 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
 
       // カラー・吸光グラデーション・鏡面反射
       shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <roughnessmap_fragment>',
+        '#include <metalnessmap_fragment>',
         /* glsl */ `
-        #include <roughnessmap_fragment>
+        #include <metalnessmap_fragment>
 
         // 波の高さに基づく浅瀬・深部カラーグラデーション
         float waveHeightFactor = clamp((vWorldPosition.y + 0.2) * 1.5, 0.0, 1.0);

@@ -49,6 +49,7 @@ describe('WaterSurfaceMaterial - Gerstner Waves Water Surface Shader', () => {
         void main() {
           #include <normal_fragment_maps>
           #include <roughnessmap_fragment>
+          #include <metalnessmap_fragment>
         }
       `,
     };

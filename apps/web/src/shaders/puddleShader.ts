@@ -162,17 +162,17 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
             
             // 法線マトリックス変換してサーフェス法線とブレンド
             vec3 perturbedN = vec3(rippleN.x, rippleN.z, rippleN.y);
-            normal = normalize(mix(normal, normalize(normalMatrix * perturbedN), isPuddleArea * 0.75));
+            normal = normalize(mix(normal, normalize(mat3(viewMatrix) * perturbedN), isPuddleArea * 0.75));
           }
         }
         `
       );
 
-      // カラー・粗さ変調部: 水深・濡れ縁・鏡面化
+      // カラー・粗さ・メタルネス変調部: 水深・濡れ縁・鏡面化
       shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <roughnessmap_fragment>',
+        '#include <metalnessmap_fragment>',
         /* glsl */ `
-        #include <roughnessmap_fragment>
+        #include <metalnessmap_fragment>
 
         if (uRainWetness > 0.01) {
           float pNoise = puddleFbm(vWorldPosition.xz * 0.08);
