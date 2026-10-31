@@ -42,12 +42,21 @@ Three.js の `MeshStandardMaterial` のフラグメントシェーダーチャ�
 
 - **解決策**: 両方のファクターを変更する場合は、`#include <metalnessmap_fragment>` の直後に注入フックを配置する。この位置であれば `roughnessFactor` と `metalnessFactor` の双方が宣言済みであり、安全に上書きできる。
 
+### 3. `cameraPosition` は ShaderMaterial の自動注入 uniform（明示宣言で再定義エラー）
+Three.js の `ShaderMaterial` において、`cameraPosition` (`vec3`) は Three.js レンダラーが自動的にヘッダーに注入するビルトイン uniform である。
+そのため、ユーザーの GLSL フラグメントシェーダーで `uniform vec3 cameraPosition;` を手動宣言すると `ERROR: 'cameraPosition' : redefinition` が発生する。
+
+- **解決策**: ユーザー定義 uniform の名前を `uCameraPosition` に改名し、競合を防止する。
+
 ## 修正対象
 
 - `apps/web/src/roads/japaneseRoadMaterial.ts`: `normalMatrix` -> `mat3(viewMatrix)`, フック位置を `#include <metalnessmap_fragment>` へ変更
 - `apps/web/src/shaders/puddleShader.ts`: `normalMatrix` -> `mat3(viewMatrix)`, フック位置を `#include <metalnessmap_fragment>` へ変更
 - `apps/web/src/shaders/waterShader.ts`: `normalMatrix` -> `mat3(viewMatrix)`, フック位置を `#include <metalnessmap_fragment>` へ変更
 - `apps/web/src/shaders/wetRoad.ts`: フック位置を `#include <metalnessmap_fragment>` へ変更
+- `apps/web/src/shaders/depthFog.ts`: `cameraPosition` を `uCameraPosition` に改名し ShaderMaterial の再定義エラーを解消
+- `apps/web/src/city/tokyoStationMap.ts`, `apps/web/src/vehicle/carModel.ts`: GLB モデルのロードパスを `assetManager.resolveAssetUrl()` 経由にし、GitHub Pages サブパスでの 404 を解消
+- 単体テストのモック GLSL (`puddleShader.test.ts`, `waterShader.test.ts`) にも `#include <metalnessmap_fragment>` を追加して検証整合性を担保
 - 単体テストのモック GLSL (`puddleShader.test.ts`, `waterShader.test.ts`) にも `#include <metalnessmap_fragment>` を追加して検証整合性を担保
 
 ## 検証結果

@@ -67,7 +67,8 @@ export class CarModel {
 
   private loadGlbModel(): void {
     const config = assetManager.getModelConfig("car");
-    const modelPath = config?.path ?? "/models/car.glb";
+    const rawPath = config?.path ?? "/models/car.glb";
+    const modelPath = assetManager.resolveAssetUrl(rawPath);
     const loader = new GLTFLoader();
     loader.load(
       modelPath,

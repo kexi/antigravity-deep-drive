@@ -263,7 +263,8 @@ export class TokyoStationMap {
 
   private loadGlbStationModel(): void {
     const config = assetManager.getModelConfig("tokyo_station");
-    const modelPath = config?.path ?? "/models/tokyo_station.glb";
+    const rawPath = config?.path ?? "/models/tokyo_station.glb";
+    const modelPath = assetManager.resolveAssetUrl(rawPath);
     const loader = new GLTFLoader();
     loader.load(
       modelPath,

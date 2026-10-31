@@ -48,7 +48,7 @@ export class DepthFogPass {
       tDepth: { value: this.renderTarget.depthTexture },
       cameraNear: { value: camera.near },
       cameraFar: { value: camera.far },
-      cameraPosition: { value: camera.position },
+      uCameraPosition: { value: camera.position.clone() },
       cameraWorldMatrix: { value: camera.matrixWorld },
       cameraProjectionInverse: { value: camera.projectionMatrixInverse },
       uFogColor: { value: new THREE.Color(options.fogColor ?? 0xfdba74) },
@@ -73,7 +73,7 @@ export class DepthFogPass {
       uniform sampler2D tDepth;
       uniform float cameraNear;
       uniform float cameraFar;
-      uniform vec3 cameraPosition;
+      uniform vec3 uCameraPosition;
       uniform mat4 cameraWorldMatrix;
       uniform mat4 cameraProjectionInverse;
 
@@ -116,7 +116,7 @@ export class DepthFogPass {
         vec4 worldPos4 = cameraWorldMatrix * vec4(viewPos, 1.0);
         vec3 worldPos = worldPos4.xyz;
 
-        vec3 rayVec = worldPos - cameraPosition;
+        vec3 rayVec = worldPos - uCameraPosition;
         float rayDist = length(rayVec);
         vec3 rayDir = normalize(rayVec);
 
@@ -124,7 +124,7 @@ export class DepthFogPass {
         float effectiveDist = max(0.0, rayDist - uStartDistance);
 
         // 高度減衰フォグの視線積分 (Analytical Height Falloff Fog Integral)
-        float camY = cameraPosition.y;
+        float camY = uCameraPosition.y;
         float targetY = worldPos.y;
         float deltaY = targetY - camY;
 
@@ -211,7 +211,7 @@ export class DepthFogPass {
     this.material.uniforms.tColor.value = sceneColorTexture;
     this.material.uniforms.cameraNear.value = this.sceneCamera.near;
     this.material.uniforms.cameraFar.value = this.sceneCamera.far;
-    this.material.uniforms.cameraPosition.value.copy(this.sceneCamera.position);
+    this.material.uniforms.uCameraPosition.value.copy(this.sceneCamera.position);
     this.material.uniforms.cameraWorldMatrix.value.copy(this.sceneCamera.matrixWorld);
     this.material.uniforms.cameraProjectionInverse.value.copy(this.sceneCamera.projectionMatrixInverse);
 
