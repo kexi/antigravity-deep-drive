@@ -1,0 +1,13 @@
+tags:
+  - name: architecture
+    description: システム設計・アーキテクチャ方針
+  - name: graphics
+    description: 3D描画・シェーダー・ライティング・ポストプロセス
+  - name: physics
+    description: 物理シミュレーション・衝突判定・車両力学
+  - name: open-data
+    description: 東京都・PLATEAU等のオープンデータ連携
+  - name: roads
+    description: 日本の道路規格・プロシージャル道路生成・路面シェーダー
+  - name: ci-cd
+    description: CI/CDパイプライン・自動デプロイ・GitHub Actions

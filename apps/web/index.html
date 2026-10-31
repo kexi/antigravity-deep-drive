@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tokyo Station Deep Drive - 東京駅ドライブシミュレーター</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        user-select: none;
+      }
+      body, html {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: #050811;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        color: #ffffff;
+      }
+      #webgl-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+        display: block;
+      }
+      #ui-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 10;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 20px;
+      }
+      .interactive {
+        pointer-events: auto;
+      }
+      /* ヘッダー情報 */
+      .hud-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+      }
+      .title-box {
+        background: rgba(10, 16, 28, 0.75);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        padding: 12px 18px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      }
+      .title-box h1 {
+        font-size: 1.1rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        color: #60a5fa;
+        margin-bottom: 4px;
+      }
+      .title-box p {
+        font-size: 0.8rem;
+        color: #94a3b8;
+      }
+
+      /* コントロールパネル */
+      .hud-controls {
+        display: flex;
+        gap: 10px;
+      }
+      .control-panel {
+        background: rgba(10, 16, 28, 0.75);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        padding: 12px 16px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .panel-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: #94a3b8;
+        letter-spacing: 0.08em;
+      }
+      .btn-group {
+        display: flex;
+        gap: 6px;
+      }
+      button.hud-btn {
+        background: rgba(30, 41, 59, 0.8);
+        color: #e2e8f0;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        padding: 6px 12px;
+        font-size: 0.8rem;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      button.hud-btn:hover {
+        background: rgba(59, 130, 246, 0.4);
+        border-color: #3b82f6;
+      }
+      button.hud-btn.active {
+        background: #2563eb;
+        border-color: #60a5fa;
+        color: #ffffff;
+        font-weight: 600;
+        box-shadow: 0 0 12px rgba(37, 99, 235, 0.5);
+      }
+
+      /* フッター・メーター */
+      .hud-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+      }
+      .controls-guide {
+        background: rgba(10, 16, 28, 0.7);
+        backdrop-filter: blur(10px);
+        padding: 10px 16px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 0.75rem;
+        line-height: 1.6;
+        color: #cbd5e1;
+      }
+      .controls-guide kbd {
+        background: rgba(255, 255, 255, 0.15);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: monospace;
+        font-weight: bold;
+        color: #38bdf8;
+      }
+
+      /* スピードメーター */
+      .speedometer-box {
+        background: rgba(10, 16, 28, 0.85);
+        backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 14px;
+        padding: 16px 24px;
+        min-width: 170px;
+        text-align: right;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      }
+      .speed-num {
+        font-size: 3rem;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+        color: #ffffff;
+        letter-spacing: -0.03em;
+        text-shadow: 0 0 15px rgba(96, 165, 250, 0.5);
+      }
+      .speed-unit {
+        font-size: 0.85rem;
+        color: #64748b;
+        font-weight: 600;
+        margin-left: 4px;
+      }
+      .gear-indicator {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #38bdf8;
+        margin-top: 4px;
+      }
+      .motion-blur-indicator {
+        font-size: 0.7rem;
+        color: #a855f7;
+        margin-top: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="webgl-canvas"></canvas>
+
+    <div id="ui-overlay">
+      <!-- ヘッダー -->
+      <div class="hud-header">
+        <div class="title-box">
+          <h1>TOKYO STATION DEEP DRIVE</h1>
+          <p>東京都オープンデータ・丸の内駅前〜行幸通り 3Dシミュレーター</p>
+        </div>
+
+        <div class="hud-controls interactive">
+          <!-- 天候切り替え -->
+          <div class="control-panel">
+            <span class="panel-label">天候 (Weather)</span>
+            <div class="btn-group" id="weather-buttons">
+              <button class="hud-btn active" data-weather="clear">晴天</button>
+              <button class="hud-btn" data-weather="sunset">夕暮れ</button>
+              <button class="hud-btn" data-weather="rain">雨天</button>
+              <button class="hud-btn" data-weather="night">夜間</button>
+            </div>
+          </div>
+
+          <!-- 視点切り替え -->
+          <div class="control-panel">
+            <span class="panel-label">カメラ視点 [C]</span>
+            <div class="btn-group" id="camera-buttons">
+              <button class="hud-btn active" data-camera="cockpit">車内視点</button>
+              <button class="hud-btn" data-camera="chase">追従視点</button>
+            </div>
+          </div>
+
+          <!-- ワイパー -->
+          <div class="control-panel">
+            <span class="panel-label">ワイパー [X]</span>
+            <div class="btn-group" id="wiper-buttons">
+              <button class="hud-btn" data-wiper="off">OFF</button>
+              <button class="hud-btn active" data-wiper="slow">通常</button>
+              <button class="hud-btn" data-wiper="fast">高速</button>
+            </div>
+          </div>
+
+          <!-- モーションブラー -->
+          <div class="control-panel">
+            <span class="panel-label">モーションブラー [B]</span>
+            <div class="btn-group" id="blur-buttons">
+              <button class="hud-btn active" data-blur="on">ON</button>
+              <button class="hud-btn" data-blur="off">OFF</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- フッター -->
+      <div class="hud-footer">
+        <div class="controls-guide">
+          <div><kbd>W</kbd> / <kbd>↑</kbd> : 前進・加速</div>
+          <div><kbd>S</kbd> / <kbd>↓</kbd> : ブレーキ・後退</div>
+          <div><kbd>A</kbd> / <kbd>D</kbd> or <kbd>←</kbd> / <kbd>→</kbd> : ステアリング操舵</div>
+          <div><kbd>Space</kbd> : ハンドブレーキ | <kbd>R</kbd> : 車両リセット</div>
+          <div><kbd>C</kbd> : 視点切り替え | <kbd>X</kbd> : ワイパー切替 | <kbd>B</kbd> : モーションブラー</div>
+        </div>
+
+        <div class="speedometer-box">
+          <div class="gear-indicator" id="gear-indicator">D 1</div>
+          <div>
+            <span class="speed-num" id="speed-display">0</span>
+            <span class="speed-unit">km/h</span>
+          </div>
+          <div class="motion-blur-indicator" id="blur-status">MOTION BLUR: ACTIVE</div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
