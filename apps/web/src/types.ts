@@ -1,4 +1,7 @@
-export type WeatherType = "clear" | "sunset" | "rain" | "night";
+export type TimeOfDay = "morning" | "day" | "sunset" | "night";
+export type WeatherCondition = "clear" | "cloudy" | "rain";
+// Why not: 既存のYAMLプリセットや単体テストとの後方互換性を保ちつつ、純粋な天候(WeatherCondition)と時間帯(TimeOfDay)を分離する
+export type WeatherType = WeatherCondition | "sunset" | "night";
 export type CameraMode = "cockpit" | "chase";
 export type WiperMode = "off" | "slow" | "fast";
 

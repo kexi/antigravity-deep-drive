@@ -1066,21 +1066,9 @@ def build_interior(materials) -> bpy.types.Object:
     )
     add_box(bm, center=Vector((-0.218, -0.48, 0.927)), size=Vector((0.022, 0.018, 0.018)), mat_idx=5, smooth=False)
 
-    # 4. センターコンソール＆ベゼル付きカーナビ画面（単なる青い長方形の板に見えないよう立体フレーム＋地図UIを造形）
-    # ナビ画面外枠ハウジング（X = -0.02m：右ハンドル運転席から見やすい位置・高さ Z = 0.855m）
-    add_box(bm, center=Vector((-0.02, -0.63, 0.855)), size=Vector((0.27, 0.06, 0.135)), mat_idx=0, smooth=False)
-    add_box(bm, center=Vector((-0.02, -0.598, 0.855)), size=Vector((0.252, 0.010, 0.118)), mat_idx=5, smooth=False)
-    # ナビ液晶ダーク背景 (`MeterBack`)
-    add_box(bm, center=Vector((-0.02, -0.592, 0.855)), size=Vector((0.236, 0.006, 0.104)), mat_idx=2, smooth=False)
-    # ナビ画面内の立体地図道路グリッド＆現在地レッドマーカー（青い無地ブロックに見えないリアルなカーナビ表現）
-    add_box(bm, center=Vector((-0.03, -0.588, 0.855)), size=Vector((0.010, 0.004, 0.092)), mat_idx=3, smooth=False)
-    add_box(bm, center=Vector((-0.02, -0.588, 0.845)), size=Vector((0.210, 0.004, 0.008)), mat_idx=3, smooth=False)
-    add_box(bm, center=Vector((0.04, -0.588, 0.868)), size=Vector((0.110, 0.004, 0.022)), mat_idx=3, smooth=False)
-    add_box(bm, center=Vector((-0.03, -0.586, 0.845)), size=Vector((0.018, 0.004, 0.018)), mat_idx=4, smooth=False)
-
-    # ナビ下のセンターエアコン吹き出し口＆赤いハザードスイッチ
-    add_box(bm, center=Vector((-0.02, -0.60, 0.765)), size=Vector((0.24, 0.03, 0.038)), mat_idx=0, smooth=False)
-    add_box(bm, center=Vector((-0.02, -0.583, 0.765)), size=Vector((0.022, 0.008, 0.020)), mat_idx=4, smooth=False)
+    # 4. センターコンソールエアコン吹き出し口＆ハザードスイッチ台座（上部のフローティング11インチナビ画面は Three.js CanvasTexture 側で高精細描画）
+    add_box(bm, center=Vector((-0.135, -0.60, 0.855)), size=Vector((0.20, 0.04, 0.036)), mat_idx=0, smooth=False)
+    add_box(bm, center=Vector((-0.135, -0.58, 0.855)), size=Vector((0.024, 0.008, 0.020)), mat_idx=4, smooth=False)
 
     # センターコンソールトンネル＆シフトゲート＆右ハンドル車配置のシフトノブ・赤いエンジンスターターボタン
     add_box(bm, center=Vector((0.0, -0.05, 0.52)), size=Vector((0.28, 1.18, 0.28)), mat_idx=0, smooth=False)
@@ -1254,7 +1242,7 @@ def build_windshield(materials) -> bpy.types.Object:
 
 
 def build_wiper(materials, name_suffix: str, pivot_loc: Vector, pivot_rot: Euler, parent_root: bpy.types.Object):
-    """日本の右ハンドル車用ワイパーピボットEmptyと、フロントガラス下端カウルに沿って右（運転席側 -X）へ伸びるエアロワイパーブレードを作成"""
+    """日本の右ハンドル車用ワイパーピボットEmptyと、フロントガラス下端カウルに沿って延伸するエアロワイパーブレードを作成"""
     pivot_empty = bpy.data.objects.new(f"Wiper{name_suffix}", None)
     pivot_empty.empty_display_type = "SINGLE_ARROW"
     pivot_empty.empty_display_size = 0.2
@@ -1267,15 +1255,15 @@ def build_wiper(materials, name_suffix: str, pivot_loc: Vector, pivot_rot: Euler
     bm = bmesh.new()
 
     is_driver = name_suffix == "Driver"
-    arm_length = 0.41 if is_driver else 0.37
-    blade_inner_r = 0.10
-    blade_outer_r = 0.76 if is_driver else 0.68
+    arm_length = 0.45 if is_driver else 0.36
+    blade_inner_r = 0.08
+    blade_outer_r = 0.86 if is_driver else 0.66
 
-    # 日本の右ハンドル車仕様: ピボットから右方向（運転席側 -X）へ向かってアーム＆ブレードを配置
+    # Three.js の carModel.ts / windshield.ts と完全一致するピボット・ブレード半径で構築
     add_slanted_strut(
         bm,
         p0=Vector((0.0, 0.0, 0.0)),
-        p1=Vector((-arm_length, 0.032, 0.042)),
+        p1=Vector((arm_length, 0.032, 0.042)),
         width_x=0.016,
         depth_y=0.012,
         taper=0.75,
@@ -1285,8 +1273,8 @@ def build_wiper(materials, name_suffix: str, pivot_loc: Vector, pivot_rot: Euler
 
     add_slanted_strut(
         bm,
-        p0=Vector((-blade_inner_r, 0.012, 0.015)),
-        p1=Vector((-blade_outer_r, 0.055, 0.072)),
+        p0=Vector((blade_inner_r, 0.012, 0.015)),
+        p1=Vector((blade_outer_r, 0.055, 0.072)),
         width_x=0.014,
         depth_y=0.012,
         taper=0.85,
@@ -1476,13 +1464,13 @@ def generate_vehicle():
     windshield = build_windshield(materials)
     windshield.parent = root
 
-    # 日本の右ハンドル車仕様: 運転席ワイパーピボットは中央 (x=+0.06)、助手席ワイパーピボットは左端 (x=+0.66) に置き、
-    # ブレード先端を運転席側 (-X: 右側) へ向けてカウルに密着配置する
-    driver_loc = Vector((0.06, -1.318, 0.891))
+    # 日本の右ハンドル車仕様: 運転席ワイパーピボットは (x=-0.58)、助手席ワイパーピボットは中央 (x=+0.06) に置き、
+    # Three.js の carModel.ts / windshield.ts と完全一致させる
+    driver_loc = Vector((-0.58, -1.275, 0.891))
     driver_rot = Euler((0.0, 0.0, 0.0), "XYZ")
     build_wiper(materials, "Driver", driver_loc, driver_rot, root)
 
-    passenger_loc = Vector((0.66, -1.275, 0.891))
+    passenger_loc = Vector((0.06, -1.318, 0.891))
     passenger_rot = Euler((0.0, 0.0, 0.0), "XYZ")
     build_wiper(materials, "Passenger", passenger_loc, passenger_rot, root)
 

@@ -66,8 +66,8 @@ export class CameraController {
 
     this.camera.position.copy(eyeWorld);
 
-    // ドライバーの視線先（前方道路を見据えつつ、画面下部に実寸ステアリング上半分とデジタルメーターパネルが自然に収まる角度）
-    const lookLocal = new THREE.Vector3(-0.38 - state.steeringAngle * 0.55, 0.96, 18.0);
+    // ドライバーの視線先（前方道路を見据えつつ、画面下部に実寸ステアリング上半分・デジタルメータークラスター・左側11インチセンターカーナビ・右Aピラー・ワイパーが自然に収まる角度）
+    const lookLocal = new THREE.Vector3(-0.34 - state.steeringAngle * 0.55, 0.96, 18.0);
     const lookWorld = lookLocal.applyMatrix4(carGroup.matrixWorld);
     this.camera.lookAt(lookWorld);
   }

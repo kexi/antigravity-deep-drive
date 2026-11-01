@@ -45,11 +45,13 @@ describe("createWindshieldMaterial - Windshield Raindrop & Wiper Shader", () => 
     expect(mat.uniforms.uWiperDir.value).toBe(-1.0);
   });
 
-  it("GLSLフラグメントシェーダーコード内に実寸メートル座標系・ワイパー通過履歴(strokeAge)払拭・球冠屈折水滴ロジックが含まれていることを保証する", () => {
+  it("GLSLフラグメントシェーダーコード内に実寸メートル座標系・右ハンドルJDMワイパーピボット・ワイパー通過履歴(strokeAge)払拭・球冠屈折水滴ロジックが含まれていることを保証する", () => {
     const mat = createWindshieldMaterial();
     const frag = mat.fragmentShader;
 
     const hasMetricGlassSize = frag.includes("GLASS_SIZE = vec2(1.48, 0.965)");
+    const hasRhdDriverPivot = frag.includes("pivotDriver = vec2(0.16, 0.02)");
+    const hasRhdPassengerPivot = frag.includes("pivotPassenger = vec2(0.80, 0.02)");
     const hasStrokeHistory = frag.includes("strokeAge");
     const hasStaticMist = frag.includes("calculateStaticMist");
     const hasSlidingDrops = frag.includes("calculateSlidingDrops");
@@ -61,6 +63,8 @@ describe("createWindshieldMaterial - Windshield Raindrop & Wiper Shader", () => 
     );
 
     expect(hasMetricGlassSize).toBe(true);
+    expect(hasRhdDriverPivot).toBe(true);
+    expect(hasRhdPassengerPivot).toBe(true);
     expect(hasStrokeHistory).toBe(true);
     expect(hasStaticMist).toBe(true);
     expect(hasSlidingDrops).toBe(true);
@@ -99,7 +103,7 @@ describe("createWindshieldMaterial - Windshield Raindrop & Wiper Shader", () => 
     }
   });
 
-  it("CarModel のワイパーがガラス傾斜面 (-0.977 rad) に密着し、動作時にパーク位置 (+0.09 rad) から最大角まで往復してシェーダーユニフォームと完全同期することを保証する", () => {
+  it("CarModel の右ハンドルステアリング (x=-0.38) とワイパーピボット (x=-0.58 / +0.06) がガラス傾斜面 (-0.977 rad) に密着し、パーク位置 (+0.08 rad) から最大角 (1.62 / 1.56 rad) まで往復してシェーダーユニフォームと完全同期することを保証する", () => {
     const car = new CarModel();
     const dummyState: VehicleState = {
       position: new THREE.Vector3(0, 0.8, 0),
@@ -115,19 +119,24 @@ describe("createWindshieldMaterial - Windshield Raindrop & Wiper Shader", () => 
       wheels: [],
     };
 
-    // 初期状態はカウル沿いのパーク角度 (+0.09 rad) かつガラス傾斜角 (-0.977 rad)
-    expect(car.wiperArmDriver.rotation.x).toBeCloseTo(-0.977, 3);
-    expect(car.wiperArmDriver.rotation.z).toBeCloseTo(0.09, 3);
+    // 右ハンドルステアリングとワイパーピボット位置の検証
+    expect(car.steeringWheel.position.x).toBeCloseTo(-0.38, 3);
+    expect(car.wiperArmDriver.position.x).toBeCloseTo(-0.58, 3);
+    expect(car.wiperArmPassenger.position.x).toBeCloseTo(0.06, 3);
 
-    // slow モードで半周期 (t ≈ π / 3.5 ≈ 0.897s) 進めると上死点 (1.68 rad / 1.58 rad) 付近へ到達
+    // 初期状態はカウル沿いのパーク角度 (+0.08 rad) かつガラス傾斜角 (-0.977 rad)
+    expect(car.wiperArmDriver.rotation.x).toBeCloseTo(-0.977, 3);
+    expect(car.wiperArmDriver.rotation.z).toBeCloseTo(0.08, 3);
+
+    // slow モードで半周期 (t ≈ π / 3.5 ≈ 0.897s) 進めると上死点 (1.62 rad / 1.56 rad) 付近へ到達
     car.setWiperMode("slow");
     const halfPeriodDt = Math.PI / 3.5;
     car.update(halfPeriodDt, dummyState, 1.0);
 
     const uniforms = car.windshieldMaterial.uniforms as WindshieldUniforms;
-    expect(uniforms.uWiperAngle1.value).toBeCloseTo(1.68, 2);
-    expect(uniforms.uWiperAngle2.value).toBeCloseTo(1.58, 2);
-    expect(car.wiperArmDriver.rotation.z).toBeCloseTo(1.68, 2);
+    expect(uniforms.uWiperAngle1.value).toBeCloseTo(1.62, 2);
+    expect(uniforms.uWiperAngle2.value).toBeCloseTo(1.56, 2);
+    expect(car.wiperArmDriver.rotation.z).toBeCloseTo(1.62, 2);
     expect(uniforms.uWiperClearing.value).toBeGreaterThan(0.9);
 
     // さらに進めると復路ストローク (uWiperDir = -1.0) に切り替わる
