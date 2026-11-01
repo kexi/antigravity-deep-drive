@@ -129,5 +129,51 @@ describe("日本の道路作成システムの仕様検証", () => {
     // 7. 通称名標識: 行幸通り（119）
     const streetName = signs.createStreetNameSign(0, 0, "行幸通り", "Gyoko-dori Ave.");
     expect(streetName.children.length).toBeGreaterThan(0);
+
+    // 8. 規制標識: 駐車禁止（316）& 駐停車禁止（315）+ 補助標識
+    const noParking = signs.createNoParkingSign(0, 0, false, "終日");
+    expect(noParking.children.length).toBeGreaterThan(0);
+    const noStopping = signs.createNoParkingSign(0, 0, true, "ここまで");
+    expect(noStopping.children.length).toBeGreaterThan(0);
+
+    // 9. 規制標識: 転回禁止（313）
+    const noUTurn = signs.createNoUTurnSign(0, 0, "終日");
+    expect(noUTurn.children.length).toBeGreaterThan(0);
+
+    // 10. 規制標識: 一方通行（326-A）
+    const oneWay = signs.createOneWaySign(0, 0, "自転車を除く");
+    expect(oneWay.children.length).toBeGreaterThan(0);
+
+    // 11. 規制標識: 進行方向別通行区分（327の7）
+    const laneDirection = signs.createLaneDirectionSign(0, 0);
+    expect(laneDirection.children.length).toBeGreaterThan(0);
+
+    // 12. 案内標識: 交差点名標識（114-A）
+    const intersectionName = signs.createIntersectionNameSign(0, 0, "和田倉門", "Wadakuramon");
+    expect(intersectionName.children.length).toBeGreaterThan(0);
+
+    // 13. 安全施設: 視線誘導標（デリネーター・黄黒ゼブラ警戒板）
+    const delineator = signs.createDelineatorPost(0, 0);
+    expect(delineator.children.length).toBeGreaterThan(0);
+  });
+
+  it("路面標示（ダイヤマーク◇・車線進行方向矢印・路面最高速度ペイント・導流帯ゼブラ）が正常に生成されることを保証する", async () => {
+    const { RoadMarkings } = await import("../roads/roadMarkings");
+    const markings = new RoadMarkings();
+
+    const diamond = markings.createCrosswalkDiamondMarking(0, 10);
+    expect(diamond.children.length).toBe(4);
+
+    const arrowStraightLeft = markings.createLaneArrowMarking(-3.5, 20, "straight-left");
+    expect(arrowStraightLeft.children.length).toBeGreaterThanOrEqual(3);
+
+    const arrowRight = markings.createLaneArrowMarking(3.5, 20, "right");
+    expect(arrowRight.children.length).toBeGreaterThanOrEqual(2);
+
+    const speedPaint = markings.createSpeedLimitRoadMarking(-1.75, 15, 40);
+    expect(speedPaint.children.length).toBeGreaterThan(0);
+
+    const zebra = markings.createZebraZoneMarking(0.9, 12.0, 25);
+    expect(zebra.children.length).toBeGreaterThanOrEqual(2);
   });
 });

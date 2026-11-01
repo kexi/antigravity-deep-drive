@@ -180,6 +180,14 @@ export class RoadProps {
     pedGreen.position.set(0, -0.15, 0.11);
     pedBox.add(pedGreen);
 
+    // 信号機アーム横の「交差点名標識（地点名プレート）」
+    const intersectionPlate = this.signs.createIntersectionNamePlateMesh(
+      "東京駅丸の内中央口",
+      "Tokyo Sta. Central",
+    );
+    intersectionPlate.position.set(1.55, 5.8, 0.08);
+    group.add(intersectionPlate);
+
     return group;
   }
 

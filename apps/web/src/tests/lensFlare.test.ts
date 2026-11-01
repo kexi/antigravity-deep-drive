@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import * as THREE from 'three';
-import { LensFlarePass } from '../shaders/lensFlare';
+import { describe, it, expect } from "vitest";
+import * as THREE from "three";
+import { LensFlarePass } from "../shaders/lensFlare";
 
-describe('LensFlarePass - Optical Cinematic Lens Flare Post-Process', () => {
-  it('LensFlarePassが指定解像度、アスペクト比、初期マテリアルユニフォームを適切に初期化することを保証する', () => {
+describe("LensFlarePass - Optical Cinematic Lens Flare Post-Process", () => {
+  it("LensFlarePassが指定解像度、アスペクト比、初期マテリアルユニフォームを適切に初期化することを保証する", () => {
     const lensFlarePass = new LensFlarePass(1920, 1080, {
       enabled: true,
       intensity: 1.5,
@@ -18,8 +18,7 @@ describe('LensFlarePass - Optical Cinematic Lens Flare Post-Process', () => {
     expect(isRenderTargetValid).toBe(true);
 
     const isCorrectSize =
-      lensFlarePass.renderTarget.width === 1920 &&
-      lensFlarePass.renderTarget.height === 1080;
+      lensFlarePass.renderTarget.width === 1920 && lensFlarePass.renderTarget.height === 1080;
     expect(isCorrectSize).toBe(true);
 
     const uniforms = lensFlarePass.material.uniforms;
@@ -35,7 +34,7 @@ describe('LensFlarePass - Optical Cinematic Lens Flare Post-Process', () => {
     expect(uniforms.uAspectRatio.value).toBeCloseTo(expectedAspect);
   });
 
-  it('updateSunPositionによって3D空間の太陽位置がスクリーンUV座標へ正しく射影されることを保証する', () => {
+  it("updateSunPositionによって3D空間の太陽位置がスクリーンUV座標へ正しく射影されることを保証する", () => {
     const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 1000);
     camera.position.set(0, 0, 0);
     camera.lookAt(0, 0, -100);
@@ -60,7 +59,7 @@ describe('LensFlarePass - Optical Cinematic Lens Flare Post-Process', () => {
     expect(sunPosBehind.z).toBeLessThan(0.0); // 背後フラグ
   });
 
-  it('setParamsによってフレア強度や天候カラーが動的に更新されることを保証する', () => {
+  it("setParamsによってフレア強度や天候カラーが動的に更新されることを保証する", () => {
     const lensFlarePass = new LensFlarePass(800, 600);
 
     lensFlarePass.setParams({
@@ -85,32 +84,32 @@ describe('LensFlarePass - Optical Cinematic Lens Flare Post-Process', () => {
     expect(isSunColorUpdated).toBe(true);
   });
 
-  it('GLSLフラグメントシェーダーコード内に深度オクルージョン、スターバースト光芒、アナモルフィックストリーク、ゴースト計算が含まれていることを保証する', () => {
+  it("GLSLフラグメントシェーダーコード内に深度オクルージョン、スターバースト光芒、アナモルフィックストリーク、ゴースト計算が含まれていることを保証する", () => {
     const lensFlarePass = new LensFlarePass(800, 600);
     const fragmentGlsl = lensFlarePass.material.fragmentShader;
 
     // 1. 深度サンプリングオクルージョン
-    const hasOcclusionFunc = fragmentGlsl.includes('float calculateOcclusion(vec2 sunUv)');
-    const hasDepthTextureLookup = fragmentGlsl.includes('texture2D(tDepth, sampleUv).r');
+    const hasOcclusionFunc = fragmentGlsl.includes("float calculateOcclusion(vec2 sunUv)");
+    const hasDepthTextureLookup = fragmentGlsl.includes("texture2D(tDepth, sampleUv).r");
     expect(hasOcclusionFunc).toBe(true);
     expect(hasDepthTextureLookup).toBe(true);
 
     // 2. スターバースト回折光芒
-    const hasStarburstSpikes = fragmentGlsl.includes('sin(angle * 6.0) * sin(angle * 12.0)');
+    const hasStarburstSpikes = fragmentGlsl.includes("sin(angle * 6.0) * sin(angle * 12.0)");
     expect(hasStarburstSpikes).toBe(true);
 
     // 3. アナモルフィック・シネマティックストリーク
-    const hasAnamorphicStreak = fragmentGlsl.includes('exp(-dy * 160.0)');
+    const hasAnamorphicStreak = fragmentGlsl.includes("exp(-dy * 160.0)");
     expect(hasAnamorphicStreak).toBe(true);
 
     // 4. 光学軸マルチエレメント・ゴースト
-    const hasGhostFunc = fragmentGlsl.includes('renderGhost(vec2 uv, vec2 ghostPos');
-    const hasOpticalAxis = fragmentGlsl.includes('vec2 opticalAxis = vec2(0.5) - sunUv');
+    const hasGhostFunc = fragmentGlsl.includes("renderGhost(vec2 uv, vec2 ghostPos");
+    const hasOpticalAxis = fragmentGlsl.includes("vec2 opticalAxis = vec2(0.5) - sunUv");
     expect(hasGhostFunc).toBe(true);
     expect(hasOpticalAxis).toBe(true);
 
     // 5. 大口径ハローリング
-    const hasHalo = fragmentGlsl.includes('float haloRadius = 0.42');
+    const hasHalo = fragmentGlsl.includes("float haloRadius = 0.42");
     expect(hasHalo).toBe(true);
   });
 });

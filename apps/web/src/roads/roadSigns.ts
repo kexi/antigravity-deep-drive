@@ -141,6 +141,31 @@ export class JapaneseRoadSigns {
       const frontMesh = new THREE.Mesh(frontGeo, frontMat);
       frontMesh.position.set(0, 6.0, 0.18);
       group.add(frontMesh);
+
+      // 反対車線側からも視認できるよう背面にも案内板を配置
+      const backSignMesh = new THREE.Mesh(frontGeo, frontMat);
+      backSignMesh.position.set(0, 6.0, 0.06);
+      backSignMesh.rotation.y = Math.PI;
+      group.add(backSignMesh);
+    }
+
+    // 看板上部の外照式照明ランプ（2基）
+    const lampArmGeo = new THREE.BoxGeometry(0.08, 0.08, 0.65);
+    const lampHoodGeo = new THREE.BoxGeometry(0.85, 0.1, 0.28);
+    const lampGlowMat = new THREE.MeshBasicMaterial({ color: 0xfef9c3 });
+    for (const lampX of [-1.1, 1.1]) {
+      const arm = new THREE.Mesh(lampArmGeo, this.poleMat);
+      arm.position.set(lampX, 7.25, 0.35);
+      group.add(arm);
+
+      const hood = new THREE.Mesh(lampHoodGeo, this.poleMat);
+      hood.position.set(lampX, 7.25, 0.65);
+      group.add(hood);
+
+      const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 0.18), lampGlowMat);
+      glow.rotation.x = Math.PI / 2;
+      glow.position.set(lampX, 7.19, 0.65);
+      group.add(glow);
     }
 
     return group;
@@ -302,9 +327,11 @@ export class JapaneseRoadSigns {
         ctx!.stroke();
 
         // 白矢印
-        if (direction === "straight-only") {
+        const isStraightOnly = direction === "straight-only";
+        const isStraightLeft = direction === "straight-left";
+        if (isStraightOnly) {
           this.drawArrow(ctx!, 128, 200, 128, 50, "#ffffff", 22);
-        } else if (direction === "straight-left") {
+        } else if (isStraightLeft) {
           this.drawArrow(ctx!, 140, 200, 140, 60, "#ffffff", 18);
           this.drawTurnArrowLeft(ctx!, 140, 160, 50, 100, "#ffffff");
         } else {
@@ -661,10 +688,15 @@ export class JapaneseRoadSigns {
   }
 
   /**
-   * 規制標識（最高速度 323: 丸型赤枠・青数字）
+   * 規制標識（最高速度 323: 丸型赤枠・青数字 + オプション補助標識）
    * How: 支柱に丸型赤枠・白地メッシュを配置し、Canvasで日本の標識数字を描画する。
    */
-  public createSpeedLimitSign(x: number, z: number, limit = 50): THREE.Group {
+  public createSpeedLimitSign(
+    x: number,
+    z: number,
+    limit = 50,
+    auxiliaryText?: string,
+  ): THREE.Group {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
 
@@ -718,7 +750,498 @@ export class JapaneseRoadSigns {
       }
     }
 
+    const hasAux = Boolean(auxiliaryText);
+    if (hasAux) {
+      const auxPlate = this.createAuxiliaryPlate(auxiliaryText!);
+      auxPlate.position.set(0, -0.52, 0);
+      signGroup.add(auxPlate);
+    }
+
     group.add(signGroup);
     return group;
+  }
+
+  /**
+   * 8. 規制標識: 「駐車禁止」(316) / 「駐停車禁止」(315) + 補助標識プレート
+   * How: 赤枠・青地丸板に斜め赤線（駐車禁止は1本、駐停車禁止はX字2本）を描画し、下部に補助標識を添える。
+   */
+  public createNoParkingSign(
+    x: number,
+    z: number,
+    isNoStopping = false,
+    auxiliaryText = "終日",
+  ): THREE.Group {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    const pole = this.createPoleMesh(3.8);
+    group.add(pole);
+
+    const signGroup = new THREE.Group();
+    signGroup.position.set(0, 3.35, 0);
+
+    const hasDocument = typeof document !== "undefined";
+    if (hasDocument) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext("2d");
+      const hasCtx = Boolean(ctx);
+      if (hasCtx) {
+        // 白外縁
+        ctx!.fillStyle = "#ffffff";
+        ctx!.beginPath();
+        ctx!.arc(128, 128, 122, 0, Math.PI * 2);
+        ctx!.fill();
+
+        // 赤リング
+        ctx!.fillStyle = "#dc2626";
+        ctx!.beginPath();
+        ctx!.arc(128, 128, 116, 0, Math.PI * 2);
+        ctx!.fill();
+
+        // 内部の青円
+        ctx!.fillStyle = "#1d4ed8";
+        ctx!.beginPath();
+        ctx!.arc(128, 128, 86, 0, Math.PI * 2);
+        ctx!.fill();
+
+        // 斜め赤スラッシュ（左上→右下）
+        ctx!.strokeStyle = "#dc2626";
+        ctx!.lineWidth = 24;
+        ctx!.beginPath();
+        ctx!.moveTo(56, 56);
+        ctx!.lineTo(200, 200);
+        ctx!.stroke();
+
+        // 駐停車禁止（315）の場合は右上→左下の斜線も追加
+        if (isNoStopping) {
+          ctx!.beginPath();
+          ctx!.moveTo(200, 56);
+          ctx!.lineTo(56, 200);
+          ctx!.stroke();
+        }
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.45 });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.72), mat);
+      plane.position.z = 0.02;
+      signGroup.add(plane);
+    }
+
+    const backGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.02, 24);
+    backGeo.rotateX(Math.PI / 2);
+    const back = new THREE.Mesh(backGeo, this.signBackMat);
+    signGroup.add(back);
+
+    const hasAux = Boolean(auxiliaryText);
+    if (hasAux) {
+      const auxPlate = this.createAuxiliaryPlate(auxiliaryText);
+      auxPlate.position.set(0, -0.52, 0);
+      signGroup.add(auxPlate);
+    }
+
+    group.add(signGroup);
+    return group;
+  }
+
+  /**
+   * 9. 規制標識: 「転回禁止」(313: Uターン禁止) + 補助標識
+   * How: 白地・赤枠丸板に黒のUターン矢印と赤スラッシュを描画する。
+   */
+  public createNoUTurnSign(x: number, z: number, auxiliaryText = "終日"): THREE.Group {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    const pole = this.createPoleMesh(3.8);
+    group.add(pole);
+
+    const signGroup = new THREE.Group();
+    signGroup.position.set(0, 3.35, 0);
+
+    const hasDocument = typeof document !== "undefined";
+    if (hasDocument) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext("2d");
+      const hasCtx = Boolean(ctx);
+      if (hasCtx) {
+        // 赤外枠
+        ctx!.fillStyle = "#dc2626";
+        ctx!.beginPath();
+        ctx!.arc(128, 128, 118, 0, Math.PI * 2);
+        ctx!.fill();
+
+        // 内部白円
+        ctx!.fillStyle = "#ffffff";
+        ctx!.beginPath();
+        ctx!.arc(128, 128, 90, 0, Math.PI * 2);
+        ctx!.fill();
+
+        // 黒Uターン矢印
+        ctx!.strokeStyle = "#18181b";
+        ctx!.lineWidth = 18;
+        ctx!.lineCap = "round";
+        ctx!.beginPath();
+        ctx!.moveTo(156, 185);
+        ctx!.lineTo(156, 108);
+        ctx!.arc(128, 108, 28, 0, Math.PI, true);
+        ctx!.lineTo(100, 155);
+        ctx!.stroke();
+
+        // 矢尻
+        ctx!.fillStyle = "#18181b";
+        ctx!.beginPath();
+        ctx!.moveTo(100, 185);
+        ctx!.lineTo(78, 148);
+        ctx!.lineTo(122, 148);
+        ctx!.closePath();
+        ctx!.fill();
+
+        // 赤禁止スラッシュ
+        ctx!.strokeStyle = "#dc2626";
+        ctx!.lineWidth = 22;
+        ctx!.beginPath();
+        ctx!.moveTo(58, 58);
+        ctx!.lineTo(198, 198);
+        ctx!.stroke();
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.45 });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.72), mat);
+      plane.position.z = 0.02;
+      signGroup.add(plane);
+    }
+
+    const backGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.02, 24);
+    backGeo.rotateX(Math.PI / 2);
+    const back = new THREE.Mesh(backGeo, this.signBackMat);
+    signGroup.add(back);
+
+    const hasAux = Boolean(auxiliaryText);
+    if (hasAux) {
+      const auxPlate = this.createAuxiliaryPlate(auxiliaryText);
+      auxPlate.position.set(0, -0.52, 0);
+      signGroup.add(auxPlate);
+    }
+
+    group.add(signGroup);
+    return group;
+  }
+
+  /**
+   * 10. 規制標識: 「一方通行」(326-A: 青長方形に白太矢印)
+   */
+  public createOneWaySign(x: number, z: number, auxiliaryText = "自転車を除く"): THREE.Group {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    const pole = this.createPoleMesh(3.6);
+    group.add(pole);
+
+    const signGroup = new THREE.Group();
+    signGroup.position.set(0, 3.25, 0);
+
+    const width = 0.95;
+    const height = 0.42;
+
+    const hasDocument = typeof document !== "undefined";
+    if (hasDocument) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 384;
+      canvas.height = 168;
+      const ctx = canvas.getContext("2d");
+      const hasCtx = Boolean(ctx);
+      if (hasCtx) {
+        ctx!.fillStyle = "#1d4ed8";
+        ctx!.fillRect(0, 0, 384, 168);
+
+        ctx!.strokeStyle = "#ffffff";
+        ctx!.lineWidth = 10;
+        ctx!.strokeRect(6, 6, 372, 156);
+
+        // 左向き白太矢印
+        ctx!.fillStyle = "#ffffff";
+        ctx!.fillRect(110, 64, 220, 40);
+        ctx!.beginPath();
+        ctx!.moveTo(42, 84);
+        ctx!.lineTo(122, 34);
+        ctx!.lineTo(122, 134);
+        ctx!.closePath();
+        ctx!.fill();
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.45 });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+      plane.position.z = 0.02;
+      signGroup.add(plane);
+    }
+
+    const backGeo = new THREE.BoxGeometry(width, height, 0.02);
+    const back = new THREE.Mesh(backGeo, this.signBackMat);
+    signGroup.add(back);
+
+    const hasAux = Boolean(auxiliaryText);
+    if (hasAux) {
+      const auxPlate = this.createAuxiliaryPlate(auxiliaryText);
+      auxPlate.position.set(0, -0.38, 0);
+      signGroup.add(auxPlate);
+    }
+
+    group.add(signGroup);
+    return group;
+  }
+
+  /**
+   * 11. 規制標識: 「進行方向別通行区分」(327の7: 交差点手前の車線別進行方向表示板)
+   * How: 青地に白破線区切りと左折・直進・右折の3車線矢印を描画した大型角板。
+   */
+  public createLaneDirectionSign(x: number, z: number): THREE.Group {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    const pole = this.createPoleMesh(4.4);
+    group.add(pole);
+
+    const signGroup = new THREE.Group();
+    signGroup.position.set(0, 3.85, 0);
+
+    const width = 1.65;
+    const height = 1.15;
+
+    const hasDocument = typeof document !== "undefined";
+    if (hasDocument) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 512;
+      canvas.height = 360;
+      const ctx = canvas.getContext("2d");
+      const hasCtx = Boolean(ctx);
+      if (hasCtx) {
+        ctx!.fillStyle = "#00428a";
+        ctx!.fillRect(0, 0, 512, 360);
+
+        ctx!.strokeStyle = "#ffffff";
+        ctx!.lineWidth = 10;
+        ctx!.strokeRect(8, 8, 496, 344);
+
+        // 車線区切り破線（2本）
+        ctx!.setLineDash([22, 16]);
+        ctx!.lineWidth = 8;
+        for (const divX of [170, 342]) {
+          ctx!.beginPath();
+          ctx!.moveTo(divX, 24);
+          ctx!.lineTo(divX, 336);
+          ctx!.stroke();
+        }
+        ctx!.setLineDash([]);
+
+        // 左レーン: 直進＋左折
+        this.drawArrow(ctx!, 105, 300, 105, 75, "#ffffff", 16);
+        this.drawTurnArrowLeft(ctx!, 105, 210, 42, 140, "#ffffff");
+
+        // 中央レーン: 直進
+        this.drawArrow(ctx!, 256, 300, 256, 75, "#ffffff", 20);
+
+        // 右レーン: 右折専用
+        this.drawTurnArrow(ctx!, 400, 300, 470, 145, "#ffffff");
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.4 });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+      plane.position.z = 0.02;
+      signGroup.add(plane);
+    }
+
+    const backGeo = new THREE.BoxGeometry(width, height, 0.03);
+    const back = new THREE.Mesh(backGeo, this.signBackMat);
+    signGroup.add(back);
+
+    group.add(signGroup);
+    return group;
+  }
+
+  /**
+   * 12. 案内標識: 「交差点名標識（地点名標識 114-A）」
+   * How: 信号機横や交差点角に設置される白地・青枠・青文字の交差点名プレート。
+   */
+  public createIntersectionNameSign(
+    x: number,
+    z: number,
+    nameJa = "和田倉門",
+    nameEn = "Wadakuramon",
+  ): THREE.Group {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    const pole = this.createPoleMesh(4.2);
+    group.add(pole);
+
+    const board = this.createIntersectionNamePlateMesh(nameJa, nameEn);
+    board.position.set(0, 3.85, 0);
+    group.add(board);
+
+    return group;
+  }
+
+  /**
+   * 信号機アームにも取り付け可能な交差点名プレート単体メッシュ
+   */
+  public createIntersectionNamePlateMesh(
+    nameJa = "行幸通り前",
+    nameEn = "Gyoko-dori",
+  ): THREE.Group {
+    const signGroup = new THREE.Group();
+    const width = 1.25;
+    const height = 0.42;
+
+    const hasDocument = typeof document !== "undefined";
+    if (hasDocument) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 512;
+      canvas.height = 172;
+      const ctx = canvas.getContext("2d");
+      const hasCtx = Boolean(ctx);
+      if (hasCtx) {
+        ctx!.fillStyle = "#ffffff";
+        ctx!.fillRect(0, 0, 512, 172);
+
+        ctx!.strokeStyle = "#00428a";
+        ctx!.lineWidth = 10;
+        ctx!.strokeRect(8, 8, 496, 156);
+
+        ctx!.fillStyle = "#00428a";
+        ctx!.textAlign = "center";
+        ctx!.font = "bold 52px sans-serif";
+        ctx!.fillText(nameJa, 256, 76);
+        ctx!.font = "bold 28px sans-serif";
+        ctx!.fillText(nameEn, 256, 132);
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.4 });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+      plane.position.z = 0.02;
+      signGroup.add(plane);
+    }
+
+    const backGeo = new THREE.BoxGeometry(width, height, 0.02);
+    const back = new THREE.Mesh(backGeo, this.signBackMat);
+    signGroup.add(back);
+
+    return signGroup;
+  }
+
+  /**
+   * 13. 安全施設: 「視線誘導標（デリネーター）＆ 障害物表示ゼブラ標示板」
+   * How: 中央分離帯端や交差点コーナーに設置される黄黒ゼブラ反射板とオレンジ反射器。
+   */
+  public createDelineatorPost(x: number, z: number): THREE.Group {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    // 支柱（高さ1.2m）
+    const poleGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.2, 10);
+    const pole = new THREE.Mesh(poleGeo, this.poleMat);
+    pole.position.y = 0.6;
+    group.add(pole);
+
+    // 黄黒ゼブラ警戒板（幅0.26m, 高さ0.75m）
+    const zebraWidth = 0.26;
+    const zebraHeight = 0.75;
+    const hasDocument = typeof document !== "undefined";
+    if (hasDocument) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 128;
+      canvas.height = 384;
+      const ctx = canvas.getContext("2d");
+      const hasCtx = Boolean(ctx);
+      if (hasCtx) {
+        ctx!.fillStyle = "#facc15";
+        ctx!.fillRect(0, 0, 128, 384);
+
+        ctx!.fillStyle = "#18181b";
+        for (let y = -128; y < 384; y += 64) {
+          ctx!.beginPath();
+          ctx!.moveTo(0, y);
+          ctx!.lineTo(128, y + 64);
+          ctx!.lineTo(128, y + 96);
+          ctx!.lineTo(0, y + 32);
+          ctx!.closePath();
+          ctx!.fill();
+        }
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.35 });
+      const front = new THREE.Mesh(new THREE.PlaneGeometry(zebraWidth, zebraHeight), mat);
+      front.position.set(0, 0.72, 0.05);
+      group.add(front);
+    }
+
+    // 上部オレンジ反射デリネーターレンズ
+    const reflectorGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.04, 16);
+    reflectorGeo.rotateX(Math.PI / 2);
+    const reflectorMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
+    const reflector = new THREE.Mesh(reflectorGeo, reflectorMat);
+    reflector.position.set(0, 1.22, 0.04);
+    group.add(reflector);
+
+    return group;
+  }
+
+  /**
+   * 補助標識プレート（501〜510系: 本標識の下に付く白長方形プレート）
+   */
+  private createAuxiliaryPlate(text: string): THREE.Group {
+    const auxGroup = new THREE.Group();
+    const width = 0.62;
+    const height = 0.22;
+
+    const backGeo = new THREE.BoxGeometry(width, height, 0.015);
+    const back = new THREE.Mesh(backGeo, this.signBackMat);
+    auxGroup.add(back);
+
+    const hasDocument = typeof document !== "undefined";
+    if (hasDocument) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 256;
+      canvas.height = 96;
+      const ctx = canvas.getContext("2d");
+      const hasCtx = Boolean(ctx);
+      if (hasCtx) {
+        ctx!.fillStyle = "#ffffff";
+        ctx!.fillRect(0, 0, 256, 96);
+
+        ctx!.strokeStyle = "#334155";
+        ctx!.lineWidth = 4;
+        ctx!.strokeRect(4, 4, 248, 88);
+
+        ctx!.fillStyle = "#1e293b";
+        ctx!.font = "bold 36px sans-serif";
+        ctx!.textAlign = "center";
+        ctx!.textBaseline = "middle";
+        ctx!.fillText(text, 128, 48);
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.45 });
+      const front = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+      front.position.z = 0.012;
+      auxGroup.add(front);
+    }
+
+    return auxGroup;
   }
 }

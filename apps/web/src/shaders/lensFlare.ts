@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from "three";
 
 export interface LensFlareOptions {
   enabled?: boolean;
@@ -40,11 +40,7 @@ export class LensFlarePass {
   private sunScreenPos = new THREE.Vector3();
   private sunWorldPos = new THREE.Vector3(120, 35, -80);
 
-  constructor(
-    width: number,
-    height: number,
-    options: LensFlareOptions = {}
-  ) {
+  constructor(width: number, height: number, options: LensFlareOptions = {}) {
     this.renderTarget = new THREE.WebGLRenderTarget(width, height, {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
@@ -296,7 +292,7 @@ export class LensFlarePass {
     renderer: THREE.WebGLRenderer,
     sceneColorTexture: THREE.Texture,
     depthTexture: THREE.Texture | null,
-    target: THREE.WebGLRenderTarget | null = null
+    target: THREE.WebGLRenderTarget | null = null,
   ): void {
     this.material.uniforms.tColor.value = sceneColorTexture;
     this.material.uniforms.tDepth.value = depthTexture;

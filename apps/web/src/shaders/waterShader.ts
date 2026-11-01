@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from "three";
 
 export interface WaterShaderOptions {
   shallowColor?: number;
@@ -59,7 +59,7 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
 
       // 頂点シェーダー: Gerstner 波による頂点変位と法線計算
       shader.vertexShader = shader.vertexShader.replace(
-        '#include <common>',
+        "#include <common>",
         /* glsl */ `
         #include <common>
         uniform float uTime;
@@ -100,11 +100,11 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
             d.y * (a * cos(f))
           );
         }
-        `
+        `,
       );
 
       shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
+        "#include <begin_vertex>",
         /* glsl */ `
         #include <begin_vertex>
 
@@ -121,12 +121,12 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
         transformed += waveOffset;
         vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
         vWaveNormal = normalize(cross(binormal, tangent));
-        `
+        `,
       );
 
       // フラグメントシェーダー: 水色減衰、フレネル、雨滴リップルの合成
       shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <common>',
+        "#include <common>",
         /* glsl */ `
         #include <common>
         uniform float uTime;
@@ -168,12 +168,12 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
           }
           return normalize(rNorm);
         }
-        `
+        `,
       );
 
       // 法線マップ部の変調: Gerstner 波法線とリップルのブレンド
       shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <normal_fragment_maps>',
+        "#include <normal_fragment_maps>",
         /* glsl */ `
         #include <normal_fragment_maps>
 
@@ -187,12 +187,12 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
         }
 
         normal = baseN;
-        `
+        `,
       );
 
       // カラー・吸光グラデーション・鏡面反射
       shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <metalnessmap_fragment>',
+        "#include <metalnessmap_fragment>",
         /* glsl */ `
         #include <metalnessmap_fragment>
 
@@ -204,7 +204,7 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
         // 水面フレネル反射（鏡面度 0.03）
         roughnessFactor = 0.03;
         metalnessFactor = 0.25;
-        `
+        `,
       );
     };
   }

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build && pnpm run minify",
     "minify": "tsx scripts/minify.ts",
+    "fetch-open-data": "tsx scripts/fetch-open-data.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "lint": "oxlint src",

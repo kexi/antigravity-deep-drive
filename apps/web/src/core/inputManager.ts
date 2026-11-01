@@ -20,13 +20,26 @@ export class InputManager {
     const key = e.key.toLowerCase();
     this.keys[key] = true;
 
-    if (key === "c") {
+    const isCameraKey = key === "c";
+    if (isCameraKey) {
       this.onCameraToggle?.();
-    } else if (key === "x") {
+      return;
+    }
+
+    const isWiperKey = key === "x";
+    if (isWiperKey) {
       this.onWiperToggle?.();
-    } else if (key === "b") {
+      return;
+    }
+
+    const isBlurKey = key === "b";
+    if (isBlurKey) {
       this.onBlurToggle?.();
-    } else if (key === "r") {
+      return;
+    }
+
+    const isResetKey = key === "r";
+    if (isResetKey) {
       this.onResetVehicle?.();
     }
   }

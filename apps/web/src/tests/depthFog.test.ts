@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import * as THREE from 'three';
-import { DepthFogPass } from '../shaders/depthFog';
+import { describe, it, expect } from "vitest";
+import * as THREE from "three";
+import { DepthFogPass } from "../shaders/depthFog";
 
-describe('DepthFogPass - Atmospheric Height and Depth Fog', () => {
-  it('DepthFogPassが指定解像度と深度レンダーターゲットを適切に初期化することを保証する', () => {
+describe("DepthFogPass - Atmospheric Height and Depth Fog", () => {
+  it("DepthFogPassが指定解像度と深度レンダーターゲットを適切に初期化することを保証する", () => {
     const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 1000);
     camera.position.set(0, 10, 50);
     camera.updateMatrixWorld();
@@ -23,8 +23,7 @@ describe('DepthFogPass - Atmospheric Height and Depth Fog', () => {
       fogPass.renderTarget.width === 1280 && fogPass.renderTarget.height === 720;
     expect(isCorrectSize).toBe(true);
 
-    const isDepthFormatCorrect =
-      fogPass.renderTarget.depthTexture?.type === THREE.UnsignedIntType;
+    const isDepthFormatCorrect = fogPass.renderTarget.depthTexture?.type === THREE.UnsignedIntType;
     expect(isDepthFormatCorrect).toBe(true);
 
     const uniforms = fogPass.material.uniforms;
@@ -35,7 +34,7 @@ describe('DepthFogPass - Atmospheric Height and Depth Fog', () => {
     expect(uniforms.uStartDistance.value).toBe(5.0);
   });
 
-  it('setFogParamsメソッドにより大気密度・高度減衰率・太陽光パラメータが動的更新されることを保証する', () => {
+  it("setFogParamsメソッドにより大気密度・高度減衰率・太陽光パラメータが動的更新されることを保証する", () => {
     const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 500);
     const fogPass = new DepthFogPass(800, 600, camera);
 
@@ -62,27 +61,31 @@ describe('DepthFogPass - Atmospheric Height and Depth Fog', () => {
     expect(isSunDirUpdated).toBe(true);
   });
 
-  it('GLSLシェーダーコードに深度復元、高度減衰積分、Henyey-Greenstein散乱計算が含まれていることを保証する', () => {
+  it("GLSLシェーダーコードに深度復元、高度減衰積分、Henyey-Greenstein散乱計算が含まれていることを保証する", () => {
     const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 500);
     const fogPass = new DepthFogPass(800, 600, camera);
 
     const fragmentGlsl = fogPass.material.fragmentShader;
 
     // 1. 深度値からのビュー座標再構築
-    const hasViewPosFunc = fragmentGlsl.includes('vec3 getViewPos(vec2 uv, float depth)');
-    const hasClipPosReconstruct = fragmentGlsl.includes('cameraProjectionInverse * clipPos');
+    const hasViewPosFunc = fragmentGlsl.includes("vec3 getViewPos(vec2 uv, float depth)");
+    const hasClipPosReconstruct = fragmentGlsl.includes("cameraProjectionInverse * clipPos");
     expect(hasViewPosFunc).toBe(true);
     expect(hasClipPosReconstruct).toBe(true);
 
     // 2. 指数高度減衰の解析解
-    const hasHeightIntegral = fragmentGlsl.includes('exp(-uHeightFalloff * camY)');
-    const hasDeltaYBranch = fragmentGlsl.includes('abs(deltaY) > 0.001');
+    const hasHeightIntegral = fragmentGlsl.includes("exp(-uHeightFalloff * camY)");
+    const hasDeltaYBranch = fragmentGlsl.includes("abs(deltaY) > 0.001");
     expect(hasHeightIntegral).toBe(true);
     expect(hasDeltaYBranch).toBe(true);
 
     // 3. Henyey-Greenstein ミー散乱位相関数
-    const hasHenyeyGreenstein = fragmentGlsl.includes('float henyeyGreenstein(float cosTheta, float g)');
-    const hasInscatteringMix = fragmentGlsl.includes('mix(uFogColor, uSunColor, clamp(phase * uInscatteringIntensity, 0.0, 1.0))');
+    const hasHenyeyGreenstein = fragmentGlsl.includes(
+      "float henyeyGreenstein(float cosTheta, float g)",
+    );
+    const hasInscatteringMix = fragmentGlsl.includes(
+      "mix(uFogColor, uSunColor, clamp(phase * uInscatteringIntensity, 0.0, 1.0))",
+    );
     expect(hasHenyeyGreenstein).toBe(true);
     expect(hasInscatteringMix).toBe(true);
   });

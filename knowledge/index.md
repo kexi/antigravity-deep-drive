@@ -25,3 +25,6 @@ trust_signals:
 - [010-sky-shader.md](./010-sky-shader.md): 物理ベース大気散乱・プロシージャル動的雲・星空 空シェーダー (Atmospheric Dynamic Sky Shader)
 - [011-tsdown-minify-ghp-deploy.md](./011-tsdown-minify-ghp-deploy.md): tsdown によるバンドル Minification 最適化と GitHub Pages デプロイパイプライン
 - [012-shader-compile-and-normal-matrix-fix.md](./012-shader-compile-and-normal-matrix-fix.md): Three.js フラグメントシェーダーにおける normalMatrix と metalnessFactor コンパイル不整合の解決
+- [013-tree-and-foliage-shader.md](./013-tree-and-foliage-shader.md): 行幸通りイチョウ街路樹のBlender CLIモデリングと物理ベース葉っぱシェーダー・木シェーダー
+- [014-3d-textures-rapier-raycast-vehicle-and-high-precision-modeling.md](./014-3d-textures-rapier-raycast-vehicle-and-high-precision-modeling.md): 3Dボリュームテクスチャ生成・Rapierレイキャスト車両物理・高精度3Dモデリング刷新・Blender公式MCP導入
+- [015-tokyo-plateau-and-gsi-open-data.md](./015-tokyo-plateau-and-gsi-open-data.md): 東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI DEM5A / 道路中心線) オープンデータ統合

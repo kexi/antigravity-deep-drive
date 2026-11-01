@@ -23,12 +23,22 @@ models:
   - id: "tokyo_station"
     path: "/models/tokyo_station.glb"
     scale: [1.0, 1.0, 1.0]
-    offset: [0.0, 0.0, -80.0]
+    offset: [0.0, 0.0, -45.0]
     subparts:
       mainBuilding: "TokyoStation_Main"
       northDome: "Dome_North"
       southDome: "Dome_South"
     fallbackColor: 0x8b3a2b
+
+  - id: "street_tree"
+    path: "/models/street_tree.glb"
+    scale: [1.0, 1.0, 1.0]
+    offset: [0.0, 0.0, 0.0]
+    subparts:
+      trunk: "Tree_Trunk"
+      foliage: "Tree_Foliage"
+      guard: "Tree_Guard"
+    fallbackColor: 0xeab308
 
 textures3d:
   - id: "asphalt_3d"
@@ -108,60 +118,122 @@ roads:
 signs:
   - id: "overhead_guide_gyoko"
     type: "overhead_guide"
-    position: [0.0, 0.0, -45.0]
-    rotationY: 0.0
+    position: [0.0, 0.0, 58.0]
+    rotationY: 3.14159
     label: "大手町 皇居外苑"
     subLabel: "Otemachi / Kokyo Gaien"
     arrowDirections: ["直進", "左折"]
 
+  - id: "overhead_guide_wadakura"
+    type: "overhead_guide"
+    position: [0.0, 0.0, 175.0]
+    rotationY: 3.14159
+    label: "日比谷 霞が関"
+    subLabel: "Hibiya / Kasumigaseki"
+    arrowDirections: ["左折", "右折"]
+
   - id: "speed_limit_gyoko"
     type: "speed_limit"
-    position: [13.0, 0.0, -20.0]
+    position: [-9.2, 0.0, 42.0]
     rotationY: 3.14159
     speedLimit: 40
+    auxiliaryText: "終日"
+
+  - id: "no_parking_gyoko_left"
+    type: "no_parking"
+    position: [-9.2, 0.0, 50.0]
+    rotationY: 3.14159
+    auxiliaryText: "終日"
+
+  - id: "no_stopping_gyoko_right"
+    type: "no_stopping"
+    position: [9.2, 0.0, 46.0]
+    rotationY: 3.14159
+    auxiliaryText: "ここまで"
+
+  - id: "lane_direction_gyoko"
+    type: "lane_direction"
+    position: [-9.5, 0.0, 72.0]
+    rotationY: 3.14159
+
+  - id: "intersection_name_gyoko"
+    type: "intersection_name"
+    position: [-9.2, 0.0, 88.0]
+    rotationY: 3.14159
+    label: "行幸通り前"
+    subLabel: "Gyoko-dori"
+
+  - id: "no_uturn_gyoko"
+    type: "no_uturn"
+    position: [9.2, 0.0, 78.0]
+    rotationY: 3.14159
+    auxiliaryText: "終日"
+
+  - id: "one_way_marunouchi"
+    type: "one_way"
+    position: [-10.5, 0.0, 35.0]
+    rotationY: 2.61799
+    auxiliaryText: "自転車を除く"
+
+  - id: "delineator_median_south"
+    type: "delineator"
+    position: [0.0, 0.0, 38.0]
+    rotationY: 3.14159
+
+  - id: "delineator_median_north"
+    type: "delineator"
+    position: [0.0, 0.0, 96.0]
+    rotationY: 3.14159
 
   - id: "stop_marunouchi_entry"
     type: "stop"
-    position: [-18.0, 0.0, 2.0]
+    position: [-14.0, 0.0, 12.0]
     rotationY: 1.5708
 
   - id: "no_entry_plaza"
     type: "no_entry"
-    position: [0.0, 0.0, -70.0]
+    position: [0.0, 0.0, -8.0]
     rotationY: 0.0
 
   - id: "direction_mandatory_hibiya"
     type: "direction_mandatory"
-    position: [18.0, 0.0, 2.0]
-    rotationY: -1.5708
+    position: [9.2, 0.0, 64.0]
+    rotationY: 3.14159
     arrowDirections: ["左折", "直進"]
 
   - id: "traffic_light_ahead_gyoko"
     type: "traffic_light_ahead"
-    position: [-13.0, 0.0, 10.0]
-    rotationY: 0.0
+    position: [-9.2, 0.0, 62.0]
+    rotationY: 3.14159
 
   - id: "crosswalk_station_front"
     type: "crosswalk"
-    position: [13.0, 0.0, -50.0]
+    position: [-9.2, 0.0, 82.0]
     rotationY: 3.14159
 
   - id: "street_name_gyoko"
     type: "street_name"
-    position: [-13.0, 0.0, -35.0]
-    rotationY: 1.5708
+    position: [-9.5, 0.0, 32.0]
+    rotationY: 2.85
     label: "行幸通り"
     subLabel: "Gyoko-dori Ave."
+
+  - id: "intersection_name_wadakura"
+    type: "intersection_name"
+    position: [-9.5, 0.0, 215.0]
+    rotationY: 3.14159
+    label: "和田倉門"
+    subLabel: "Wadakuramon"
 
 weatherPresets:
   - id: "sunset"
     name: "夕暮れの丸の内 (Sunset Golden Hour)"
-    sunPosition: [120.0, 35.0, -80.0]
-    sunColor: 0xff8844
-    ambientColor: 0x442233
-    skyColor: 0x221122
-    fogDensity: 0.003
-    fogColor: 0xffaa77
+    sunPosition: [60.0, 42.0, 180.0]
+    sunColor: 0xff9944
+    ambientColor: 0xfdba74
+    skyColor: 0x2563eb
+    fogDensity: 0.002
+    fogColor: 0xfb923c
     rain:
       enabled: false
       intensity: 0.0
@@ -174,12 +246,12 @@ weatherPresets:
 
   - id: "clear"
     name: "晴天 (Clear Daylight)"
-    sunPosition: [80.0, 120.0, -40.0]
-    sunColor: 0xffffff
-    ambientColor: 0x334455
-    skyColor: 0x112233
-    fogDensity: 0.001
-    fogColor: 0xcceeff
+    sunPosition: [50.0, 110.0, 180.0]
+    sunColor: 0xfffaed
+    ambientColor: 0x93c5fd
+    skyColor: 0x0284c7
+    fogDensity: 0.0012
+    fogColor: 0xbae6fd
     rain:
       enabled: false
       intensity: 0.0
@@ -187,17 +259,17 @@ weatherPresets:
       windshieldWetness: 0.0
     lensflare:
       enabled: true
-      intensity: 0.8
+      intensity: 0.9
       color: 0xfffaee
 
   - id: "rain"
     name: "雨の東京駅 (Rainy Reflection)"
-    sunPosition: [50.0, 60.0, -30.0]
-    sunColor: 0x667788
-    ambientColor: 0x222a33
-    skyColor: 0x111620
-    fogDensity: 0.012
-    fogColor: 0x334455
+    sunPosition: [40.0, 70.0, 120.0]
+    sunColor: 0x94a3b8
+    ambientColor: 0x64748b
+    skyColor: 0x1e293b
+    fogDensity: 0.008
+    fogColor: 0x475569
     rain:
       enabled: true
       intensity: 0.85
@@ -210,12 +282,12 @@ weatherPresets:
 
   - id: "night"
     name: "夜景 (Tokyo Station Night Lights)"
-    sunPosition: [0.0, -50.0, 0.0]
-    sunColor: 0x112244
-    ambientColor: 0x080c18
-    skyColor: 0x02040a
-    fogDensity: 0.004
-    fogColor: 0x050a14
+    sunPosition: [30.0, 80.0, 120.0]
+    sunColor: 0x38bdf8
+    ambientColor: 0x1e293b
+    skyColor: 0x050814
+    fogDensity: 0.0035
+    fogColor: 0x0f172a
     rain:
       enabled: false
       intensity: 0.0

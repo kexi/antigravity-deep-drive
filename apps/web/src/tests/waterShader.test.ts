@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import * as THREE from 'three';
-import { WaterSurfaceMaterial } from '../shaders/waterShader';
+import { describe, it, expect } from "vitest";
+import * as THREE from "three";
+import { WaterSurfaceMaterial } from "../shaders/waterShader";
 
-describe('WaterSurfaceMaterial - Gerstner Waves Water Surface Shader', () => {
-  it('水面シェーダーが初期パラメータ（波速、波高、浅瀬・深部色）を正しく初期化することを保証する', () => {
+describe("WaterSurfaceMaterial - Gerstner Waves Water Surface Shader", () => {
+  it("水面シェーダーが初期パラメータ（波速、波高、浅瀬・深部色）を正しく初期化することを保証する", () => {
     const waterMat = new WaterSurfaceMaterial({
       shallowColor: 0x14708c,
       deepColor: 0x031e2b,
@@ -20,7 +20,7 @@ describe('WaterSurfaceMaterial - Gerstner Waves Water Surface Shader', () => {
     expect(waterMat.uDeepColor.value.getHex()).toBe(0x031e2b);
   });
 
-  it('時間・雨量パラメータの更新がユニフォームに正常に反映されることを保証する', () => {
+  it("時間・雨量パラメータの更新がユニフォームに正常に反映されることを保証する", () => {
     const waterMat = new WaterSurfaceMaterial();
 
     waterMat.uTime.value = 45.67;
@@ -33,7 +33,7 @@ describe('WaterSurfaceMaterial - Gerstner Waves Water Surface Shader', () => {
     expect(isRainSet).toBe(true);
   });
 
-  it('onBeforeCompile フックによってGLSLコードにGerstner波計算と吸光グラデーションが注入されることを保証する', () => {
+  it("onBeforeCompile フックによってGLSLコードにGerstner波計算と吸光グラデーションが注入されることを保証する", () => {
     const waterMat = new WaterSurfaceMaterial();
 
     const mockShader = {
@@ -56,7 +56,7 @@ describe('WaterSurfaceMaterial - Gerstner Waves Water Surface Shader', () => {
 
     waterMat.onBeforeCompile(
       mockShader as unknown as THREE.WebGLProgramParametersWithUniforms,
-      {} as unknown as THREE.WebGLRenderer
+      {} as unknown as THREE.WebGLRenderer,
     );
 
     // ユニフォームバインド検証
@@ -66,14 +66,16 @@ describe('WaterSurfaceMaterial - Gerstner Waves Water Surface Shader', () => {
     expect(mockShader.uniforms.uRainWetness).toBe(waterMat.uRainWetness);
 
     // GLSL頂点シェーダー検証
-    const hasGerstner = mockShader.vertexShader.includes('calculateGerstnerWave');
-    const hasDisplacement = mockShader.vertexShader.includes('transformed += waveOffset');
+    const hasGerstner = mockShader.vertexShader.includes("calculateGerstnerWave");
+    const hasDisplacement = mockShader.vertexShader.includes("transformed += waveOffset");
     expect(hasGerstner).toBe(true);
     expect(hasDisplacement).toBe(true);
 
     // GLSLフラグメントシェーダー検証
-    const hasWaterAbsorption = mockShader.fragmentShader.includes('mix(uDeepColor, uShallowColor, waveHeightFactor)');
-    const hasWaterRipples = mockShader.fragmentShader.includes('waterRainRipples');
+    const hasWaterAbsorption = mockShader.fragmentShader.includes(
+      "mix(uDeepColor, uShallowColor, waveHeightFactor)",
+    );
+    const hasWaterRipples = mockShader.fragmentShader.includes("waterRainRipples");
     expect(hasWaterAbsorption).toBe(true);
     expect(hasWaterRipples).toBe(true);
   });

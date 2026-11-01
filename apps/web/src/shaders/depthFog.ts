@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from "three";
 
 export interface DepthFogOptions {
   fogColor?: number;
@@ -30,7 +30,12 @@ export class DepthFogPass {
   private quadCamera: THREE.OrthographicCamera;
   private quadMesh: THREE.Mesh;
 
-  constructor(width: number, height: number, camera: THREE.PerspectiveCamera, options: DepthFogOptions = {}) {
+  constructor(
+    width: number,
+    height: number,
+    camera: THREE.PerspectiveCamera,
+    options: DepthFogOptions = {},
+  ) {
     this.sceneCamera = camera;
 
     // 深度テクスチャ付きレンダーターゲット
@@ -206,14 +211,16 @@ export class DepthFogPass {
   public render(
     renderer: THREE.WebGLRenderer,
     sceneColorTexture: THREE.Texture,
-    target: THREE.WebGLRenderTarget | null = null
+    target: THREE.WebGLRenderTarget | null = null,
   ): void {
     this.material.uniforms.tColor.value = sceneColorTexture;
     this.material.uniforms.cameraNear.value = this.sceneCamera.near;
     this.material.uniforms.cameraFar.value = this.sceneCamera.far;
     this.material.uniforms.uCameraPosition.value.copy(this.sceneCamera.position);
     this.material.uniforms.cameraWorldMatrix.value.copy(this.sceneCamera.matrixWorld);
-    this.material.uniforms.cameraProjectionInverse.value.copy(this.sceneCamera.projectionMatrixInverse);
+    this.material.uniforms.cameraProjectionInverse.value.copy(
+      this.sceneCamera.projectionMatrixInverse,
+    );
 
     renderer.setRenderTarget(target);
     renderer.render(this.quadScene, this.quadCamera);

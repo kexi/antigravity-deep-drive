@@ -61,9 +61,15 @@ models:
     const hasOverheadSign = signs.some((sign) => sign.type === "overhead_guide");
     const hasStopSign = signs.some((sign) => sign.type === "stop");
     const hasSpeedSign = signs.some((sign) => sign.type === "speed_limit");
+    const hasNoParkingSign = signs.some((sign) => sign.type === "no_parking");
+    const hasLaneDirectionSign = signs.some((sign) => sign.type === "lane_direction");
+    const hasIntersectionNameSign = signs.some((sign) => sign.type === "intersection_name");
     expect(hasOverheadSign).toBe(true);
     expect(hasStopSign).toBe(true);
     expect(hasSpeedSign).toBe(true);
+    expect(hasNoParkingSign).toBe(true);
+    expect(hasLaneDirectionSign).toBe(true);
+    expect(hasIntersectionNameSign).toBe(true);
   });
 
   it("3Dテクスチャの生成とキャッシュ管理が機能することを保証する", () => {

@@ -9,12 +9,23 @@ export interface VehicleInput {
   handbrake: boolean;
 }
 
+export interface WheelTelemetry {
+  suspensionLength: number;
+  inContact: boolean;
+  rotation: number;
+  steering: number;
+}
+
 export interface VehicleState {
   speedKmh: number;
   engineRpm: number;
   gear: string;
   position: { x: number; y: number; z: number };
+  quaternion: { x: number; y: number; z: number; w: number };
   velocity: { x: number; y: number; z: number };
   headingAngle: number;
   steeringAngle: number;
+  pitchAngle: number;
+  rollAngle: number;
+  wheels: WheelTelemetry[];
 }

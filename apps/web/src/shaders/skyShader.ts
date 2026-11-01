@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from "three";
 
 export interface SkyOptions {
   zenithColor?: number;
@@ -174,7 +174,7 @@ export class AtmosphericSky {
     // スカイドーム用球体ジオメトリ
     const geometry = new THREE.SphereGeometry(900, 32, 16);
     this.mesh = new THREE.Mesh(geometry, this.material);
-    this.mesh.name = 'AtmosphericSkyDome';
+    this.mesh.name = "AtmosphericSkyDome";
   }
 
   public update(time: number, cameraPos: THREE.Vector3): void {

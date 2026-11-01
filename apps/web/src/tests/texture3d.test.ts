@@ -31,10 +31,12 @@ describe("3Dプロシージャルテクスチャ生成システムの仕様検�
     let hasNonZeroR = false;
     let hasNonZeroA = false;
     for (let i = 0; i < data.length; i += 4) {
-      if (data[i] > 0) {
+      const isNonZeroR = data[i] > 0;
+      if (isNonZeroR) {
         hasNonZeroR = true;
       }
-      if (data[i + 3] > 0) {
+      const isNonZeroA = data[i + 3] > 0;
+      if (isNonZeroA) {
         hasNonZeroA = true;
       }
       const isBothFound = hasNonZeroR && hasNonZeroA;
@@ -44,6 +46,44 @@ describe("3Dプロシージャルテクスチャ生成システムの仕様検�
     }
     expect(hasNonZeroR).toBe(true);
     expect(hasNonZeroA).toBe(true);
+  });
+
+  it("イチョウ葉っぱ＆樹皮用3Dボリュームテクスチャが4チャンネル（葉脈・縦溝・コケ・SSS）で正常に生成されることを保証する", () => {
+    const size = 12;
+    const texture = Procedural3DTextureGenerator.generateFoliageBark3DTexture(size);
+
+    expect(texture).toBeInstanceOf(THREE.Data3DTexture);
+    expect(texture.format).toBe(THREE.RGBAFormat);
+    expect(texture.wrapS).toBe(THREE.RepeatWrapping);
+    expect(texture.wrapT).toBe(THREE.RepeatWrapping);
+    expect(texture.wrapR).toBe(THREE.RepeatWrapping);
+
+    const data = texture.image.data as Uint8Array;
+    expect(data.byteLength).toBe(size * size * size * 4);
+  });
+
+  it("東京駅赤レンガ・丸の内白御影石・お堀石垣用3Dボリュームテクスチャが正常に生成されることを保証する", () => {
+    const size = 12;
+    const texture = Procedural3DTextureGenerator.generateArchitecture3DTexture(size);
+
+    expect(texture).toBeInstanceOf(THREE.Data3DTexture);
+    expect(texture.format).toBe(THREE.RGBAFormat);
+    expect(texture.wrapS).toBe(THREE.RepeatWrapping);
+    expect(texture.wrapT).toBe(THREE.RepeatWrapping);
+    expect(texture.wrapR).toBe(THREE.RepeatWrapping);
+
+    const data = texture.image.data as Uint8Array;
+    expect(data.byteLength).toBe(size * size * size * 4);
+  });
+
+  it("3次元トーラス周期ノイズが境界(0.0と1.0)で数学的に完全連続であることを保証する", () => {
+    const v0 = Procedural3DTextureGenerator.samplePeriodicVolumeNoise3D(0.0, 0.37, 0.64, 4);
+    const v1 = Procedural3DTextureGenerator.samplePeriodicVolumeNoise3D(1.0, 0.37, 0.64, 4);
+    expect(v0).toBeCloseTo(v1, 6);
+
+    const vy0 = Procedural3DTextureGenerator.samplePeriodicVolumeNoise3D(0.42, 0.0, 0.81, 4);
+    const vy1 = Procedural3DTextureGenerator.samplePeriodicVolumeNoise3D(0.42, 1.0, 0.81, 4);
+    expect(vy0).toBeCloseTo(vy1, 6);
   });
 
   it("雨煙・大気フォグ用3DボリュームテクスチャがRedFormatで正常に生成されることを保証する", () => {

@@ -10,8 +10,9 @@ export class PhysicsWorld {
   private initialized = false;
 
   public static async getInstance(): Promise<PhysicsWorld> {
-    if (PhysicsWorld.instance) {
-      return PhysicsWorld.instance;
+    const hasExistingInstance = PhysicsWorld.instance !== null;
+    if (hasExistingInstance) {
+      return PhysicsWorld.instance!;
     }
     const inst = new PhysicsWorld();
     await inst.init();

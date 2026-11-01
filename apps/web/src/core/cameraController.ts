@@ -31,23 +31,25 @@ export class CameraController {
     // 車速に応じたFOVの動的変化（スピード感の強調）
     const speedKmh = state.speedKmh;
     const speedRatio = Math.min(speedKmh / 160.0, 1.0);
-    const targetFov =
-      this.mode === "cockpit"
-        ? this.fovDefault + speedRatio * 10
-        : this.fovDefault + 5 + speedRatio * 15;
+    const isCockpitMode = this.mode === "cockpit";
+    const targetFov = isCockpitMode
+      ? this.fovDefault + speedRatio * 10
+      : this.fovDefault + 5 + speedRatio * 15;
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, dt * 5.0);
     this.camera.updateProjectionMatrix();
 
-    if (this.mode === "cockpit") {
+    if (isCockpitMode) {
       this.updateCockpitCamera(dt, state, carGroup);
-    } else {
-      this.updateChaseCamera(dt, state, carGroup);
+      return;
     }
+
+    this.updateChaseCamera(dt, state, carGroup);
   }
 
   private updateCockpitCamera(_dt: number, state: VehicleState, carGroup: THREE.Group): void {
-    // 運転席のアイポイント（右ハンドル位置: x=0.38, y=1.18, z=-0.05）
-    const eyeLocal = new THREE.Vector3(0.38, 1.18, -0.05);
+    // ドライバー視点のアイポイント（日本の右ハンドル運転席の実寸位置:
+    // Three.js +Z 前方座標系では -X が車体右側となるため x = -0.38m、アイポイント高 y = 1.13m、前後位置 z = 0.06m）
+    const eyeLocal = new THREE.Vector3(-0.38, 1.13, 0.06);
     const eyeWorld = eyeLocal.clone().applyMatrix4(carGroup.matrixWorld);
 
     // 日本のアスファルト路面マイクロバイブレーション（平坦コライダー上の滑らかな走行と、視覚的凸凹の体感を両立）
@@ -64,8 +66,8 @@ export class CameraController {
 
     this.camera.position.copy(eyeWorld);
 
-    // 車両の前方を見据えるターゲット点
-    const lookLocal = new THREE.Vector3(0.38 - state.steeringAngle * 0.2, 1.15, 20.0);
+    // ドライバーの視線先（前方道路を見据えつつ、画面下部に実寸ステアリング上半分とデジタルメーターパネルが自然に収まる角度）
+    const lookLocal = new THREE.Vector3(-0.38 - state.steeringAngle * 0.55, 0.96, 18.0);
     const lookWorld = lookLocal.applyMatrix4(carGroup.matrixWorld);
     this.camera.lookAt(lookWorld);
   }

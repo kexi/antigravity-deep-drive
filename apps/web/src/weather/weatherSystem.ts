@@ -91,32 +91,29 @@ export class WeatherSystem {
     canvas.width = size;
     canvas.height = size;
     const ctx = canvas.getContext("2d");
-    if (ctx) {
-      const gradient = ctx.createRadialGradient(
-        size / 2,
-        size / 2,
-        0,
-        size / 2,
-        size / 2,
-        size / 2,
-      );
-      gradient.addColorStop(
-        0.0,
-        `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(b * 255)}, 1.0)`,
-      );
-      gradient.addColorStop(
-        0.2,
-        `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(b * 255)}, 0.4)`,
-      );
-      gradient.addColorStop(
-        0.5,
-        `rgba(${Math.floor(r * 255 * 0.5)}, ${Math.floor(g * 255 * 0.5)}, ${Math.floor(b * 255)}, 0.1)`,
-      );
-      gradient.addColorStop(1.0, "rgba(0, 0, 0, 0.0)");
-
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, size, size);
+    const hasContext = ctx !== null;
+    if (!hasContext) {
+      return new THREE.CanvasTexture(canvas);
     }
+
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(
+      0.0,
+      `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(b * 255)}, 1.0)`,
+    );
+    gradient.addColorStop(
+      0.2,
+      `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(b * 255)}, 0.4)`,
+    );
+    gradient.addColorStop(
+      0.5,
+      `rgba(${Math.floor(r * 255 * 0.5)}, ${Math.floor(g * 255 * 0.5)}, ${Math.floor(b * 255)}, 0.1)`,
+    );
+    gradient.addColorStop(1.0, "rgba(0, 0, 0, 0.0)");
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+
     const texture = new THREE.CanvasTexture(canvas);
     return texture;
   }
@@ -155,7 +152,8 @@ export class WeatherSystem {
   public setWeather(type: WeatherType): void {
     this.currentWeather = type;
 
-    if (type === "clear") {
+    const isClear = type === "clear";
+    if (isClear) {
       this.scene.background = new THREE.Color(0x38bdf8);
       this.scene.fog = new THREE.FogExp2(0xbae6fd, 0.003);
       this.dirLight.color.setHex(0xfffaed);
@@ -167,6 +165,8 @@ export class WeatherSystem {
       this.lensflare.visible = true;
       this.lensflareConfig = { enabled: true, intensity: 0.9, color: 0xfffaed };
       this.rainMesh.visible = false;
+      this.rainIntensity = 0.0;
+      this.wetness = 0.58;
       this.sky.setParams({
         zenithColor: 0x0284c7,
         horizonColor: 0xbae6fd,
@@ -177,7 +177,11 @@ export class WeatherSystem {
         starsIntensity: 0.0,
       });
       this.sky.setSunPosition(this.dirLight.position);
-    } else if (type === "sunset") {
+      return;
+    }
+
+    const isSunset = type === "sunset";
+    if (isSunset) {
       this.scene.background = new THREE.Color(0xf97316);
       this.scene.fog = new THREE.FogExp2(0xfdba74, 0.004);
       this.dirLight.color.setHex(0xfb923c);
@@ -189,6 +193,8 @@ export class WeatherSystem {
       this.lensflare.visible = true;
       this.lensflareConfig = { enabled: true, intensity: 1.4, color: 0xffbb66 };
       this.rainMesh.visible = false;
+      this.rainIntensity = 0.0;
+      this.wetness = 0.78;
       this.sky.setParams({
         zenithColor: 0x4c1d95,
         horizonColor: 0xf97316,
@@ -199,7 +205,11 @@ export class WeatherSystem {
         starsIntensity: 0.05,
       });
       this.sky.setSunPosition(this.dirLight.position);
-    } else if (type === "rain") {
+      return;
+    }
+
+    const isRain = type === "rain";
+    if (isRain) {
       this.scene.background = new THREE.Color(0x334155);
       this.scene.fog = new THREE.FogExp2(0x475569, 0.008);
       this.dirLight.color.setHex(0x94a3b8);
@@ -211,6 +221,8 @@ export class WeatherSystem {
       this.lensflare.visible = false;
       this.lensflareConfig = { enabled: false, intensity: 0.0, color: 0x8899aa };
       this.rainMesh.visible = true;
+      this.rainIntensity = 1.0;
+      this.wetness = 1.0;
       this.sky.setParams({
         zenithColor: 0x1e293b,
         horizonColor: 0x475569,
@@ -221,7 +233,11 @@ export class WeatherSystem {
         starsIntensity: 0.0,
       });
       this.sky.setSunPosition(this.dirLight.position);
-    } else if (type === "night") {
+      return;
+    }
+
+    const isNight = type === "night";
+    if (isNight) {
       this.scene.background = new THREE.Color(0x050811);
       this.scene.fog = new THREE.FogExp2(0x0f172a, 0.005);
       this.dirLight.color.setHex(0x38bdf8);
@@ -233,6 +249,8 @@ export class WeatherSystem {
       this.lensflare.visible = false;
       this.lensflareConfig = { enabled: false, intensity: 0.0, color: 0x38bdf8 };
       this.rainMesh.visible = false;
+      this.rainIntensity = 0.0;
+      this.wetness = 0.82;
       this.sky.setParams({
         zenithColor: 0x020617,
         horizonColor: 0x0f172a,
@@ -263,10 +281,18 @@ export class WeatherSystem {
     this.scene.background = new THREE.Color(preset.skyColor);
     this.scene.fog = new THREE.FogExp2(preset.fogColor, preset.fogDensity);
 
+    const isSunset = preset.id === "sunset";
+    const isNight = preset.id === "night";
+    const isRain = preset.rain.enabled;
+
     this.dirLight.color.setHex(preset.sunColor);
     this.dirLight.position.set(preset.sunPosition[0], preset.sunPosition[1], preset.sunPosition[2]);
+    this.dirLight.intensity = isNight ? 0.5 : isRain ? 1.0 : isSunset ? 3.2 : 2.8;
 
     this.hemiLight.color.setHex(preset.ambientColor);
+    this.hemiLight.groundColor.setHex(isNight ? 0x020617 : isSunset ? 0x451a03 : 0x1e293b);
+    this.hemiLight.intensity = isNight ? 0.45 : isRain ? 0.7 : 1.1;
+
     this.lensflare.visible = preset.lensflare.enabled;
     this.lensflareConfig = {
       enabled: preset.lensflare.enabled,
@@ -275,19 +301,27 @@ export class WeatherSystem {
     };
     this.rainMesh.visible = preset.rain.enabled;
 
-    if (preset.rain.enabled) {
+    if (isRain) {
       this.rainIntensity = preset.rain.intensity;
-      this.wetness = preset.rain.windshieldWetness;
+      this.wetness = Math.max(0.85, preset.rain.windshieldWetness);
+    } else if (isNight) {
+      this.rainIntensity = 0.0;
+      this.wetness = 0.82;
+    } else if (isSunset) {
+      this.rainIntensity = 0.0;
+      this.wetness = 0.78;
+    } else {
+      this.rainIntensity = 0.0;
+      this.wetness = 0.58;
     }
 
     // スカイドームのプリセット連動
-    const isNight = preset.id === "night";
     this.sky.setSunPosition(this.dirLight.position);
     this.sky.setParams({
       zenithColor: preset.skyColor,
       horizonColor: preset.fogColor,
       sunColor: preset.sunColor,
-      cloudDensity: preset.rain.enabled ? 0.85 : (isNight ? 0.25 : 0.35),
+      cloudDensity: isRain ? 0.85 : isNight ? 0.25 : 0.35,
       starsIntensity: isNight ? 0.9 : 0.0,
     });
   }
@@ -312,14 +346,43 @@ export class WeatherSystem {
     return this.lensflareConfig;
   }
 
+  /**
+   * 水たまりシェーダー（PuddleMaterial / JapaneseRoadMaterial）へ渡す大気・太陽・波紋パラメータを取得する。
+   * How: 現在の天候に応じた雨滴波紋強度・太陽ベクトル・空の天頂/地平線カラー・夜間係数を返す。
+   */
+  public getPuddleEnvironmentParams() {
+    const isNight = this.currentWeather === "night";
+    const isSunset = this.currentWeather === "sunset";
+    const nightFactor = isNight ? 1.0 : isSunset ? 0.35 : 0.0;
+    const rippleIntensity = Math.max(0.08, this.rainIntensity);
+    const horizonUniform = this.sky.material.uniforms.uHorizonColor;
+    const zenithUniform = this.sky.material.uniforms.uZenithColor;
+
+    return {
+      rippleIntensity,
+      sunDirection: this.getSunDirection(),
+      sunColor: this.dirLight.color,
+      skyHorizonColor: horizonUniform
+        ? (horizonUniform.value as THREE.Color)
+        : new THREE.Color(0xfdba74),
+      skyZenithColor: zenithUniform
+        ? (zenithUniform.value as THREE.Color)
+        : new THREE.Color(0x4c1d95),
+      nightFactor,
+    };
+  }
+
   public update(dt: number, carPos: THREE.Vector3, carVelocity: THREE.Vector3): void {
     // 雨天ターゲット値
-    const targetRain = this.currentWeather === "rain" ? 1.0 : 0.0;
+    const isRainWeather = this.currentWeather === "rain";
+    const isNightWeather = this.currentWeather === "night";
+    const isSunsetWeather = this.currentWeather === "sunset";
+    const targetRain = isRainWeather ? 1.0 : 0.0;
     this.rainIntensity = THREE.MathUtils.lerp(this.rainIntensity, targetRain, dt * 2.5);
 
-    // 路面濡れ度（雨が止んでもゆっくり乾く）
-    const targetWet = this.currentWeather === "rain" ? 1.0 : 0.0;
-    const wetLerpSpeed = this.currentWeather === "rain" ? 1.5 : 0.2;
+    // 路面水たまり湿潤度（雨天は全面水たまり、夕暮れ・夜間・晴天は道路の轍・凹部に雨上がりの残水水たまりを維持）
+    const targetWet = isRainWeather ? 1.0 : isNightWeather ? 0.82 : isSunsetWeather ? 0.78 : 0.58;
+    const wetLerpSpeed = isRainWeather ? 1.5 : 0.8;
     this.wetness = THREE.MathUtils.lerp(this.wetness, targetWet, dt * wetLerpSpeed);
 
     // 雨パーティクルの更新（プレイヤー車両の周囲に追従）
@@ -352,8 +415,9 @@ export class WeatherSystem {
 
       const isBelowGround = dummy.position.y < 0;
       const isFarAway = Math.abs(dx) > boxSize / 2 || Math.abs(dz) > boxSize / 2;
+      const shouldRecycleDrop = isBelowGround || isFarAway;
 
-      if (isBelowGround || isFarAway) {
+      if (shouldRecycleDrop) {
         dummy.position.y = 35 + Math.random() * 10;
         dummy.position.x = carPos.x + (Math.random() - 0.5) * boxSize;
         dummy.position.z = carPos.z + (Math.random() - 0.5) * boxSize;

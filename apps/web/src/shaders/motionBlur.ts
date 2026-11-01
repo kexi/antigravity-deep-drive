@@ -123,13 +123,14 @@ export class MotionBlurPass {
     // 時速30km/h以上でブラーが徐々に発現
     const minSpeed = 20.0;
     const isMovingFast = speedKmh > minSpeed;
-    if (isMovingFast) {
-      const normalizedSpeed = Math.min((speedKmh - minSpeed) / 120.0, 1.0);
-      // ブラー強度: 最大 0.045
-      this.material.uniforms.uStrength.value = normalizedSpeed * 0.04;
-    } else {
+    if (!isMovingFast) {
       this.material.uniforms.uStrength.value = 0.0;
+      return;
     }
+
+    const normalizedSpeed = Math.min((speedKmh - minSpeed) / 120.0, 1.0);
+    // ブラー強度: 最大 0.045
+    this.material.uniforms.uStrength.value = normalizedSpeed * 0.04;
   }
 
   public render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void {
@@ -146,7 +147,7 @@ export class MotionBlurPass {
   public renderFromTexture(
     renderer: THREE.WebGLRenderer,
     inputTexture: THREE.Texture,
-    target: THREE.WebGLRenderTarget | null = null
+    target: THREE.WebGLRenderTarget | null = null,
   ): void {
     renderer.setRenderTarget(target);
     this.material.uniforms.tDiffuse.value = inputTexture;

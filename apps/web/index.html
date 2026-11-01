@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f172a'/%3E%3Cpath d='M6 20l3-7h14l3 7v4h-3v-2H9v2H6v-4z' fill='%2338bdf8'/%3E%3C/svg%3E" />
     <title>Tokyo Station Deep Drive - 東京駅ドライブシミュレーター</title>
     <style>
       * {
@@ -144,6 +145,45 @@
         font-weight: bold;
         color: #38bdf8;
       }
+      .footer-left-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .gis-telemetry-box {
+        background: rgba(10, 16, 28, 0.8);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        padding: 10px 14px;
+        border-radius: 8px;
+        border: 1px solid rgba(56, 189, 248, 0.28);
+        font-size: 0.72rem;
+        line-height: 1.55;
+        color: #e2e8f0;
+        min-width: 340px;
+      }
+      .gis-telemetry-header {
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        color: #38bdf8;
+        margin-bottom: 4px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .gis-row {
+        display: flex;
+        gap: 6px;
+        font-variant-numeric: tabular-nums;
+      }
+      .gis-label {
+        color: #94a3b8;
+        min-width: 78px;
+      }
+      .gis-val {
+        color: #f8fafc;
+        font-weight: 600;
+      }
 
       /* スピードメーター */
       .speedometer-box {
@@ -192,7 +232,7 @@
       <div class="hud-header">
         <div class="title-box">
           <h1>TOKYO STATION DEEP DRIVE</h1>
-          <p>東京都オープンデータ・丸の内駅前〜行幸通り 3Dシミュレーター</p>
+          <p>東京都 PLATEAU (千代田区 13101) × 国土地理院 (GSI DEM5A / 道路中心線) 3Dシミュレーター</p>
         </div>
 
         <div class="hud-controls interactive">
@@ -211,7 +251,7 @@
           <div class="control-panel">
             <span class="panel-label">カメラ視点 [C]</span>
             <div class="btn-group" id="camera-buttons">
-              <button class="hud-btn active" data-camera="cockpit">車内視点</button>
+              <button class="hud-btn active" data-camera="cockpit">ドライバー視点</button>
               <button class="hud-btn" data-camera="chase">追従視点</button>
             </div>
           </div>
@@ -239,12 +279,33 @@
 
       <!-- フッター -->
       <div class="hud-footer">
-        <div class="controls-guide">
-          <div><kbd>W</kbd> / <kbd>↑</kbd> : 前進・加速</div>
-          <div><kbd>S</kbd> / <kbd>↓</kbd> : ブレーキ・後退</div>
-          <div><kbd>A</kbd> / <kbd>D</kbd> or <kbd>←</kbd> / <kbd>→</kbd> : ステアリング操舵</div>
-          <div><kbd>Space</kbd> : ハンドブレーキ | <kbd>R</kbd> : 車両リセット</div>
-          <div><kbd>C</kbd> : 視点切り替え | <kbd>X</kbd> : ワイパー切替 | <kbd>B</kbd> : モーションブラー</div>
+        <div class="footer-left-stack">
+          <div class="gis-telemetry-box" id="gis-telemetry-box">
+            <div class="gis-telemetry-header">
+              <span>東京都 PLATEAU 13101 × 国土地理院 GIS</span>
+              <span id="gis-crs-badge">JGD2011 / DEM5A</span>
+            </div>
+            <div class="gis-row">
+              <span class="gis-label">座標 / 標高:</span>
+              <span class="gis-val" id="gis-coord-display">35.681788°N, 139.764974°E (TP +3.18m)</span>
+            </div>
+            <div class="gis-row">
+              <span class="gis-label">GSI 道路網:</span>
+              <span class="gis-val" id="gis-road-display">行幸通り (都道404号) [rID: 50313-12843]</span>
+            </div>
+            <div class="gis-row">
+              <span class="gis-label">PLATEAU 建築:</span>
+              <span class="gis-val" id="gis-bldg-display">新丸の内ビルディング (199.9m / 37F)</span>
+            </div>
+          </div>
+
+          <div class="controls-guide">
+            <div><kbd>W</kbd> / <kbd>↑</kbd> : 前進・加速</div>
+            <div><kbd>S</kbd> / <kbd>↓</kbd> : ブレーキ・後退</div>
+            <div><kbd>A</kbd> / <kbd>D</kbd> or <kbd>←</kbd> / <kbd>→</kbd> : ステアリング操舵</div>
+            <div><kbd>Space</kbd> : ハンドブレーキ | <kbd>R</kbd> : 車両リセット</div>
+            <div><kbd>C</kbd> : 視点切り替え | <kbd>X</kbd> : ワイパー切替 | <kbd>B</kbd> : モーションブラー</div>
+          </div>
         </div>
 
         <div class="speedometer-box">

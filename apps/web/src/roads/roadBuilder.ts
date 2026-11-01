@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type RAPIER from "@dimforge/rapier3d-compat";
 import { JapaneseRoadMaterial } from "./japaneseRoadMaterial";
+import { PuddleMaterial } from "../shaders/puddleShader";
 import { RoadMarkings } from "./roadMarkings";
 import { RoadProps } from "./roadProps";
 import type { JapaneseRoadSegmentConfig } from "./types";
@@ -10,12 +11,14 @@ import type { JapaneseRoadSegmentConfig } from "./types";
  * 【コア仕様】
  * - ビジュアル：
  *   - アスファルト骨材、クラック（ひび割れ）、補修パッチワーク、マンホール段差によるリアルな「凸凹」
+ *   - 車道（JapaneseRoadMaterial）と歩道（PuddleMaterial）の双方に物理ベース水たまり・波紋・平面鏡面反射を適用
  * - 物理コライダー：
  *   - 車道面は完全に「平ら（Flat）」な Rapier コライダーで構成し、
  *     高速走行時のスナッギング（引っかかり）や異常振動を完全に防止
  */
 export class JapaneseRoadBuilder {
   private roadMaterials: JapaneseRoadMaterial[] = [];
+  private puddleMaterials: PuddleMaterial[] = [];
   private markings: RoadMarkings;
   private props: RoadProps;
 
@@ -30,7 +33,11 @@ export class JapaneseRoadBuilder {
     rapier: typeof RAPIER,
     position: THREE.Vector3,
     rotationY = 0,
-  ): { group: THREE.Group; materials: JapaneseRoadMaterial[] } {
+  ): {
+    group: THREE.Group;
+    materials: JapaneseRoadMaterial[];
+    puddleMaterials: PuddleMaterial[];
+  } {
     const group = new THREE.Group();
     group.position.copy(position);
     group.rotation.y = rotationY;
@@ -40,7 +47,7 @@ export class JapaneseRoadBuilder {
     const totalRoadWidth = roadwayWidth + config.shoulderWidth * 2;
     const halfRoadWidth = totalRoadWidth / 2;
 
-    // 1. ビジュアル車道アスファルト（凸凹シェーダー適用）
+    // 1. ビジュアル車道アスファルト（凸凹＆水たまり鏡面シェーダー適用）
     const roadMat = new JapaneseRoadMaterial({ baseRoughness: 0.85, baseMetalness: 0.12 });
     this.roadMaterials.push(roadMat);
 
@@ -67,7 +74,7 @@ export class JapaneseRoadBuilder {
     // 3. 縁石（マウントアップコンクリートブロック）
     this.buildCurbs(group, config, halfRoadWidth);
 
-    // 4. 歩道（インターロッキングブロック舗装）
+    // 4. 歩道（インターロッキングブロック舗装 + 水たまりシェーダー）
     this.buildSidewalks(group, config, halfRoadWidth, world, rapier, roadBody);
 
     // 5. 道路標示（黄色中央線、白破線、路肩線、横断歩道）
@@ -76,7 +83,11 @@ export class JapaneseRoadBuilder {
     // 6. プロップ（マンホール、グレーチング、ガードレール、信号機、標識）
     this.buildProps(group, config, halfRoadWidth);
 
-    return { group, materials: this.roadMaterials };
+    return {
+      group,
+      materials: this.roadMaterials,
+      puddleMaterials: this.puddleMaterials,
+    };
   }
 
   private buildCurbs(
@@ -116,11 +127,13 @@ export class JapaneseRoadBuilder {
     rapier: typeof RAPIER,
     roadBody: RAPIER.RigidBody,
   ): void {
-    const sidewalkMat = new THREE.MeshStandardMaterial({
-      color: 0xc4b5fd, // インターロッキングブロック（淡いテラコッタ/グレー調）
-      roughness: 0.75,
-      metalness: 0.05,
+    const sidewalkMat = new PuddleMaterial({
+      baseColor: 0x94a3b8, // 丸の内御影石・インターロッキングブロック調
+      baseRoughness: 0.76,
+      baseMetalness: 0.08,
+      puddleThreshold: 0.46,
     });
+    this.puddleMaterials.push(sidewalkMat);
 
     const swGeo = new THREE.BoxGeometry(config.sidewalkWidth, config.curbHeight, config.length);
 
@@ -193,15 +206,76 @@ export class JapaneseRoadBuilder {
     );
     group.add(shoulderLines);
 
-    // 4. 横断歩道
+    // 4. 横断歩道 ＋ 予告ダイヤマーク（◇）＋ 路面進行方向矢印 ＋ 路面速度制限ペイント
     const hasCrosswalks = config.hasCrosswalks;
+    const crossZ = config.length * 0.25;
     if (hasCrosswalks) {
       // セグメント中央手前に横断歩道を配置
       const crosswalk = this.markings.createCrosswalk(
         halfRoadWidth * 2 - config.shoulderWidth * 2,
-        config.length * 0.25,
+        crossZ,
       );
       group.add(crosswalk);
+
+      // 横断歩道手前 22m & 38m に「横断歩道又は自転車横断帯あり」ダイヤマーク（◇）を配置
+      const leftLaneCenter = -config.laneWidth * 0.5;
+      const rightLaneCenter = config.laneWidth * 0.5;
+      for (const offsetZ of [-22.0, -38.0]) {
+        const diamondLeft = this.markings.createCrosswalkDiamondMarking(
+          leftLaneCenter,
+          crossZ + offsetZ,
+        );
+        group.add(diamondLeft);
+
+        const diamondRight = this.markings.createCrosswalkDiamondMarking(
+          rightLaneCenter,
+          crossZ - offsetZ,
+        );
+        group.add(diamondRight);
+      }
+    }
+
+    // 5. 車線進行方向矢印（直進・左折・右折）と路面速度ペイント（40 / 50）
+    const speedVal = config.speedLimitSign ?? 50;
+    const arrowZ = crossZ - 12.0;
+    const isMultiLaneRoad = config.lanesPerDirection >= 2;
+    if (isMultiLaneRoad) {
+      // 左側通行・第1車線（左端）：直進＋左折、第2車線（中央寄り）：直進または右折
+      const outerLeftX = -config.laneWidth * 1.5;
+      const innerLeftX = -config.laneWidth * 0.5;
+      group.add(this.markings.createLaneArrowMarking(outerLeftX, arrowZ, "straight-left", 0));
+      group.add(this.markings.createLaneArrowMarking(innerLeftX, arrowZ, "straight", 0));
+
+      // 対向車線
+      const innerRightX = config.laneWidth * 0.5;
+      const outerRightX = config.laneWidth * 1.5;
+      group.add(this.markings.createLaneArrowMarking(innerRightX, crossZ + 12.0, "right", Math.PI));
+      group.add(
+        this.markings.createLaneArrowMarking(outerRightX, crossZ + 12.0, "straight-left", Math.PI),
+      );
+
+      // 路面最高速度標示
+      group.add(
+        this.markings.createSpeedLimitRoadMarking(innerLeftX, -config.length * 0.18, speedVal, 0),
+      );
+      group.add(
+        this.markings.createSpeedLimitRoadMarking(
+          innerRightX,
+          config.length * 0.05,
+          speedVal,
+          Math.PI,
+        ),
+      );
+
+      // 交差点手前の中央導流帯（ゼブラゾーン）
+      const zebra = this.markings.createZebraZoneMarking(0.9, 14.0, crossZ - 14.0);
+      group.add(zebra);
+    } else {
+      const laneX = -config.laneWidth * 0.5;
+      group.add(this.markings.createLaneArrowMarking(laneX, arrowZ, "straight-left", 0));
+      group.add(
+        this.markings.createSpeedLimitRoadMarking(laneX, -config.length * 0.15, speedVal, 0),
+      );
     }
   }
 
@@ -291,12 +365,47 @@ export class JapaneseRoadBuilder {
       );
       group.add(streetSign);
     }
+
+    // 駐車禁止標識（316）＋ 補助標識「終日」を両側歩道に定期配置
+    const noParkingLeft = this.props.signs.createNoParkingSign(
+      -halfRoadWidth - 1.15,
+      -config.length * 0.12,
+      false,
+      "終日",
+    );
+    group.add(noParkingLeft);
+
+    const noParkingRight = this.props.signs.createNoParkingSign(
+      halfRoadWidth + 1.15,
+      config.length * 0.08,
+      true,
+      "ここまで",
+    );
+    noParkingRight.rotation.y = Math.PI;
+    group.add(noParkingRight);
+
+    // 交差点手前の「進行方向別通行区分」標識（327の7）とデリネーター（視線誘導標）
+    const isMajorMultiLane = config.lanesPerDirection >= 2;
+    if (isMajorMultiLane) {
+      const laneDirSign = this.props.signs.createLaneDirectionSign(
+        -halfRoadWidth - 1.35,
+        config.length * 0.25 - 24.0,
+      );
+      group.add(laneDirSign);
+
+      const delinNorth = this.props.signs.createDelineatorPost(0, config.length * 0.25 - 6.5);
+      group.add(delinNorth);
+    }
   }
 
   public updateRainWetness(wetness: number, time: number): void {
     for (let i = 0; i < this.roadMaterials.length; i++) {
       this.roadMaterials[i].uRainWetness.value = wetness;
       this.roadMaterials[i].uTime.value = time;
+    }
+    for (let i = 0; i < this.puddleMaterials.length; i++) {
+      this.puddleMaterials[i].uRainWetness.value = wetness;
+      this.puddleMaterials[i].uTime.value = time;
     }
   }
 }

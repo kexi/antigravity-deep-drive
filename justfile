@@ -60,10 +60,19 @@ verify-all:
 model-assets:
     /Applications/Blender.app/Contents/MacOS/Blender --background --python blender/scripts/generate_vehicle_model.py
     /Applications/Blender.app/Contents/MacOS/Blender --background --python blender/scripts/generate_tokyo_station.py
+    /Applications/Blender.app/Contents/MacOS/Blender --background --python blender/scripts/generate_street_tree.py
+
+# 行幸通りイチョウ街路樹3DモデルをBlenderでプロシージャル生成してGLB形式でエクスポートする
+generate-tree:
+    /Applications/Blender.app/Contents/MacOS/Blender --background --python blender/scripts/generate_street_tree.py
 
 # 3DテクスチャPBRマテリアルをBlenderで生成する
 generate-textures:
     /Applications/Blender.app/Contents/MacOS/Blender --background --python blender/scripts/generate_3d_pbr_textures.py
+
+# Blender公式MCPサーバーをバックグラウンドソケット待受モードで起動する
+start-blender-mcp:
+    /Applications/Blender.app/Contents/MacOS/Blender --background --online-mode --command blender_mcp --port 9876
 
 # ビルド成果物とキャッシュを削除する
 clean-cache:
@@ -72,6 +81,10 @@ clean-cache:
 # tsdownを使用してビルド済みJSアセットをminifyする
 minify-assets:
     pnpm --filter web run minify
+
+# 東京都PLATEAUおよび国土地理院のオープンデータを取得して都市データバンドルを生成する
+fetch-open-data:
+    pnpm --filter web run fetch-open-data
 
 # GitHub Pagesデプロイワークフローを起動する
 deploy-pages:
