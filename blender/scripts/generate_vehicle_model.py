@@ -1656,8 +1656,10 @@ def build_chassis(materials) -> bpy.types.Object:
                 f.material_index = 0 if avg_z >= pivot.z - 0.006 else 1
                 f.smooth = False
 
-        # 前端キャップを閉じる
-        f_cap = bm.faces.new(list(reversed(ring_front)))
+        # 前端キャップを閉じる（外向き法線: 車両前方 -Y）
+        # Why not list(reversed(ring_front)):
+        # ring_front 頂点順序はリング外周向きに定義されているため、reversed すると法線が内向き (+Y) に反転してしまう。
+        f_cap = bm.faces.new(ring_front)
         f_cap.material_index = 0
         f_cap.smooth = False
 
@@ -1675,8 +1677,10 @@ def build_chassis(materials) -> bpy.types.Object:
             f_rim.material_index = 1
             f_rim.smooth = False
 
-        # インナーバイザー奥の背面プレート
-        f_back = bm.faces.new(ring_rear_inner)
+        # インナーバイザー奥の背面プレート（外向き法線: 車両後方 +Y）
+        # Why not ring_rear_inner:
+        # 凹み内側から後方を向く背面プレートは、外周ループと逆向きにすることで法線が車両後方 (+Y) を向く。
+        f_back = bm.faces.new(list(reversed(ring_rear_inner)))
         f_back.material_index = 1
         f_back.smooth = False
 
@@ -3381,10 +3385,14 @@ def build_side_mirror_glasses(materials, parent_root: bpy.types.Object):
         f_glass.material_index = 0
         f_glass.smooth = False
         # 法線が必ず車両後方 (+Y) かつ車体内側を向くように揃える
+        # Why not bm.normal_update() を呼ばずに f_glass.normal.y < 0 を判定しないか:
+        # BMesh では bm.faces.new() 直後は f_glass.normal が (0,0,0) の初期値であり、
+        # 事前に bm.normal_update() を呼ばないと判定が常に false となって左ミラー法線が前方 (-Y / Three.js +Z) を向いたまま
+        # Three.js 側で裏面カリング (Backface Culling) により完全不可視になってしまうため。
+        bm.normal_update()
         if f_glass.normal.y < 0:
             f_glass.normal_flip()
-
-        bm.normal_update()
+            bm.normal_update()
         bm.to_mesh(mesh)
         bm.free()
 

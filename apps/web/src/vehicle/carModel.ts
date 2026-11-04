@@ -445,6 +445,10 @@ export class CarModel {
               mirrorMesh.material = this.rearviewMirrorMaterial;
               child.castShadow = false;
               child.receiveShadow = false;
+              child.visible = true;
+              if (mirrorMesh.geometry) {
+                mirrorMesh.geometry.computeVertexNormals();
+              }
               return;
             }
 
@@ -454,6 +458,10 @@ export class CarModel {
               mirrorMesh.material = this.sideMirrorRightMaterial;
               child.castShadow = false;
               child.receiveShadow = false;
+              child.visible = true;
+              if (mirrorMesh.geometry) {
+                mirrorMesh.geometry.computeVertexNormals();
+              }
               return;
             }
 
@@ -463,6 +471,10 @@ export class CarModel {
               mirrorMesh.material = this.sideMirrorLeftMaterial;
               child.castShadow = false;
               child.receiveShadow = false;
+              child.visible = true;
+              if (mirrorMesh.geometry) {
+                mirrorMesh.geometry.computeVertexNormals();
+              }
               return;
             }
 
@@ -4009,7 +4021,11 @@ export class CarModel {
     uvOffset: THREE.Vector2,
     tintColor: THREE.Color,
   ): THREE.ShaderMaterial {
+    // Why side: THREE.DoubleSide を指定するか:
+    // 鏡面メッシュの法線や頂点インデックスの巻き順の差異に関わらず、
+    // 運転席から見たときに裏面カリング (Backface Culling) で反射面が不可視になる事故を確実に防止するため。
     return new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
       uniforms: {
         tMirror: { value: mirrorTexture },
         uUvScale: { value: uvScale },

@@ -1684,6 +1684,16 @@ async function bootstrap() {
     forceEvictChunk: (chunkId: WorldChunkId) => streamingSystem.forceEvictChunk(chunkId),
   };
 
+  // デバッグ・自動検証用に主要コンポーネントを window へ公開
+  (window as unknown as { __DEEP_DRIVE_DEV__?: unknown }).__DEEP_DRIVE_DEV__ = {
+    carModel,
+    cameraController,
+    vehiclePhysics,
+    weatherSystem,
+    scene,
+    renderer,
+  };
+
   logger.info(
     "bootstrap",
     "bootstrap.ready",
@@ -1918,15 +1928,29 @@ async function bootstrap() {
     weatherSystem.updateSky(currentTime * 0.001, cameraController.camera.position);
 
     // 5.2 車内ルームミラー（バックミラー）& 左右ドアミラー（サイドミラー）のリアルタイム後方反射描画
-    // Why 運転席視点 (cockpit) かつタイトル画面解除後・フレームレート余裕時のみ更新するか:
-    // 追従視点 (chase) やタイトルオーバーレイ表示中、あるいはフレーム時間が 26ms を超える高負荷時には
-    // シーン全体の2パス目オフスクリーン描画をスキップして 30fps (33.3ms/frame) を確実に維持するため。
+    // Why ミラー注視時(force=true)の即時更新と、通常運転時・高負荷時の階層化更新を行うか:
+    // 従来の smoothedFrameMs <= 26.0 (38.5fps必須) 判定では 30〜35fps 時にミラー更新がゼロFPSで完全凍結してしまっていた。
+    // ドライバーがミラーを直視している時は最優先で毎フレーム更新し、通常運転時も品質プリセットの間隔で更新、
+    // 超高負荷時 (40ms超) でも最低 4フレームに 1回は更新を保証することで「遅い・止まる」違和感を根絶する。
     const isCockpitCamera = cameraController.mode === "cockpit";
-    const hasMirrorFrameBudget =
-      isTitleScreenDismissed && rawFrameMs <= 28.0 && smoothedFrameMs <= 26.0;
-    const shouldUpdateCarMirrors = isCockpitCamera && hasMirrorFrameBudget;
-    if (shouldUpdateCarMirrors) {
-      carModel.updateMirrors(renderer, scene);
+    if (isCockpitCamera && isTitleScreenDismissed) {
+      const gazeState = cameraController.getGazeState();
+      const isLookingAtMirror =
+        gazeState.preset === "rearview_mirror" ||
+        gazeState.preset === "left_mirror" ||
+        gazeState.preset === "right_mirror";
+
+      if (isLookingAtMirror) {
+        carModel.updateMirrors(renderer, scene, true);
+      } else {
+        const isUnderSevereLoad = rawFrameMs > 42.0 && smoothedFrameMs > 38.0;
+        const shouldUpdateNormalCadence = !isUnderSevereLoad;
+        const shouldUpdateFallbackCadence = isUnderSevereLoad && frameCounter % 4 === 0;
+        const shouldUpdateMirrors = shouldUpdateNormalCadence || shouldUpdateFallbackCadence;
+        if (shouldUpdateMirrors) {
+          carModel.updateMirrors(renderer, scene, false);
+        }
+      }
     }
 
     // 5.3 シャドウマップは8フレームに1回（かつフレーム予算に余裕がある時のみ）更新し GPU シャドウパス負荷を削減

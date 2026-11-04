@@ -11,7 +11,10 @@ interface GazePresetSpec {
 export const GAZE_PRESET_SPECS: Record<Exclude<GazePreset, "free">, GazePresetSpec> = {
   forward: { yawDeg: 0, pitchDeg: 0, label: "正面" },
   right_mirror: { yawDeg: -30, pitchDeg: -8, label: "右ミラー" },
-  left_mirror: { yawDeg: 47, pitchDeg: -6, label: "左ミラー" },
+  // Why yawDeg: 54 を採用するか（47度ではない理由）:
+  // 右ハンドル運転席 (x = -0.38m, y = 1.13m, z = 0.06m) から左ドアミラー鏡面中心 (x = 0.915m, y = 0.965m, z = 0.873m) への
+  // 実幾何ベクトル方向は水平約 55.2度であり、47度では左ミラーが視界左端に偏ってしまうため、54度でビューポート中央に捉える。
+  left_mirror: { yawDeg: 54, pitchDeg: -6, label: "左ミラー" },
   rearview_mirror: { yawDeg: 26, pitchDeg: 8, label: "ルームミラー" },
   dashboard: { yawDeg: 18, pitchDeg: -15, label: "計器・ナビ" },
   right_shoulder: { yawDeg: -95, pitchDeg: -4, label: "右目視" },

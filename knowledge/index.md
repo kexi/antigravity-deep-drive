@@ -44,6 +44,7 @@ trust_signals:
 - [029-mm-precision-car-and-non-overlapping-lane-system.md](./029-mm-precision-car-and-non-overlapping-lane-system.md): ミリ単位（1mm = 0.001m）車両3Dモデリングと非重複車線・横断歩道レンダリングシステム
 - [030-distance-lod-model-optimization.md](./030-distance-lod-model-optimization.md): 遠方3Dモデルの距離ベース多段階LOD（Level of Detail）軽量化アーキテクチャ
 - [031-cockpit-depth-masked-motion-blur-and-road-props.md](./031-cockpit-depth-masked-motion-blur-and-road-props.md): 深度バッファマスクによる車内インテリア除外モーションブラーと日本の道路交通法準拠プロップ改修
+- [032-cockpit-mirrors-backface-culling-and-frame-cadence.md](./032-cockpit-mirrors-backface-culling-and-frame-cadence.md): 車内ルームミラー・左右ドアミラーの描画バジェット階層化と BMesh 法線カリング防止設計
 
 
 
