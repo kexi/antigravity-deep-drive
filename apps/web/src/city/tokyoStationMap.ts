@@ -115,6 +115,9 @@ export class TokyoStationMap {
   private sharedGinkgoCanopyGeometry: THREE.BufferGeometry;
   private streetLampCounter = 0;
   private isNightActive = false;
+  private sharedArchUniforms = {
+    uNightModeFactor: { value: 0.0 },
+  };
   private shibuyaStreamEmissiveEntries: Array<{
     material: THREE.MeshStandardMaterial;
     dayIntensity: number;
@@ -958,7 +961,10 @@ export class TokyoStationMap {
       | "copper_patina"
       | "curtain_glass"
       | "anodized_metal"
-      | "cast_iron",
+      | "cast_iron"
+      | "stone_punched"
+      | "ribbon_window"
+      | "retail_storefront",
   ): void {
     const isAlreadyApplied = Boolean(mat.userData?.hasArch3DVolumeShader);
     if (isAlreadyApplied) {
@@ -968,6 +974,7 @@ export class TokyoStationMap {
       ...mat.userData,
       hasArch3DVolumeShader: true,
       arch3DMode: mode,
+      arch3DVolumeChannel: mode,
     };
 
     const archVolumeTex = Procedural3DTextureGenerator.getSharedArchitecture3DTexture();
@@ -979,6 +986,9 @@ export class TokyoStationMap {
     const isCopperPatina = mode === "copper_patina";
     const isCurtainGlass = mode === "curtain_glass";
     const isAnodizedMetal = mode === "anodized_metal";
+    const isStonePunched = mode === "stone_punched";
+    const isRibbonWindow = mode === "ribbon_window";
+    const isRetailStorefront = mode === "retail_storefront";
 
     let modeCode = 6; // "cast_iron"
     if (isRedBrick) {
@@ -993,21 +1003,30 @@ export class TokyoStationMap {
       modeCode = 4;
     } else if (isAnodizedMetal) {
       modeCode = 5;
+    } else if (isStonePunched) {
+      modeCode = 7;
+    } else if (isRibbonWindow) {
+      modeCode = 8;
+    } else if (isRetailStorefront) {
+      modeCode = 9;
     }
 
     // Why 単一のシェーダープログラムと uniform int uArchSurfaceMode 分岐を使うか:
-    // モードごとに異なる GLSL 文字列をコンパイルすると、Three.js の複雑な PBR シェーダーが7種類別々にリンクされ、
+    // モードごとに異なる GLSL 文字列をコンパイルすると、Three.js の複雑な PBR シェーダーが10種類別々にリンクされ、
     // ANGLE Metal バックエンドでのシェーダーコンパイル時間およびコマンドバッファ切り替え負荷が増大するため。
-    mat.customProgramCacheKey = () => "arch_3d_tex_unified_v2";
+    mat.customProgramCacheKey = () => "arch_3d_tex_unified_v3";
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uArchVolumeTex = { value: archVolumeTex };
       shader.uniforms.uPropVolumeTex = { value: propVolumeTex };
       shader.uniforms.uArchSurfaceMode = { value: modeCode };
+      shader.uniforms.uNightModeFactor = this.sharedArchUniforms.uNightModeFactor;
+
       shader.vertexShader = shader.vertexShader.replace(
         "#include <common>",
         /* glsl */ `
         #include <common>
         varying vec3 vArchWorldPos;
+        varying vec3 vArchNormal;
         `,
       );
       shader.vertexShader = shader.vertexShader.replace(
@@ -1015,6 +1034,7 @@ export class TokyoStationMap {
         /* glsl */ `
         #include <worldpos_vertex>
         vArchWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vArchNormal = normalize(mat3(modelMatrix) * normal);
         `,
       );
 
@@ -1025,7 +1045,9 @@ export class TokyoStationMap {
         uniform sampler3D uArchVolumeTex;
         uniform sampler3D uPropVolumeTex;
         uniform int uArchSurfaceMode;
+        uniform float uNightModeFactor;
         varying vec3 vArchWorldPos;
+        varying vec3 vArchNormal;
         `,
       );
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -1036,42 +1058,217 @@ export class TokyoStationMap {
         vec4 archVolMacro = vec4(0.5);
         vec4 archVolMicro = vec4(0.5);
         vec4 propVolSample = vec4(0.5);
-        if (archViewDist < 48.0) {
+
+        // 3D ボリュームテクスチャ（近〜中距離サンプリング）
+        if (archViewDist < 72.0) {
           archVolMacro = texture(uArchVolumeTex, vArchWorldPos * 0.22);
-          if (archViewDist < 26.0) {
+          if (archViewDist < 30.0) {
             archVolMicro = texture(uArchVolumeTex, vArchWorldPos * 0.65);
             propVolSample = texture(uPropVolumeTex, vArchWorldPos * 0.48);
           } else {
             archVolMicro = archVolMacro;
             propVolSample = archVolMacro;
           }
-          if (uArchSurfaceMode == 0) {
-            float clayGrain = mix(archVolMacro.r, archVolMicro.r, 0.45);
-            float mortarJoint = smoothstep(0.62, 0.88, archVolMacro.g);
-            vec3 brickTone = diffuseColor.rgb * mix(0.82, 1.16, clayGrain) * mix(0.88, 1.04, archVolMacro.b);
-            vec3 mortarColor = vec3(0.76, 0.73, 0.69);
-            diffuseColor.rgb = mix(brickTone, mortarColor, mortarJoint * 0.28) * mix(0.90, 1.05, archVolMicro.a);
-          } else if (uArchSurfaceMode == 1) {
-            float biotiteCrystal = mix(archVolMacro.r, archVolMicro.r, 0.52);
-            float stoneJoint = smoothstep(0.66, 0.90, archVolMacro.g);
-            diffuseColor.rgb *= mix(0.86, 1.12, biotiteCrystal) * (1.0 - stoneJoint * 0.14) * mix(0.92, 1.04, archVolMacro.b);
-          } else if (uArchSurfaceMode == 2) {
-            float megalithJoint = smoothstep(0.55, 0.85, archVolMacro.g);
-            vec3 stoneShade = diffuseColor.rgb * mix(0.78, 1.15, archVolMicro.r) * (1.0 - megalithJoint * 0.26);
-            vec3 dampMossTint = vec3(0.22, 0.29, 0.24);
-            diffuseColor.rgb = mix(stoneShade, dampMossTint, smoothstep(0.58, 0.86, archVolMacro.b) * 0.32);
-          } else if (uArchSurfaceMode == 3) {
-            vec3 verdigrisTint = vec3(0.11, 0.52, 0.46);
-            vec3 agedBronzeTint = diffuseColor.rgb * mix(0.84, 1.16, archVolMacro.r * 0.6 + propVolSample.b * 0.4);
-            diffuseColor.rgb = mix(agedBronzeTint, verdigrisTint, smoothstep(0.42, 0.78, archVolMacro.b) * 0.35);
-          } else if (uArchSurfaceMode == 4) {
+        }
+
+        // 壁面幾何グリッド座標（Screen-space anti-aliased procedural facade）
+        vec3 absArchNorm = abs(vArchNormal);
+        bool isFacadeWall = absArchNorm.y < 0.68;
+        float facadeU = (absArchNorm.x > absArchNorm.z) ? vArchWorldPos.z : vArchWorldPos.x;
+        float facadeV = vArchWorldPos.y;
+        float dWallU = max(fwidth(facadeU) * 1.5, 0.002);
+        float dWallV = max(fwidth(facadeV) * 1.5, 0.002);
+
+        if (uArchSurfaceMode == 0) {
+          // 赤レンガ・テラコッタ（東京駅丸の内駅舎・東京海上日動ビルなど）
+          float clayGrain = mix(archVolMacro.r, archVolMicro.r, 0.45);
+          float mortarJoint = smoothstep(0.62, 0.88, archVolMacro.g);
+          if (archViewDist < 60.0 && isFacadeWall) {
+            float brickH = 0.075;
+            float brickL = 0.225;
+            float rowIdx = floor(facadeV / brickH);
+            float uShift = mod(rowIdx, 2.0) * (brickL * 0.5);
+            float uInBrick = mod(facadeU + uShift, brickL);
+            float vInBrick = mod(facadeV, brickH);
+            float edgeH = 1.0 - smoothstep(0.012 - dWallV, 0.012 + dWallV, vInBrick);
+            float edgeV = 1.0 - smoothstep(0.012 - dWallU, 0.012 + dWallU, uInBrick);
+            mortarJoint = max(mortarJoint, max(edgeH, edgeV) * 0.72);
+          }
+          vec3 brickTone = diffuseColor.rgb * mix(0.82, 1.16, clayGrain) * mix(0.88, 1.04, archVolMacro.b);
+          vec3 mortarColor = vec3(0.76, 0.73, 0.69);
+          diffuseColor.rgb = mix(brickTone, mortarColor, mortarJoint * 0.32) * mix(0.90, 1.05, archVolMicro.a);
+        } else if (uArchSurfaceMode == 1) {
+          // 白御影石・ポディウム石張りパネル
+          float biotiteCrystal = mix(archVolMacro.r, archVolMicro.r, 0.52);
+          float panelJoint = 0.0;
+          if (archViewDist < 180.0 && isFacadeWall) {
+            float panelW = 1.2;
+            float panelH = 0.9;
+            float pRow = floor(facadeV / panelH);
+            float pShift = mod(pRow, 2.0) * (panelW * 0.5);
+            float uInPanel = mod(facadeU + pShift, panelW);
+            float vInPanel = mod(facadeV, panelH);
+            float edgeH = 1.0 - smoothstep(0.022 - dWallV, 0.022 + dWallV, vInPanel);
+            float edgeV = 1.0 - smoothstep(0.022 - dWallU, 0.022 + dWallU, uInPanel);
+            panelJoint = max(edgeH, edgeV) * (1.0 - smoothstep(120.0, 180.0, archViewDist));
+          }
+          float stoneJoint = max(smoothstep(0.66, 0.90, archVolMacro.g), panelJoint * 0.6);
+          diffuseColor.rgb *= mix(0.86, 1.12, biotiteCrystal) * (1.0 - stoneJoint * 0.22) * mix(0.92, 1.04, archVolMacro.b);
+        } else if (uArchSurfaceMode == 2) {
+          // 皇居石垣・巨石
+          float megalithJoint = smoothstep(0.55, 0.85, archVolMacro.g);
+          vec3 stoneShade = diffuseColor.rgb * mix(0.78, 1.15, archVolMicro.r) * (1.0 - megalithJoint * 0.26);
+          vec3 dampMossTint = vec3(0.22, 0.29, 0.24);
+          diffuseColor.rgb = mix(stoneShade, dampMossTint, smoothstep(0.58, 0.86, archVolMacro.b) * 0.32);
+        } else if (uArchSurfaceMode == 3) {
+          // 緑青銅板屋根
+          vec3 verdigrisTint = vec3(0.11, 0.52, 0.46);
+          vec3 agedBronzeTint = diffuseColor.rgb * mix(0.84, 1.16, archVolMacro.r * 0.6 + propVolSample.b * 0.4);
+          diffuseColor.rgb = mix(agedBronzeTint, verdigrisTint, smoothstep(0.42, 0.78, archVolMacro.b) * 0.35);
+        } else if (uArchSurfaceMode == 4) {
+          // 全面ガラスカーテンウォール高層タワー（Low-E ガラス ＋ 垂直アルミマリオン ＋ 水平スパンドレル）
+          if (isFacadeWall && archViewDist < 360.0) {
+            float floorH = 3.8;
+            float bayW = 1.8;
+            float spandrelH = 1.05;
+            float mullionW = 0.18;
+
+            float vInFloor = mod(facadeV, floorH);
+            float uInBay = mod(facadeU, bayW);
+
+            float isSpandrel = 1.0 - smoothstep(spandrelH - dWallV, spandrelH + dWallV, vInFloor);
+            float isMullion = 1.0 - smoothstep(mullionW - dWallU, mullionW + dWallU, uInBay);
+            float isGlass = (1.0 - isSpandrel) * (1.0 - isMullion);
+
+            float topShadow = mix(0.84, 1.06, smoothstep(spandrelH, floorH, vInFloor));
+            vec3 glassColor = diffuseColor.rgb * topShadow;
+            vec3 spandrelColor = diffuseColor.rgb * 0.68;
+            vec3 mullionColor = mix(diffuseColor.rgb, vec3(0.85, 0.88, 0.92), 0.55);
+
+            diffuseColor.rgb = mix(spandrelColor, glassColor, isGlass);
+            diffuseColor.rgb = mix(diffuseColor.rgb, mullionColor, isMullion * 0.85);
+            diffuseColor.rgb *= mix(0.92, 1.08, archVolMacro.r);
+          } else {
             float floorDepthMod = mix(0.88, 1.14, archVolMacro.r * 0.6 + archVolMacro.b * 0.4);
             float coatingShimmer = mix(0.94, 1.08, propVolSample.r);
             diffuseColor.rgb *= floorDepthMod * coatingShimmer;
-          } else if (uArchSurfaceMode == 5) {
-            diffuseColor.rgb *= mix(0.88, 1.14, propVolSample.b) * mix(0.92, 1.05, archVolMacro.b);
+          }
+        } else if (uArchSurfaceMode == 5) {
+          // アルミマリオン・ルーバー
+          diffuseColor.rgb *= mix(0.88, 1.14, propVolSample.b) * mix(0.92, 1.05, archVolMacro.b);
+        } else if (uArchSurfaceMode == 6) {
+          // 鋳鉄・ダークフレーム
+          diffuseColor.rgb *= mix(0.84, 1.16, propVolSample.a * 0.65 + propVolSample.b * 0.35) * mix(0.90, 1.06, archVolMacro.b);
+        } else if (uArchSurfaceMode == 7) {
+          // 石張り連窓ファサード（丸の内ポストモダン・重厚な石造柱梁 ＋ 縦長窓）
+          if (isFacadeWall && archViewDist < 360.0) {
+            float floorH = 3.9;
+            float bayW = 2.4;
+            float spandrelH = 1.45;
+            float pillarW = 0.65;
+
+            float vInFloor = mod(facadeV, floorH);
+            float uInBay = mod(facadeU, bayW);
+
+            float isSpandrel = 1.0 - smoothstep(spandrelH - dWallV, spandrelH + dWallV, vInFloor);
+            float isPillar = 1.0 - smoothstep(pillarW - dWallU, pillarW + dWallU, uInBay);
+            float isGlass = (1.0 - isSpandrel) * (1.0 - isPillar);
+
+            float biotiteCrystal = mix(archVolMacro.r, archVolMicro.r, 0.45);
+            vec3 stoneColor = diffuseColor.rgb * mix(0.88, 1.12, biotiteCrystal);
+            vec3 windowDark = diffuseColor.rgb * 0.32;
+            diffuseColor.rgb = mix(stoneColor, windowDark, isGlass * 0.78);
           } else {
-            diffuseColor.rgb *= mix(0.84, 1.16, propVolSample.a * 0.65 + propVolSample.b * 0.35) * mix(0.90, 1.06, archVolMacro.b);
+            diffuseColor.rgb *= mix(0.86, 1.12, archVolMacro.r);
+          }
+        } else if (uArchSurfaceMode == 8) {
+          // 水平リボン連窓ファサード（中層オフィス・帯状ガラス窓 ＋ メタル/コンクリートスパンドレル）
+          if (isFacadeWall && archViewDist < 360.0) {
+            float floorH = 3.6;
+            float spandrelH = 1.55;
+            float vInFloor = mod(facadeV, floorH);
+            float isSpandrel = 1.0 - smoothstep(spandrelH - dWallV, spandrelH + dWallV, vInFloor);
+            float isGlass = 1.0 - isSpandrel;
+
+            vec3 spandrelColor = diffuseColor.rgb * mix(0.92, 1.06, archVolMacro.b);
+            vec3 glassColor = diffuseColor.rgb * 0.50 * mix(0.84, 1.08, smoothstep(spandrelH, floorH, vInFloor));
+
+            float bayW = 1.6;
+            float mullionW = 0.12;
+            float uInBay = mod(facadeU, bayW);
+            float isMullion = 1.0 - smoothstep(mullionW - dWallU, mullionW + dWallU, uInBay);
+
+            diffuseColor.rgb = mix(spandrelColor, glassColor, isGlass);
+            diffuseColor.rgb = mix(diffuseColor.rgb, spandrelColor * 1.15, isGlass * isMullion * 0.65);
+          } else {
+            diffuseColor.rgb *= mix(0.90, 1.10, archVolMacro.r);
+          }
+        } else if (uArchSurfaceMode == 9) {
+          // 1F〜2F路面店舗・ショーウィンドウ・ロビーガラス
+          if (isFacadeWall && archViewDist < 250.0) {
+            float bayW = 3.6;
+            float uInBay = mod(facadeU, bayW);
+            float columnW = 0.45;
+            float isColumn = 1.0 - smoothstep(columnW - dWallU, columnW + dWallU, uInBay);
+
+            float vStore = mod(facadeV, 7.0);
+            float baseH = 0.4;
+            float transomH = 1.2;
+            float isBase = 1.0 - smoothstep(baseH - dWallV, baseH + dWallV, vStore);
+            float isTransom = smoothstep(7.0 - transomH - dWallV, 7.0 - transomH + dWallV, vStore);
+            float isGlass = (1.0 - isBase) * (1.0 - isTransom) * (1.0 - isColumn);
+
+            vec3 frameColor = diffuseColor.rgb * 0.72;
+            vec3 glassDisplay = diffuseColor.rgb * 1.18;
+            diffuseColor.rgb = mix(frameColor, glassDisplay, isGlass * 0.85);
+          } else {
+            diffuseColor.rgb *= 1.08;
+          }
+        }
+        `,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <emissivemap_fragment>",
+        /* glsl */ `
+        #include <emissivemap_fragment>
+        if (uNightModeFactor > 0.01 && isFacadeWall && archViewDist < 360.0) {
+          bool hasWindows = (uArchSurfaceMode == 4 || uArchSurfaceMode == 7 || uArchSurfaceMode == 8 || uArchSurfaceMode == 9);
+          if (hasWindows) {
+            float floorH = (uArchSurfaceMode == 8) ? 3.6 : (uArchSurfaceMode == 7 ? 3.9 : (uArchSurfaceMode == 9 ? 7.0 : 3.8));
+            float bayW = (uArchSurfaceMode == 8) ? 1.6 : (uArchSurfaceMode == 7 ? 2.4 : (uArchSurfaceMode == 9 ? 3.6 : 1.8));
+            float spandrelH = (uArchSurfaceMode == 8) ? 1.55 : (uArchSurfaceMode == 7 ? 1.45 : (uArchSurfaceMode == 9 ? 0.4 : 1.05));
+            float mullionW = (uArchSurfaceMode == 8) ? 0.12 : (uArchSurfaceMode == 7 ? 0.65 : (uArchSurfaceMode == 9 ? 0.45 : 0.18));
+
+            float vInFloor = mod(facadeV, floorH);
+            float uInBay = mod(facadeU, bayW);
+            float isSpandrel = 1.0 - smoothstep(spandrelH - dWallV, spandrelH + dWallV, vInFloor);
+            float isMullion = 1.0 - smoothstep(mullionW - dWallU, mullionW + dWallU, uInBay);
+            float isGlass = (1.0 - isSpandrel) * (1.0 - isMullion);
+
+            if (isGlass > 0.05) {
+              float floorId = floor(facadeV / floorH);
+              float bayId = floor(facadeU / bayW);
+              vec2 roomSeed = floor(vArchWorldPos.xz * 0.02) * 17.13;
+              float roomHash = fract(sin(dot(vec2(floorId, bayId) + roomSeed, vec2(12.9898, 78.233))) * 43758.5453);
+
+              float litThreshold = (uArchSurfaceMode == 9) ? 0.10 : 0.40;
+              if (roomHash > litThreshold) {
+                float colorMix = fract(roomHash * 7.31);
+                vec3 coolLight = vec3(0.92, 0.96, 1.0);
+                vec3 warmLight = vec3(1.0, 0.84, 0.58);
+                vec3 roomLightColor = mix(coolLight, warmLight, colorMix);
+
+                float blindFrac = fract(roomHash * 11.19);
+                float windowNormV = (vInFloor - spandrelH) / max(floorH - spandrelH, 0.001);
+                float blindCoverage = blindFrac * 0.65;
+                float blindFactor = (windowNormV > (1.0 - blindCoverage)) ? 0.15 : 1.0;
+
+                float distFade = 1.0 - smoothstep(280.0, 360.0, archViewDist);
+                float lightIntensity = (uArchSurfaceMode == 9 ? 1.6 : 1.25) * uNightModeFactor * blindFactor * distFade;
+
+                totalEmissiveRadiance += roomLightColor * isGlass * lightIntensity;
+              }
+            }
           }
         }
         `,
@@ -1092,11 +1289,33 @@ export class TokyoStationMap {
         `,
       );
       shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <roughnessmap_fragment>",
+        /* glsl */ `
+        #include <roughnessmap_fragment>
+        if (archViewDist < 72.0) {
+          roughnessFactor = clamp(roughnessFactor + (archVolMacro.a - 0.5) * 0.14, 0.08, 0.96);
+        }
+        if (isFacadeWall && (uArchSurfaceMode == 4 || uArchSurfaceMode == 8)) {
+          float floorH = (uArchSurfaceMode == 8) ? 3.6 : 3.8;
+          float spandrelH = (uArchSurfaceMode == 8) ? 1.55 : 1.05;
+          float vInFloor = mod(facadeV, floorH);
+          float isSpandrel = 1.0 - smoothstep(spandrelH - dWallV, spandrelH + dWallV, vInFloor);
+          float isGlass = 1.0 - isSpandrel;
+          roughnessFactor = mix(roughnessFactor, 0.06, isGlass * 0.7);
+        }
+        `,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
         "#include <metalnessmap_fragment>",
         /* glsl */ `
         #include <metalnessmap_fragment>
-        if (archViewDist < 48.0) {
-          roughnessFactor = clamp(roughnessFactor + (archVolMacro.a - 0.5) * 0.14, 0.08, 0.96);
+        if (isFacadeWall && (uArchSurfaceMode == 4 || uArchSurfaceMode == 8)) {
+          float floorH = (uArchSurfaceMode == 8) ? 3.6 : 3.8;
+          float spandrelH = (uArchSurfaceMode == 8) ? 1.55 : 1.05;
+          float vInFloor = mod(facadeV, floorH);
+          float isSpandrel = 1.0 - smoothstep(spandrelH - dWallV, spandrelH + dWallV, vInFloor);
+          float isGlass = 1.0 - isSpandrel;
+          metalnessFactor = mix(metalnessFactor, 0.92, isGlass * 0.45);
         }
         `,
       );
@@ -1115,7 +1334,10 @@ export class TokyoStationMap {
       | "copper_patina"
       | "curtain_glass"
       | "anodized_metal"
-      | "cast_iron",
+      | "cast_iron"
+      | "stone_punched"
+      | "ribbon_window"
+      | "retail_storefront",
   ): void {
     this.applyArchitecture3DTexture(mat, channel);
   }
@@ -1653,6 +1875,7 @@ export class TokyoStationMap {
       const crownHeight = Math.min(10, Math.max(5, b.h * 0.07));
       const towerHeight = Math.max(12, b.h - podiumHeight - crownHeight);
 
+      // 1. 低層ポディウム（商業・エントランス基壇部）
       const baseGeo = new THREE.BoxGeometry(b.w, podiumHeight, b.d);
       const baseMat = new THREE.MeshStandardMaterial({
         color: b.podiumColor,
@@ -1666,6 +1889,40 @@ export class TokyoStationMap {
       baseMesh.receiveShadow = true;
       bGroup.add(baseMesh);
 
+      // 1b. 低層1F〜2F 渋谷商業街区の路面ショーウィンドウ・ロビーガラス（retail_storefront プロシージャルテクスチャ）
+      const storefrontGeo = new THREE.BoxGeometry(
+        b.w * 0.98,
+        Math.min(7.0, podiumHeight * 0.45),
+        b.d * 0.98,
+      );
+      const lobbyGlassMat = new THREE.MeshStandardMaterial({
+        color: b.warmInterior,
+        emissive: b.warmInterior,
+        emissiveIntensity: 0.42,
+        roughness: 0.18,
+      });
+      this.applyArchitecture3DTexture(lobbyGlassMat, "retail_storefront");
+      const storefrontMesh = new THREE.Mesh(storefrontGeo, lobbyGlassMat);
+      storefrontMesh.position.y = -b.h / 2 + Math.min(3.6, podiumHeight * 0.25);
+      storefrontMesh.userData.lodDetailTier = "high";
+      bGroup.add(storefrontMesh);
+
+      // 2. 高層タワー本体（ビルの個性に応じたファサードスタイル）
+      const isCerulean = b.buildingId === "13113-bldg-cerulean-tower";
+      const isAoyamaOval = b.buildingId === "13113-bldg-aoyama-oval";
+      let towerTextureMode: "curtain_glass" | "stone_punched" | "ribbon_window" = "curtain_glass";
+      if (isCerulean) {
+        // セルリアンタワー（ホテル＆オフィスのグリッド＆水平リボン連窓）
+        towerTextureMode = "ribbon_window";
+      } else if (isAoyamaOval) {
+        // 青山オーバルビル（端正な水平連窓モダニズムオフィス）
+        towerTextureMode = "ribbon_window";
+      } else if (b.h < 85 && (b.storeysAboveGround ?? 0) <= 20) {
+        // 中層ビルは水平連窓と石造パンチング窓を配して多様性を演出
+        const isEvenStoreys = (b.storeysAboveGround ?? 0) % 2 === 0;
+        towerTextureMode = isEvenStoreys ? "ribbon_window" : "stone_punched";
+      }
+
       const towerW = b.w * 0.88;
       const towerD = b.d * 0.88;
       const towerCenterY = -b.h / 2 + podiumHeight + towerHeight / 2;
@@ -1677,7 +1934,7 @@ export class TokyoStationMap {
         reflectivity: 0.92,
         clearcoat: 0.85,
       });
-      this.applyArchitecture3DTexture(towerMat, "curtain_glass");
+      this.applyArchitecture3DTexture(towerMat, towerTextureMode);
       const towerMesh = new THREE.Mesh(towerGeo, towerMat);
       towerMesh.position.y = towerCenterY;
       towerMesh.castShadow = true;
@@ -2000,21 +2257,32 @@ export class TokyoStationMap {
       const crownHeight = Math.min(10, Math.max(4, b.h * 0.08));
       const towerHeight = Math.max(6, b.h - podiumHeight - crownHeight);
 
-      // 1. 低層基壇部（丸の内31m石積み商業ポディウム + 3D ボリューム御影石テクスチャ）
+      // 1. 低層基壇部（丸の内31m歴史的百尺ポディウム：東京海上日動は赤レンガ、明治生命館は重厚石造パンチング、他は白御影石）
+      const isTokioMarine = b.buildingId === "13101-bldg-604";
+      const isMeijiYasuda = b.buildingId === "13101-bldg-3449";
+      const isHotel = b.usage === "宿泊施設";
+
+      let podiumTextureMode: "white_granite" | "red_brick" | "stone_punched" = "white_granite";
+      if (isTokioMarine) {
+        podiumTextureMode = "red_brick";
+      } else if (isMeijiYasuda) {
+        podiumTextureMode = "stone_punched";
+      }
+
       const baseGeo = new THREE.BoxGeometry(b.w, podiumHeight, b.d);
       const baseMat = new THREE.MeshStandardMaterial({
         color: b.podiumColor,
         roughness: 0.62,
         metalness: 0.12,
       });
-      this.applyArchitecture3DTexture(baseMat, "white_granite");
+      this.applyArchitecture3DTexture(baseMat, podiumTextureMode);
       const baseMesh = new THREE.Mesh(baseGeo, baseMat);
       baseMesh.position.y = -b.h / 2 + podiumHeight / 2;
       baseMesh.castShadow = true;
       baseMesh.receiveShadow = true;
       bGroup.add(baseMesh);
 
-      // 1b. 低層1F〜2F 商業路面ショーウィンドウ・ロビーガラス＆コロネード（列柱）ディテール
+      // 1b. 低層1F〜2F 商業路面ショーウィンドウ・ロビーガラス＆コロネード（retail_storefront プロシージャルテクスチャ）
       const storefrontGeo = new THREE.BoxGeometry(b.w * 0.96, 6.5, b.d * 0.96);
       const lobbyGlassMat = new THREE.MeshStandardMaterial({
         color: b.warmInterior,
@@ -2022,7 +2290,7 @@ export class TokyoStationMap {
         emissiveIntensity: 0.38,
         roughness: 0.2,
       });
-      this.applyArchitecture3DTexture(lobbyGlassMat, "curtain_glass");
+      this.applyArchitecture3DTexture(lobbyGlassMat, "retail_storefront");
       const storefrontMesh = new THREE.Mesh(storefrontGeo, lobbyGlassMat);
       storefrontMesh.position.y = -b.h / 2 + 3.6;
       storefrontMesh.userData.lodDetailTier = "high";
@@ -2035,7 +2303,20 @@ export class TokyoStationMap {
       corniceMesh.userData.lodDetailTier = "high";
       bGroup.add(corniceMesh);
 
-      // 2. セットバック高層タワー本体（オフィスビル・Low-E ガラスカーテンウォール + 3D微細歪み＆フロア奥行き変調）
+      // 2. セットバック高層タワー本体（ビルの個性に応じたファサードスタイル）
+      let towerTextureMode: "curtain_glass" | "stone_punched" | "ribbon_window" = "curtain_glass";
+      if (isTokioMarine) {
+        // 東京海上日動ビル本館（前川國男設計の端正なパンチングウィンドウ）
+        towerTextureMode = "stone_punched";
+      } else if (isHotel) {
+        // パレスホテル東京（皇居前の水平連窓リボンウィンドウ＆テラス）
+        towerTextureMode = "ribbon_window";
+      } else if (b.h < 85 && (b.storeysAboveGround ?? 0) <= 20) {
+        // 中層モダニズムビルには水平連窓と石造パンチング窓を交互に配し、街並みの多様性を創出
+        const isEvenStoreys = (b.storeysAboveGround ?? 0) % 2 === 0;
+        towerTextureMode = isEvenStoreys ? "ribbon_window" : "stone_punched";
+      }
+
       const towerW = b.w * 0.86;
       const towerD = b.d * 0.86;
       const towerCenterY = -b.h / 2 + podiumHeight + towerHeight / 2;
@@ -2047,7 +2328,7 @@ export class TokyoStationMap {
         reflectivity: 0.92,
         clearcoat: 0.85,
       });
-      this.applyArchitecture3DTexture(glassTowerMat, "curtain_glass");
+      this.applyArchitecture3DTexture(glassTowerMat, towerTextureMode);
       const towerMesh = new THREE.Mesh(towerGeo, glassTowerMat);
       towerMesh.position.y = towerCenterY;
       towerMesh.castShadow = true;
@@ -2847,6 +3128,7 @@ export class TokyoStationMap {
 
   public setNightMode(isNight: boolean): void {
     this.isNightActive = isNight;
+    this.sharedArchUniforms.uNightModeFactor.value = isNight ? 1.0 : 0.0;
     for (let i = 0; i < this.streetLights.length; i++) {
       this.streetLights[i].intensity = isNight ? 22.0 : 0.0;
       this.streetLights[i].visible = false;

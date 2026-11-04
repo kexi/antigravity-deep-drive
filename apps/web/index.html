@@ -12,6 +12,58 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f172a'/%3E%3Cpath d='M6 20l3-7h14l3 7v4h-3v-2H9v2H6v-4z' fill='%2338bdf8'/%3E%3C/svg%3E"
     />
     <title>Antigravity Deep Drive — 渋谷 &amp; 東京駅 3D ドライビングシミュレーター</title>
+    <meta
+      name="description"
+      content="Realistic 3D driving simulator set in Tokyo Station and Shibuya. Powered by Three.js WebGL, Project PLATEAU 3D city data, JDM physics, and procedural building architecture."
+    />
+    <meta name="author" content="@7_tsuno" />
+    <link rel="canonical" href="https://kexi.github.io/antigravity-deep-drive/" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://kexi.github.io/antigravity-deep-drive/" />
+    <meta
+      property="og:title"
+      content="Antigravity Deep Drive — 3D Tokyo &amp; Shibuya Driving Simulator"
+    />
+    <meta
+      property="og:description"
+      content="Experience realistic 3D driving through Tokyo Station and Shibuya in your browser. Powered by Three.js WebGL, Project PLATEAU 3D city data, JDM physics, and procedural building architecture."
+    />
+    <meta
+      property="og:image"
+      content="https://kexi.github.io/antigravity-deep-drive/og-image.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Antigravity Deep Drive — 3D Tokyo &amp; Shibuya Driving Simulator"
+    />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:site_name" content="Antigravity Deep Drive" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@7_tsuno" />
+    <meta name="twitter:creator" content="@7_tsuno" />
+    <meta name="twitter:url" content="https://kexi.github.io/antigravity-deep-drive/" />
+    <meta
+      name="twitter:title"
+      content="Antigravity Deep Drive — 3D Tokyo &amp; Shibuya Driving Simulator"
+    />
+    <meta
+      name="twitter:description"
+      content="Experience realistic 3D driving through Tokyo Station and Shibuya in your browser. Powered by Three.js WebGL, Project PLATEAU 3D city data, JDM physics, and procedural building architecture."
+    />
+    <meta
+      name="twitter:image"
+      content="https://kexi.github.io/antigravity-deep-drive/og-image.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="Antigravity Deep Drive — 3D Tokyo &amp; Shibuya Driving Simulator"
+    />
     <style>
       * {
         box-sizing: border-box;
@@ -204,10 +256,27 @@
         visibility: hidden !important;
         pointer-events: none !important;
       }
-      body.ui-off-mode:not([data-touch-ui-mode="on"]) #virtual-touch-controls {
+      /* デスクトップ等のタッチUI非表示環境では UI OFF 時に仮想コントローラーも非表示 */
+      body.ui-off-mode:not([data-touch-ui="visible"]) #virtual-touch-controls {
         opacity: 0 !important;
         visibility: hidden !important;
         pointer-events: none !important;
+      }
+
+      /* スマホ・タッチUI環境での UI OFF モード: 視界の没入感を邪魔しないよう半透明・ミニマル表示にするが、ハンドルとペダル操作は確実に維持 */
+      body.ui-off-mode[data-touch-ui="visible"] #virtual-touch-controls {
+        opacity: 0.65;
+        transition: opacity 0.2s ease;
+      }
+      body.ui-off-mode[data-touch-ui="visible"] #virtual-touch-controls:hover,
+      body.ui-off-mode[data-touch-ui="visible"] #virtual-touch-controls:focus-within,
+      body.ui-off-mode[data-touch-ui="visible"] #virtual-touch-controls:active {
+        opacity: 0.92;
+      }
+      body.ui-off-mode[data-touch-ui="visible"] .touch-cluster {
+        background: rgba(10, 16, 28, 0.45);
+        border-color: rgba(255, 255, 255, 0.08);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
       }
 
       /* モバイル・タブレット向けクイックアクションバー */

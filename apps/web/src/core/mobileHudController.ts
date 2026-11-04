@@ -452,11 +452,17 @@ export class MobileHudController {
     if (isForcedOn) {
       return true;
     }
+    // スマホ・タブレット等のタッチ操作環境では、UI OFF（没入モード）であっても
+    // 物理キーボードが存在せず操作不能になるのを防ぐため、ステアリングとペダル操作パッドを表示維持する。
+    const isTouchOrCompact = this.isCompactOrTouchViewport();
+    if (isTouchOrCompact) {
+      return true;
+    }
     const isHiddenByUiOff = !this.isHudVisible;
     if (isHiddenByUiOff) {
       return false;
     }
-    return this.isCompactOrTouchViewport();
+    return false;
   }
 
   public syncTouchUiVisibility(): void {
