@@ -7,9 +7,12 @@
 [![Rapier 3D](https://img.shields.io/badge/Rapier_3D-0.21-orange.svg)](https://rapier.rs/)
 [![pnpm](https://img.shields.io/badge/pnpm-workspace-orange.svg?logo=pnpm)](https://pnpm.io/)
 [![just](https://img.shields.io/badge/just-task_runner-red.svg)](https://github.com/casey/just)
+[![GitHub Pages](https://img.shields.io/badge/demo-play_online-brightgreen.svg?logo=googlechrome)](https://kexi.github.io/antigravity-deep-drive/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Antigravity Deep Drive** は、ブラウザ上で動作する次世代 3D ドライブシミュレーションゲームです。東京都 Project PLATEAU の 3D 都市モデルおよび国土地理院 (GSI) の標高・道路中心線オープンデータを統合し、東京駅丸の内〜皇居周辺、および渋谷ストリーム周辺の精密な実空間ドライビング体験を提供します。
+
+🎮 **オンラインデモ（ブラウザで今すぐプレイ）**: **[https://kexi.github.io/antigravity-deep-drive/](https://kexi.github.io/antigravity-deep-drive/)**
 
 ---
 
