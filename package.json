@@ -2,6 +2,7 @@
   "name": "antigravity-deep-drive",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "prepare": "lefthook install || true",
