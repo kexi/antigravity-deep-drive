@@ -93,6 +93,8 @@ export class CarModel {
 
   private mirrorFrameCounter = 0;
   private proceduralBodyGroup: THREE.Group;
+  private proceduralHeadlightMeshesGroup = new THREE.Group();
+  private glbHeadlightMaterial: THREE.MeshStandardMaterial | null = null;
   private turnSignalState: TurnSignalState = "off";
   private turnSignalTimer = 0;
   private turnSignalBlinkOn = false;
@@ -359,6 +361,7 @@ export class CarModel {
                   const isWheelAlloy =
                     matName.includes("WheelAlloy") ||
                     (matName.includes("Chrome") && !isInteriorChrome);
+                  const isHeadlightLED = matName.includes("HeadlightLED");
                   const isBrakeRotor =
                     matName.includes("BrakeRotor") || matName.includes("BrakeCaliper");
 
@@ -391,7 +394,18 @@ export class CarModel {
                     stdMat.color.setHex(0x14171c);
                     this.applyVehicleExterior3DTexture(stdMat, "tire_rubber");
                   } else if (isWheelAlloy) {
+                    // Why 外装クローム/ホイールアロイにダークサテンチタンカラー (0x323a46) を明示設定するか:
+                    // glTF 2.0 エクスポートで Chrome / WheelAlloy は baseColorFactor = [1, 1, 1, 1]（純白）となり、
+                    // 夜間や夕暮れの暗闇環境でアンダーモールやエンブレム、ホイールが真っ白に白飛びして棒のように浮き上がるのを防ぎ、
+                    // トヨタ クラウン セダン（プレシャスメタル仕様）本来の深みのあるダークスモークメッキ・サテンチタンの重厚なPBR物性を実現するため。
+                    stdMat.color.setHex(0x323a46);
+                    stdMat.metalness = 0.88;
+                    stdMat.roughness = 0.22;
                     this.applyVehicleExterior3DTexture(stdMat, "wheel_alloy");
+                  } else if (isHeadlightLED) {
+                    this.glbHeadlightMaterial = stdMat;
+                    stdMat.emissive.setHex(0xdbeafe);
+                    stdMat.emissiveIntensity = this.headlightsEnabled ? 4.5 : 0.4;
                   } else if (isBrakeRotor) {
                     this.applyVehicleExterior3DTexture(stdMat, "brake_rotor");
                   }
@@ -517,9 +531,11 @@ export class CarModel {
           this.glbModelGroup = glbScene;
           this.group.add(glbScene);
 
-          // GLBの配置に伴いプロシージャルボディ＆内装メッシュを非表示化
+          // GLBの配置に伴いプロシージャルボディ＆内装メッシュおよびプロシージャルヘッドライト発光体を非表示化
           this.proceduralBodyGroup.visible = false;
           this.proceduralBodyGroup.userData.permanentlyHiddenByGlb = true;
+          this.proceduralHeadlightMeshesGroup.visible = false;
+          this.proceduralHeadlightMeshesGroup.userData.permanentlyHiddenByGlb = true;
           resolve();
         },
         undefined,
@@ -3057,6 +3073,10 @@ export class CarModel {
     this.headlightLightSourceGroup = new THREE.Group();
     this.headlightLightSourceGroup.name = "HeadlightLightSourceGroup";
 
+    // プロシージャル専用の発光メッシュグループ（car.glb 読込完了時に非表示化される）
+    this.proceduralHeadlightMeshesGroup = new THREE.Group();
+    this.proceduralHeadlightMeshesGroup.name = "ProceduralHeadlightMeshesGroup";
+
     const ledProjectorMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       toneMapped: false,
@@ -3079,7 +3099,7 @@ export class CarModel {
     const centerDrlMesh = new THREE.Mesh(centerDrlGeo, hammerheadDrlMat);
     centerDrlMesh.position.set(0.0, 0.722, 2.332);
     centerDrlMesh.castShadow = false;
-    this.headlightLightSourceGroup.add(centerDrlMesh);
+    this.proceduralHeadlightMeshesGroup.add(centerDrlMesh);
 
     // 片側4眼・計8眼の超薄型 Bi-Beam LED プロジェクターレンズ発光コア (x = ±0.50, ±0.59, ±0.68, ±0.77)
     const quadXOffsets = [0.5, 0.59, 0.68, 0.77];
@@ -3096,15 +3116,16 @@ export class CarModel {
         lensMesh.position.set(xPos, yPos, zPos);
         lensMesh.rotation.y = side * -0.18;
         lensMesh.castShadow = false;
-        this.headlightLightSourceGroup.add(lensMesh);
+        this.proceduralHeadlightMeshesGroup.add(lensMesh);
 
         const haloMesh = new THREE.Mesh(haloGeo, ledHaloMat);
         haloMesh.position.set(xPos, yPos, zPos + 0.012);
         haloMesh.rotation.y = side * -0.18;
         haloMesh.castShadow = false;
-        this.headlightLightSourceGroup.add(haloMesh);
+        this.proceduralHeadlightMeshesGroup.add(haloMesh);
       }
     }
+    this.headlightLightSourceGroup.add(this.proceduralHeadlightMeshesGroup);
 
     // 4. ボリューメトリック・ライトビームコーン（夜間・夕暮れ・雨天時にヘッドライト光源から前方へ伸びる光束）
     this.headlightBeamConeGroup = new THREE.Group();
@@ -4005,6 +4026,9 @@ export class CarModel {
     }
     if (this.headlightBeamConeGroup) {
       this.headlightBeamConeGroup.visible = enabled;
+    }
+    if (this.glbHeadlightMaterial) {
+      this.glbHeadlightMaterial.emissiveIntensity = enabled ? 4.5 : 0.4;
     }
   }
 

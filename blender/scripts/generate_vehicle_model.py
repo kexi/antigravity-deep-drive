@@ -1216,11 +1216,12 @@ def build_chassis(materials) -> bpy.types.Object:
         Vector((-0.81, -2.10, 0.236)),
     ]
     add_hexahedron(bm, splitter_verts, mat_idx=1, smooth=False)
+    # フロントリップスポイラー下端ロアモール（ピアノブラック仕上げ）
     add_box(
         bm,
         center=Vector((0.0, -2.282, 0.212)),
         size=Vector((1.36, 0.018, 0.014)),
-        mat_idx=2,
+        mat_idx=1,
         smooth=False,
     )
 
@@ -1237,7 +1238,10 @@ def build_chassis(materials) -> bpy.types.Object:
     ]
     add_hexahedron(bm, grille_verts, mat_idx=1, smooth=False)
 
-    # クラウン セダン最大の特徴：アンダープライオリティグリルの「縦基調メッキバー列（Vertical Bars）」19本
+    # クラウン セダン最大の特徴：アンダープライオリティグリルの「縦基調グロスブラックバー列（Vertical Bars）」19本
+    # Why not メッキ調 (mat_idx=2):
+    # 実車トヨタ クラウン セダン (AZSH32/KZSM30) のアンダープライオリティグリルは漆黒のグロスブラック幾何学ルーバーであり、
+    # 白銀クロームを適用すると夜間や夕暮れの暗闇でバンパーに白い棒が白浮きして突き刺さるような違和感を生むため、全ルーバーをピアノブラックに統一する。
     for bar_i in range(-9, 10):
         bx = bar_i * 0.058
         top_x = bx * 0.88
@@ -1248,7 +1252,7 @@ def build_chassis(materials) -> bpy.types.Object:
             width_x=0.011,
             depth_y=0.022,
             taper=0.92,
-            mat_idx=2 if abs(bar_i) % 2 == 0 else 1,
+            mat_idx=1,
             smooth=False,
         )
 
@@ -1392,7 +1396,7 @@ def build_chassis(materials) -> bpy.types.Object:
                 mat_idx=2,
                 smooth=False,
             )
-        # 左右バンパーコーナーのC字ブラック＆クロームガーニッシュ（ロアボディ幅 wb=0.72..0.80 の内側に収める）
+        # 左右バンパーコーナーのC字ピアノブラックインテークガーニッシュ（ロアボディ幅 wb=0.72..0.80 の内側に収める）
         add_box(
             bm,
             center=Vector((side * 0.68, -2.215, 0.34)),
@@ -1404,7 +1408,7 @@ def build_chassis(materials) -> bpy.types.Object:
             bm,
             center=Vector((side * 0.725, -2.235, 0.34)),
             size=Vector((0.018, 0.035, 0.175)),
-            mat_idx=2,
+            mat_idx=1,
             smooth=False,
         )
 
