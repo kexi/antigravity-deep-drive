@@ -1,23 +1,38 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f172a'/%3E%3Cpath d='M6 20l3-7h14l3 7v4h-3v-2H9v2H6v-4z' fill='%2338bdf8'/%3E%3C/svg%3E" />
-    <title>Tokyo Station Deep Drive - 東京駅ドライブシミュレーター</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#050811" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f172a'/%3E%3Cpath d='M6 20l3-7h14l3 7v4h-3v-2H9v2H6v-4z' fill='%2338bdf8'/%3E%3C/svg%3E"
+    />
+    <title>Antigravity Deep Drive — 渋谷 &amp; 東京駅 3D ドライビングシミュレーター</title>
     <style>
       * {
         box-sizing: border-box;
         margin: 0;
         padding: 0;
         user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
       }
-      body, html {
+      body,
+      html {
         width: 100%;
         height: 100%;
+        width: 100dvw;
+        height: 100dvh;
         overflow: hidden;
+        overscroll-behavior: none;
         background-color: #050811;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
         color: #ffffff;
       }
       #webgl-canvas {
@@ -28,6 +43,7 @@
         height: 100%;
         z-index: 1;
         display: block;
+        touch-action: none;
       }
       #ui-overlay {
         position: absolute;
@@ -40,7 +56,10 @@
         display: flex;
         flex-direction: column;
         justify-content: space-between;
-        padding: 20px;
+        padding-top: max(16px, env(safe-area-inset-top));
+        padding-right: max(16px, env(safe-area-inset-right));
+        padding-bottom: max(16px, env(safe-area-inset-bottom));
+        padding-left: max(16px, env(safe-area-inset-left));
       }
       .interactive {
         pointer-events: auto;
@@ -50,63 +69,265 @@
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
+        gap: 12px;
+      }
+      .header-left-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
       }
       .title-box {
         background: rgba(10, 16, 28, 0.75);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
-        padding: 12px 18px;
+        padding: 10px 14px;
         border-radius: 10px;
         border: 1px solid rgba(255, 255, 255, 0.12);
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
       }
+      .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .title-row-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
       .title-box h1 {
-        font-size: 1.1rem;
+        font-size: 1rem;
         font-weight: 700;
         letter-spacing: 0.05em;
         color: #60a5fa;
-        margin-bottom: 4px;
+        margin-bottom: 2px;
+        white-space: nowrap;
       }
       .title-box p {
-        font-size: 0.8rem;
+        font-size: 0.72rem;
         color: #94a3b8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .hud-ui-toggle-btn {
+        background: rgba(30, 41, 59, 0.88);
+        color: #38bdf8;
+        border: 1px solid rgba(56, 189, 248, 0.45);
+        border-radius: 6px;
+        padding: 3px 9px;
+        font-size: 0.68rem;
+        font-weight: 700;
+        cursor: pointer;
+        white-space: nowrap;
+        letter-spacing: 0.02em;
+        transition:
+          background 0.15s ease,
+          border-color 0.15s ease,
+          color 0.15s ease,
+          transform 0.1s ease;
+      }
+      .hud-ui-toggle-btn:hover {
+        background: rgba(2, 132, 199, 0.38);
+        border-color: #7dd3fc;
+        color: #ffffff;
+      }
+      .hud-ui-toggle-btn:active {
+        transform: scale(0.96);
+      }
+      .gis-toggle-btn {
+        display: none;
+        background: rgba(30, 41, 59, 0.88);
+        color: #93c5fd;
+        border: 1px solid rgba(96, 165, 250, 0.35);
+        border-radius: 6px;
+        padding: 3px 8px;
+        font-size: 0.68rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .gis-toggle-btn[aria-expanded="true"] {
+        background: rgba(37, 99, 235, 0.45);
+        color: #ffffff;
+        border-color: #60a5fa;
+      }
+
+      /* UI OFF モード（HUD全非表示・没入ドライブモード） */
+      .ui-restore-fab {
+        position: fixed;
+        top: max(14px, env(safe-area-inset-top));
+        right: max(14px, env(safe-area-inset-right));
+        z-index: 46;
+        display: none;
+        align-items: center;
+        gap: 6px;
+        background: rgba(10, 16, 28, 0.56);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        color: #e2e8f0;
+        border: 1px solid rgba(56, 189, 248, 0.42);
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        cursor: pointer;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+        opacity: 0.68;
+        transition:
+          opacity 0.18s ease,
+          background 0.18s ease,
+          border-color 0.18s ease,
+          transform 0.12s ease;
+      }
+      .ui-restore-fab:hover,
+      .ui-restore-fab:focus-visible {
+        opacity: 1;
+        background: rgba(15, 23, 42, 0.9);
+        border-color: #38bdf8;
+        color: #ffffff;
+      }
+      .ui-restore-fab:active {
+        transform: scale(0.96);
+      }
+      body.ui-off-mode .ui-restore-fab {
+        display: inline-flex;
+      }
+      body.ui-off-mode #ui-overlay .hud-header,
+      body.ui-off-mode #ui-overlay .footer-left-stack,
+      body.ui-off-mode #ui-overlay .speedometer-box {
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+      body.ui-off-mode:not([data-touch-ui-mode="on"]) #virtual-touch-controls {
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+
+      /* モバイル・タブレット向けクイックアクションバー */
+      .mobile-quick-bar {
+        display: none;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        background: rgba(10, 16, 28, 0.82);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        padding: 6px 8px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+      button.quick-chip-btn {
+        background: rgba(30, 41, 59, 0.88);
+        color: #e2e8f0;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 7px;
+        padding: 6px 10px;
+        min-height: 34px;
+        font-size: 0.73rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+        touch-action: manipulation;
+        transition:
+          background 0.15s ease,
+          border-color 0.15s ease,
+          transform 0.1s ease;
+      }
+      button.quick-chip-btn:active {
+        transform: scale(0.96);
+      }
+      button.quick-chip-btn.active {
+        background: #2563eb;
+        border-color: #60a5fa;
+        color: #ffffff;
+        box-shadow: 0 0 10px rgba(37, 99, 235, 0.45);
+      }
+      button.quick-chip-btn.menu-trigger {
+        background: rgba(15, 23, 42, 0.95);
+        border-color: rgba(56, 189, 248, 0.48);
+        color: #38bdf8;
+      }
+      button.quick-chip-btn.menu-trigger[aria-expanded="true"] {
+        background: #0284c7;
+        border-color: #7dd3fc;
+        color: #ffffff;
+      }
+
+      /* ドロワー背景オーバーレイ（モバイル時のみ有効） */
+      .hud-drawer-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 24;
+        background: rgba(5, 8, 17, 0.55);
+        backdrop-filter: blur(3px);
+        -webkit-backdrop-filter: blur(3px);
       }
 
       /* コントロールパネル */
       .hud-controls {
         display: flex;
-        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .drawer-header-bar {
+        display: none;
+        width: 100%;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 6px;
+        margin-bottom: 4px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      .drawer-header-bar span {
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: #38bdf8;
+        letter-spacing: 0.04em;
       }
       .control-panel {
         background: rgba(10, 16, 28, 0.75);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
-        padding: 12px 16px;
+        padding: 9px 12px;
         border-radius: 10px;
         border: 1px solid rgba(255, 255, 255, 0.12);
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
       }
       .panel-label {
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         font-weight: 600;
         text-transform: uppercase;
         color: #94a3b8;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.06em;
+        white-space: nowrap;
       }
       .btn-group {
         display: flex;
-        gap: 6px;
+        flex-wrap: wrap;
+        gap: 5px;
       }
       button.hud-btn {
         background: rgba(30, 41, 59, 0.8);
         color: #e2e8f0;
         border: 1px solid rgba(255, 255, 255, 0.15);
-        padding: 6px 12px;
-        font-size: 0.8rem;
+        padding: 5px 10px;
+        font-size: 0.76rem;
         border-radius: 6px;
         cursor: pointer;
+        white-space: nowrap;
+        touch-action: manipulation;
         transition: all 0.2s ease;
       }
       button.hud-btn:hover {
@@ -120,12 +341,33 @@
         font-weight: 600;
         box-shadow: 0 0 12px rgba(37, 99, 235, 0.5);
       }
+      .sound-volume-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+      }
+      .sound-volume-slider {
+        flex: 1;
+        accent-color: #3b82f6;
+        cursor: pointer;
+        height: 5px;
+      }
+      .sound-volume-value {
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: #93c5fd;
+        min-width: 36px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
 
       /* フッター・メーター */
       .hud-footer {
         display: flex;
         justify-content: space-between;
         align-items: flex-end;
+        gap: 12px;
       }
       .controls-guide {
         background: rgba(10, 16, 28, 0.7);
@@ -170,6 +412,7 @@
         margin-bottom: 4px;
         display: flex;
         justify-content: space-between;
+        gap: 8px;
       }
       .gis-row {
         display: flex;
@@ -222,43 +465,1470 @@
         color: #a855f7;
         margin-top: 4px;
       }
+      .turn-signal-hud-indicator {
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        color: #64748b;
+        margin-top: 4px;
+        transition:
+          color 0.08s ease,
+          text-shadow 0.08s ease;
+      }
+      .turn-signal-hud-indicator.is-active {
+        color: #4ade80;
+      }
+      .turn-signal-hud-indicator.is-blinking-on {
+        color: #22c55e;
+        text-shadow: 0 0 12px rgba(34, 197, 94, 0.85);
+      }
+      .turn-signal-hud-indicator.is-hazard.is-blinking-on {
+        color: #f59e0b;
+        text-shadow: 0 0 12px rgba(245, 158, 11, 0.85);
+      }
+
+      /* 仮想タッチドライビングコントローラー（スマホ・タブレット用） */
+      .virtual-touch-controls {
+        display: none;
+        width: 100%;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: 12px;
+        pointer-events: none;
+      }
+      body[data-touch-ui="visible"] .virtual-touch-controls {
+        display: flex;
+      }
+      body[data-touch-ui="visible"] .controls-guide {
+        display: none;
+      }
+      body[data-touch-ui="visible"] .hud-footer {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+      }
+      body[data-touch-ui="visible"] .speedometer-box {
+        align-self: center;
+      }
+      .touch-cluster {
+        pointer-events: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        background: rgba(10, 16, 28, 0.72);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 16px;
+        padding: 10px 12px;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+        touch-action: none;
+      }
+      .touch-cluster-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.66rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        color: #94a3b8;
+      }
+      .touch-steer-readout {
+        color: #38bdf8;
+        font-variant-numeric: tabular-nums;
+      }
+      .touch-steer-pad {
+        position: relative;
+        width: 176px;
+        height: 54px;
+        border-radius: 27px;
+        background: linear-gradient(
+          90deg,
+          rgba(37, 99, 235, 0.22) 0%,
+          rgba(15, 23, 42, 0.92) 50%,
+          rgba(37, 99, 235, 0.22) 100%
+        );
+        border: 1px solid rgba(96, 165, 250, 0.38);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        touch-action: none;
+        cursor: grab;
+        overflow: hidden;
+      }
+      .touch-steer-pad.active {
+        border-color: #60a5fa;
+        box-shadow: 0 0 16px rgba(59, 130, 246, 0.45);
+      }
+      .touch-steer-center-mark {
+        width: 2px;
+        height: 24px;
+        background: rgba(148, 163, 184, 0.45);
+        pointer-events: none;
+      }
+      .touch-steer-axis-labels {
+        position: absolute;
+        inset: 0 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.68rem;
+        font-weight: 700;
+        color: rgba(148, 163, 184, 0.65);
+        pointer-events: none;
+      }
+      .touch-steer-thumb {
+        position: absolute;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 35% 30%, #60a5fa, #1d4ed8);
+        border: 2px solid #e0f2fe;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55);
+        pointer-events: none;
+        transition: transform 0.06s linear;
+      }
+      .touch-steer-pad.active .touch-steer-thumb {
+        transition: none;
+      }
+      .touch-steer-btn-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      button.touch-control-btn {
+        background: rgba(30, 41, 59, 0.9);
+        color: #f8fafc;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        min-height: 48px;
+        min-width: 72px;
+        padding: 8px 12px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        cursor: pointer;
+        touch-action: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        transition:
+          background 0.1s ease,
+          transform 0.08s ease,
+          border-color 0.1s ease;
+      }
+      button.touch-control-btn .sub-caption {
+        font-size: 0.62rem;
+        font-weight: 600;
+        color: #94a3b8;
+      }
+      button.touch-control-btn.active {
+        background: #2563eb;
+        border-color: #93c5fd;
+        color: #ffffff;
+        transform: scale(0.96);
+        box-shadow: 0 0 16px rgba(37, 99, 235, 0.6);
+      }
+      button.touch-control-btn.active .sub-caption {
+        color: #dbeafe;
+      }
+      .touch-pedal-grid {
+        display: grid;
+        grid-template-columns: auto auto auto;
+        align-items: end;
+        gap: 8px;
+      }
+      button.touch-control-btn.pedal-handbrake {
+        min-height: 54px;
+        min-width: 58px;
+        border-color: rgba(245, 158, 11, 0.45);
+      }
+      button.touch-control-btn.pedal-handbrake.active {
+        background: #d97706;
+        border-color: #fde68a;
+        box-shadow: 0 0 16px rgba(217, 119, 6, 0.65);
+      }
+      button.touch-control-btn.pedal-brake {
+        min-height: 68px;
+        min-width: 74px;
+        border-color: rgba(248, 113, 113, 0.48);
+        background: rgba(69, 18, 28, 0.82);
+      }
+      button.touch-control-btn.pedal-brake.active {
+        background: #dc2626;
+        border-color: #fecaca;
+        box-shadow: 0 0 18px rgba(220, 38, 38, 0.7);
+      }
+      button.touch-control-btn.pedal-throttle {
+        min-height: 86px;
+        min-width: 82px;
+        border-color: rgba(52, 211, 153, 0.55);
+        background: rgba(14, 53, 45, 0.85);
+      }
+      button.touch-control-btn.pedal-throttle.active {
+        background: #059669;
+        border-color: #a7f3d0;
+        box-shadow: 0 0 20px rgba(5, 150, 105, 0.75);
+      }
+
+      /* 道路標識作成・配置システム モーダル (<dialog closedby="any">) */
+      dialog:modal {
+        overscroll-behavior: contain;
+      }
+      dialog::backdrop {
+        overflow: hidden;
+        overscroll-behavior: contain;
+        background: rgba(5, 8, 17, 0.62);
+        backdrop-filter: blur(4px);
+      }
+      #sign-creator-dialog {
+        margin: auto;
+        width: min(820px, 94vw);
+        max-height: 88vh;
+        max-height: 88dvh;
+        background: rgba(10, 16, 28, 0.95);
+        color: #f8fafc;
+        border: 1px solid rgba(56, 189, 248, 0.38);
+        border-radius: 14px;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65);
+        padding: 0;
+        user-select: text;
+      }
+      #sign-creator-dialog[open] {
+        display: flex;
+        flex-direction: column;
+      }
+      .sign-dialog-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 18px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      .sign-dialog-header h2 {
+        font-size: 0.96rem;
+        font-weight: 700;
+        color: #38bdf8;
+        letter-spacing: 0.04em;
+      }
+      .sign-dialog-body {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        gap: 16px;
+        padding: 16px 18px;
+        overflow-y: auto;
+      }
+      .sign-preview-pane {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      #sign-preview-canvas {
+        width: 100%;
+        height: 240px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: #0b1528;
+      }
+      .sign-validation-box {
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid rgba(56, 189, 248, 0.28);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 0.72rem;
+        line-height: 1.5;
+        color: #cbd5e1;
+      }
+      .sign-form-pane {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .sign-field-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px 12px;
+      }
+      .sign-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .sign-field.full-width {
+        grid-column: 1 / -1;
+      }
+      .sign-field label {
+        font-size: 0.7rem;
+        font-weight: 600;
+        color: #94a3b8;
+      }
+      .sign-field input,
+      .sign-field select,
+      .sign-yaml-output {
+        background: rgba(15, 23, 42, 0.9);
+        color: #f8fafc;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 6px;
+        padding: 6px 8px;
+        font-size: 0.78rem;
+      }
+      .sign-yaml-output {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.72rem;
+        resize: vertical;
+        min-height: 76px;
+      }
+      .sign-action-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 4px;
+      }
+      .sign-custom-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 4px;
+      }
+      .sign-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(30, 41, 59, 0.9);
+        border: 1px solid rgba(56, 189, 248, 0.35);
+        border-radius: 6px;
+        padding: 3px 8px;
+        font-size: 0.72rem;
+      }
+      .sign-chip button {
+        background: transparent;
+        border: none;
+        color: #f87171;
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Webアセット管理システム モーダル (<dialog id="asset-manager-dialog">) */
+      /* ------------------------------------------------------------------ */
+      #asset-manager-dialog::backdrop {
+        background: rgba(5, 10, 20, 0.72);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      #asset-manager-dialog {
+        margin: auto;
+        width: min(1040px, 95vw);
+        max-height: 90vh;
+        max-height: 90dvh;
+        background: rgba(10, 16, 28, 0.96);
+        color: #f8fafc;
+        border: 1px solid rgba(56, 189, 248, 0.42);
+        border-radius: 16px;
+        box-shadow: 0 28px 72px rgba(0, 0, 0, 0.75);
+        padding: 0;
+        user-select: text;
+      }
+      #asset-manager-dialog[open] {
+        display: flex;
+        flex-direction: column;
+      }
+      .asset-dialog-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 14px 18px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      .asset-dialog-header h2 {
+        font-size: 0.96rem;
+        font-weight: 700;
+        color: #38bdf8;
+        letter-spacing: 0.04em;
+      }
+      .asset-header-actions {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .asset-summary-bar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 8px;
+        padding: 10px 18px;
+        background: rgba(15, 23, 42, 0.75);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .asset-stat-card {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: rgba(30, 41, 59, 0.75);
+        border: 1px solid rgba(148, 163, 184, 0.22);
+      }
+      .asset-stat-card.is-boost {
+        border-color: rgba(52, 211, 153, 0.45);
+        background: rgba(6, 78, 59, 0.35);
+      }
+      .asset-stat-label {
+        font-size: 0.65rem;
+        font-weight: 600;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .asset-stat-val {
+        font-size: 0.92rem;
+        font-weight: 800;
+        color: #f8fafc;
+        font-variant-numeric: tabular-nums;
+      }
+      .asset-manager-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 10px 18px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .asset-search-input {
+        min-width: 220px;
+        background: rgba(15, 23, 42, 0.9);
+        color: #f8fafc;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 0.78rem;
+      }
+      .asset-manager-body {
+        display: grid;
+        grid-template-columns: 280px 260px 1fr;
+        gap: 14px;
+        padding: 14px 18px;
+        overflow-y: auto;
+        min-height: 400px;
+      }
+      .asset-preview-column {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      #asset-manager-preview-canvas {
+        width: 100%;
+        height: 220px;
+        border-radius: 10px;
+        border: 1px solid rgba(56, 189, 248, 0.32);
+        background: #0b1528;
+      }
+      .asset-status-banner {
+        background: rgba(15, 23, 42, 0.88);
+        border: 1px solid rgba(56, 189, 248, 0.35);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 0.72rem;
+        line-height: 1.5;
+        color: #cbd5e1;
+      }
+      .asset-status-banner[data-tone="ok"],
+      .asset-status-banner[data-tone="success"] {
+        border-color: rgba(52, 211, 153, 0.55);
+        color: #a7f3d0;
+      }
+      .asset-status-banner[data-tone="warn"] {
+        border-color: rgba(250, 204, 21, 0.65);
+        color: #fef08a;
+      }
+      .asset-status-banner[data-tone="error"] {
+        border-color: rgba(248, 113, 113, 0.65);
+        color: #fecaca;
+      }
+      .asset-list-column {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 420px;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+      .asset-list-item {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        width: 100%;
+        text-align: left;
+        background: rgba(15, 23, 42, 0.82);
+        color: #e2e8f0;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 8px;
+        padding: 8px 10px;
+        cursor: pointer;
+        transition:
+          background 0.15s ease,
+          border-color 0.15s ease;
+      }
+      .asset-list-item:hover {
+        background: rgba(30, 41, 59, 0.92);
+        border-color: rgba(96, 165, 250, 0.45);
+      }
+      .asset-list-item.active {
+        background: rgba(37, 99, 235, 0.28);
+        border-color: #60a5fa;
+        box-shadow: 0 0 12px rgba(37, 99, 235, 0.35);
+      }
+      .asset-list-item-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+        gap: 6px;
+      }
+      .asset-list-item-title,
+      .asset-item-title {
+        font-size: 0.78rem;
+        font-weight: 700;
+        color: #f8fafc;
+      }
+      .asset-list-item-sub,
+      .asset-item-sub {
+        font-size: 0.68rem;
+        color: #94a3b8;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+      .asset-list-item-badge,
+      .asset-item-meta {
+        font-size: 0.66rem;
+        font-weight: 600;
+        color: #38bdf8;
+        background: rgba(56, 189, 248, 0.12);
+        border: 1px solid rgba(56, 189, 248, 0.28);
+        border-radius: 999px;
+        padding: 1px 6px;
+        white-space: nowrap;
+      }
+      .asset-editor-column {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .asset-editor-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .asset-editor-badge {
+        font-size: 0.82rem;
+        font-weight: 800;
+        color: #38bdf8;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+      .asset-editor-path {
+        font-size: 0.72rem;
+        color: #94a3b8;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+      .asset-editor-title {
+        font-size: 0.86rem;
+        font-weight: 700;
+        color: #93c5fd;
+        margin-bottom: 4px;
+      }
+      .asset-yaml-large {
+        min-height: 260px;
+      }
+      .asset-empty-hint,
+      .asset-empty-msg {
+        font-size: 0.75rem;
+        color: #94a3b8;
+        padding: 12px;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* レスポンシブ対応（モバイル・タブレット / タッチデバイス）             */
+      /* ------------------------------------------------------------------ */
+      @media (max-width: 1024px), (pointer: coarse) {
+        .mobile-quick-bar {
+          display: flex;
+        }
+        .gis-toggle-btn {
+          display: inline-flex;
+          align-items: center;
+        }
+        .gis-telemetry-box.is-collapsed-mobile {
+          display: none;
+        }
+        .hud-drawer-backdrop.is-open {
+          display: block;
+        }
+        .hud-controls {
+          display: none;
+          position: fixed;
+          top: max(12px, env(safe-area-inset-top));
+          right: max(12px, env(safe-area-inset-right));
+          bottom: max(12px, env(safe-area-inset-bottom));
+          width: min(390px, calc(100dvw - 24px));
+          z-index: 30;
+          flex-direction: column;
+          flex-wrap: nowrap;
+          justify-content: flex-start;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          background: rgba(7, 12, 22, 0.94);
+          backdrop-filter: blur(18px);
+          -webkit-backdrop-filter: blur(18px);
+          padding: 14px;
+          border-radius: 14px;
+          border: 1px solid rgba(96, 165, 250, 0.35);
+          box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75);
+        }
+        .hud-controls.is-open {
+          display: flex;
+        }
+        .drawer-header-bar {
+          display: flex;
+        }
+        .control-panel {
+          width: 100%;
+        }
+        button.hud-btn {
+          padding: 7px 11px;
+          font-size: 0.78rem;
+          min-height: 34px;
+        }
+      }
+
+      /* スマホ縦向き (Portrait) */
+      @media (max-width: 768px) {
+        #ui-overlay {
+          padding-top: max(10px, env(safe-area-inset-top));
+          padding-right: max(10px, env(safe-area-inset-right));
+          padding-bottom: max(10px, env(safe-area-inset-bottom));
+          padding-left: max(10px, env(safe-area-inset-left));
+        }
+        .hud-header {
+          flex-direction: column;
+          align-items: stretch;
+          gap: 6px;
+        }
+        .title-box {
+          padding: 7px 10px;
+        }
+        .title-box h1 {
+          font-size: 0.86rem;
+        }
+        .title-box p {
+          font-size: 0.64rem;
+        }
+        .gis-telemetry-box {
+          min-width: 0;
+          width: 100%;
+          font-size: 0.66rem;
+          padding: 7px 10px;
+        }
+        .hud-footer {
+          flex-direction: column;
+          align-items: stretch;
+          gap: 8px;
+        }
+        .speedometer-box {
+          align-self: center;
+          display: flex;
+          align-items: baseline;
+          justify-content: center;
+          gap: 10px;
+          padding: 6px 14px;
+          min-width: 0;
+          border-radius: 999px;
+        }
+        .speed-num {
+          font-size: 1.75rem;
+        }
+        .gear-indicator {
+          font-size: 0.88rem;
+          margin-top: 0;
+        }
+        .motion-blur-indicator {
+          display: none;
+        }
+        .touch-steer-pad {
+          width: 152px;
+          height: 48px;
+        }
+        .touch-steer-thumb {
+          width: 38px;
+          height: 38px;
+        }
+        button.touch-control-btn {
+          min-height: 44px;
+          min-width: 64px;
+          padding: 6px 8px;
+          font-size: 0.76rem;
+        }
+        button.touch-control-btn.pedal-handbrake {
+          min-height: 48px;
+          min-width: 50px;
+        }
+        button.touch-control-btn.pedal-brake {
+          min-height: 62px;
+          min-width: 64px;
+        }
+        button.touch-control-btn.pedal-throttle {
+          min-height: 76px;
+          min-width: 70px;
+        }
+        .sign-dialog-body {
+          grid-template-columns: 1fr;
+          padding: 12px;
+        }
+        #sign-preview-canvas {
+          height: 180px;
+        }
+        .sign-field-grid {
+          grid-template-columns: 1fr;
+        }
+        .asset-manager-body {
+          grid-template-columns: 1fr;
+          padding: 12px;
+        }
+        #asset-manager-preview-canvas {
+          height: 180px;
+        }
+      }
+
+      @media (max-width: 768px), (pointer: coarse) {
+        .sign-field input,
+        .sign-field select,
+        .sign-yaml-output,
+        .asset-search-input {
+          font-size: 16px;
+        }
+      }
+
+      /* スマホ横向き (Landscape 短辺画面) */
+      @media (max-height: 540px) and (orientation: landscape) {
+        #ui-overlay {
+          padding-top: max(8px, env(safe-area-inset-top));
+          padding-right: max(12px, env(safe-area-inset-right));
+          padding-bottom: max(8px, env(safe-area-inset-bottom));
+          padding-left: max(12px, env(safe-area-inset-left));
+        }
+        .title-box {
+          padding: 5px 10px;
+        }
+        .title-box h1 {
+          font-size: 0.82rem;
+        }
+        .title-box p {
+          display: none;
+        }
+        .mobile-quick-bar {
+          padding: 4px 6px;
+          gap: 4px;
+        }
+        button.quick-chip-btn {
+          padding: 4px 8px;
+          min-height: 28px;
+          font-size: 0.68rem;
+        }
+        body[data-touch-ui="visible"] .hud-footer {
+          position: relative;
+          justify-content: center;
+        }
+        body[data-touch-ui="visible"] .speedometer-box {
+          position: absolute;
+          left: 50%;
+          bottom: 4px;
+          transform: translateX(-50%);
+          display: flex;
+          align-items: baseline;
+          gap: 8px;
+          padding: 5px 14px;
+          min-width: 0;
+          border-radius: 999px;
+          pointer-events: none;
+        }
+        .speedometer-box {
+          padding: 8px 14px;
+          min-width: 124px;
+        }
+        .speed-num {
+          font-size: 1.75rem;
+        }
+        .gear-indicator {
+          font-size: 0.85rem;
+          margin-top: 0;
+        }
+        .motion-blur-indicator {
+          display: none;
+        }
+        .touch-cluster {
+          padding: 7px 10px;
+          gap: 5px;
+        }
+        .touch-steer-pad {
+          width: 148px;
+          height: 42px;
+        }
+        .touch-steer-thumb {
+          width: 34px;
+          height: 34px;
+        }
+        button.touch-control-btn {
+          min-height: 38px;
+          padding: 5px 8px;
+          font-size: 0.74rem;
+        }
+        button.touch-control-btn.pedal-handbrake {
+          min-height: 44px;
+          min-width: 50px;
+        }
+        button.touch-control-btn.pedal-brake {
+          min-height: 54px;
+          min-width: 64px;
+        }
+        button.touch-control-btn.pedal-throttle {
+          min-height: 66px;
+          min-width: 72px;
+        }
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* タイトル画面 & ローディングプログレスオーバーレイ                    */
+      /* ------------------------------------------------------------------ */
+      #title-screen-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: radial-gradient(
+          circle at 50% 35%,
+          rgba(15, 23, 42, 0.72) 0%,
+          rgba(5, 8, 17, 0.92) 100%
+        );
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        transition:
+          opacity 0.35s ease,
+          visibility 0.35s ease;
+      }
+      #title-screen-overlay.is-hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      .title-screen-card {
+        width: min(560px, 94vw);
+        background: rgba(10, 16, 28, 0.9);
+        border: 1px solid rgba(56, 189, 248, 0.38);
+        border-radius: 18px;
+        padding: 28px 26px 24px;
+        box-shadow:
+          0 24px 64px rgba(0, 0, 0, 0.72),
+          0 0 40px rgba(37, 99, 235, 0.18);
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .title-badge {
+        display: inline-flex;
+        align-self: flex-start;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgba(37, 99, 235, 0.22);
+        border: 1px solid rgba(96, 165, 250, 0.45);
+        color: #93c5fd;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+      .title-hero-heading {
+        font-size: clamp(1.45rem, 3.6vw, 2.05rem);
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        color: #f8fafc;
+        text-shadow: 0 0 24px rgba(56, 189, 248, 0.45);
+        line-height: 1.15;
+      }
+      .title-hero-subtitle {
+        font-size: 0.82rem;
+        line-height: 1.55;
+        color: #cbd5e1;
+      }
+      .loading-progress-container {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      .loading-progress-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+      #loading-status-text {
+        color: #93c5fd;
+      }
+      #loading-percent-text {
+        color: #38bdf8;
+        font-variant-numeric: tabular-nums;
+      }
+      .loading-progress-track {
+        width: 100%;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(30, 41, 59, 0.95);
+        overflow: hidden;
+      }
+      #loading-progress-fill {
+        width: 8%;
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #2563eb 0%, #38bdf8 55%, #34d399 100%);
+        box-shadow: 0 0 12px rgba(56, 189, 248, 0.65);
+        transition: width 0.22s ease;
+      }
+      .loading-chunk-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        margin-top: 2px;
+      }
+      #loading-chunk-detail {
+        font-size: 0.68rem;
+        color: #94a3b8;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+      .loading-retry-btn {
+        display: none;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid rgba(248, 113, 113, 0.65);
+        background: rgba(153, 27, 27, 0.45);
+        color: #fecaca;
+        font-size: 0.7rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .loading-retry-btn.is-visible {
+        display: inline-flex;
+        align-items: center;
+      }
+      /* オープンワールド・エリア移動 / 先読みストリーミングバナー */
+      #world-streaming-banner {
+        position: fixed;
+        top: max(14px, env(safe-area-inset-top));
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 48;
+        width: min(440px, 90vw);
+        background: rgba(10, 16, 28, 0.92);
+        border: 1px solid rgba(56, 189, 248, 0.45);
+        border-radius: 12px;
+        padding: 9px 14px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        transition:
+          opacity 0.25s ease,
+          visibility 0.25s ease,
+          transform 0.25s ease;
+      }
+      #world-streaming-banner.is-hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transform: translateX(-50%) translateY(-8px);
+      }
+      .streaming-banner-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.74rem;
+        font-weight: 700;
+      }
+      #streaming-banner-title {
+        color: #93c5fd;
+      }
+      #streaming-banner-percent {
+        color: #38bdf8;
+        font-variant-numeric: tabular-nums;
+      }
+      .streaming-banner-track {
+        width: 100%;
+        height: 6px;
+        border-radius: 999px;
+        background: rgba(30, 41, 59, 0.95);
+        overflow: hidden;
+      }
+      #streaming-banner-fill {
+        width: 0%;
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #38bdf8 0%, #34d399 100%);
+        transition: width 0.18s ease;
+      }
+      .streaming-banner-bottom {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.66rem;
+        color: #cbd5e1;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+      .title-options-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+      .title-option-row {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .title-option-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: #94a3b8;
+        letter-spacing: 0.04em;
+      }
+      .title-start-btn {
+        width: 100%;
+        min-height: 48px;
+        padding: 12px 18px;
+        border-radius: 12px;
+        border: 1px solid #60a5fa;
+        background: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
+        color: #ffffff;
+        font-size: 0.96rem;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        cursor: pointer;
+        box-shadow: 0 10px 28px rgba(37, 99, 235, 0.48);
+        transition:
+          transform 0.12s ease,
+          box-shadow 0.15s ease,
+          opacity 0.2s ease;
+      }
+      .title-start-btn:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 32px rgba(56, 189, 248, 0.6);
+      }
+      .title-start-btn:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+      .title-controls-hint {
+        font-size: 0.72rem;
+        color: #94a3b8;
+        text-align: center;
+      }
     </style>
   </head>
-  <body>
+  <body data-touch-ui="hidden">
     <canvas id="webgl-canvas"></canvas>
+
+    <!-- タイトル画面 & ローディングプログレスオーバーレイ -->
+    <div
+      id="title-screen-overlay"
+      class="interactive"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="title-screen-heading"
+    >
+      <div class="title-screen-card">
+        <span class="title-badge" id="title-screen-badge"
+          >PROJECT PLATEAU × GSI 3D DRIVING SIMULATOR</span
+        >
+        <h2 class="title-hero-heading" id="title-screen-heading">ANTIGRAVITY DEEP DRIVE</h2>
+        <p class="title-hero-subtitle" id="title-screen-subtitle">
+          渋谷ストリーム・明治通り・国道246号 ＆ 東京駅丸の内 オープンデータ3Dドライブ
+        </p>
+
+        <div class="loading-progress-container" id="loading-progress-container">
+          <div class="loading-progress-meta">
+            <span id="loading-status-text">オープンデータ・3D都市空間を初期化中...</span>
+            <span id="loading-percent-text">10%</span>
+          </div>
+          <div
+            class="loading-progress-track"
+            id="loading-progress-bar"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="10"
+          >
+            <div id="loading-progress-fill"></div>
+          </div>
+          <div class="loading-chunk-row">
+            <span id="loading-chunk-detail">CHUNK: shibuya-core (1/3) · MEM: 0.0 / 160 MB</span>
+            <button type="button" class="loading-retry-btn" id="loading-retry-btn">
+              再試行 (Retry)
+            </button>
+          </div>
+        </div>
+
+        <div class="title-options-grid">
+          <div class="title-option-row">
+            <span class="title-option-label" id="title-area-label">スタート地点 (Area)</span>
+            <div class="btn-group" id="title-area-buttons">
+              <button type="button" class="hud-btn active" data-area="shibuya">渋谷</button>
+              <button type="button" class="hud-btn" data-area="tokyo">東京駅・丸の内</button>
+            </div>
+          </div>
+
+          <div class="title-option-row">
+            <span class="title-option-label" id="title-quality-label"
+              >グラフィック品質 (Graphics Quality)</span
+            >
+            <div class="btn-group" id="title-graphics-buttons">
+              <button type="button" class="hud-btn active" data-graphics="high">高</button>
+              <button type="button" class="hud-btn" data-graphics="medium">中</button>
+              <button type="button" class="hud-btn" data-graphics="low">低</button>
+            </div>
+          </div>
+
+          <div class="title-option-row">
+            <span class="title-option-label" id="title-boost-label"
+              >シェーダープレビルド (/boost)</span
+            >
+            <div class="btn-group" id="title-boost-buttons">
+              <button type="button" class="hud-btn" data-boost="on">ON (/boost)</button>
+              <button type="button" class="hud-btn active" data-boost="off">OFF</button>
+              <button type="button" class="hud-btn" id="title-open-asset-manager-btn">
+                アセット管理を開く
+              </button>
+            </div>
+          </div>
+
+          <div class="title-option-row">
+            <span class="title-option-label" id="title-lang-label">表示言語 (Language)</span>
+            <div class="btn-group" id="title-lang-buttons">
+              <button type="button" class="hud-btn active" data-lang="ja">日本語</button>
+              <button type="button" class="hud-btn" data-lang="en">English</button>
+              <button type="button" class="hud-btn" data-lang="zh">中文</button>
+            </div>
+          </div>
+        </div>
+
+        <button type="button" class="title-start-btn" id="start-drive-btn" disabled>
+          DRIVE START — ドライブを開始
+        </button>
+        <p class="title-controls-hint" id="title-controls-hint">
+          キーボード WASD/矢印 ・ マウス移動/L·Rスティック自由視線 ・ タッチ操作 ・ Switch ProCon 1
+          対応
+        </p>
+      </div>
+    </div>
+
+    <!-- オープンワールド・エリア移動 / 先読みストリーミングバナー -->
+    <div id="world-streaming-banner" class="interactive is-hidden" role="status" aria-live="polite">
+      <div class="streaming-banner-top">
+        <span id="streaming-banner-title">エリア周辺アセットを優先読み込み中...</span>
+        <span id="streaming-banner-percent">100%</span>
+      </div>
+      <div class="streaming-banner-track">
+        <div id="streaming-banner-fill"></div>
+      </div>
+      <div class="streaming-banner-bottom">
+        <span id="streaming-banner-detail">CHUNK: shibuya-core · MEM: 68.5 / 160 MB</span>
+        <button type="button" class="loading-retry-btn" id="streaming-banner-retry-btn">
+          再試行
+        </button>
+      </div>
+    </div>
+
+    <!-- UI OFF モード時の復帰用フローティングピルボタン -->
+    <button
+      type="button"
+      class="ui-restore-fab interactive"
+      id="ui-restore-fab"
+      title="UIを再表示 [Tab]"
+      aria-label="UIを再表示 [Tab]"
+    >
+      👁 UI表示 [Tab]
+    </button>
 
     <div id="ui-overlay">
       <!-- ヘッダー -->
       <div class="hud-header">
-        <div class="title-box">
-          <h1>TOKYO STATION DEEP DRIVE</h1>
-          <p>東京都 PLATEAU (千代田区 13101) × 国土地理院 (GSI DEM5A / 道路中心線) 3Dシミュレーター</p>
+        <div class="header-left-stack">
+          <div class="title-box interactive">
+            <div class="title-row">
+              <h1>ANTIGRAVITY DEEP DRIVE</h1>
+              <div class="title-row-actions">
+                <button
+                  type="button"
+                  class="hud-ui-toggle-btn"
+                  id="hud-ui-toggle-btn"
+                  title="UI全パネルを非表示にして3D視界に集中する [Tab]"
+                  aria-pressed="false"
+                >
+                  👁 UI OFF [Tab]
+                </button>
+                <button
+                  type="button"
+                  class="gis-toggle-btn"
+                  id="gis-toggle-btn"
+                  aria-expanded="false"
+                  aria-controls="gis-telemetry-box"
+                >
+                  GIS情報
+                </button>
+              </div>
+            </div>
+            <p id="header-subtitle-text">
+              東京都 PLATEAU (千代田区 13101・渋谷区 13113) × 国土地理院 (GSI DEM5A / 道路中心線)
+              3Dシミュレーター
+            </p>
+          </div>
+
+          <!-- モバイル・タッチ向け 1タップ・クイックアクションバー -->
+          <div
+            class="mobile-quick-bar interactive"
+            id="mobile-quick-bar"
+            role="toolbar"
+            aria-label="クイック操作バー"
+          >
+            <button type="button" class="quick-chip-btn" id="quick-camera-btn">視点: 運転席</button>
+            <button type="button" class="quick-chip-btn active" id="quick-gaze-forward-btn">
+              正面
+            </button>
+            <button type="button" class="quick-chip-btn" id="quick-mirror-left-btn">
+              左ミラー
+            </button>
+            <button type="button" class="quick-chip-btn" id="quick-mirror-rear-btn">ルーム</button>
+            <button type="button" class="quick-chip-btn" id="quick-mirror-right-btn">
+              右ミラー
+            </button>
+            <button type="button" class="quick-chip-btn" id="quick-nav-gaze-btn">計器・ナビ</button>
+            <button type="button" class="quick-chip-btn" id="quick-area-btn">エリア: 渋谷</button>
+            <button type="button" class="quick-chip-btn" id="quick-graphics-btn">画質: 高</button>
+            <button
+              type="button"
+              class="quick-chip-btn active"
+              id="quick-sound-btn"
+              title="エンジン音 ON / ミュート切替 [H]"
+            >
+              🔊 音: ON
+            </button>
+            <button
+              type="button"
+              class="quick-chip-btn"
+              id="quick-asset-manager-btn"
+              title="Webアセット管理システム (/boost 対応) [Y]"
+            >
+              📦 アセット
+            </button>
+            <button type="button" class="quick-chip-btn" id="quick-lang-btn">🌐 日本語</button>
+            <button type="button" class="quick-chip-btn" id="quick-reset-btn">位置リセット</button>
+            <button
+              type="button"
+              class="quick-chip-btn"
+              id="quick-ui-off-btn"
+              title="UI全パネルを非表示にして3D視界に集中する [Tab]"
+            >
+              👁 UI OFF
+            </button>
+            <button
+              type="button"
+              class="quick-chip-btn menu-trigger"
+              id="hud-menu-toggle-btn"
+              aria-expanded="false"
+              aria-controls="hud-controls-drawer"
+            >
+              環境設定
+            </button>
+          </div>
+
+          <div class="gis-telemetry-box" id="gis-telemetry-box">
+            <div class="gis-telemetry-header">
+              <span id="gis-area-header">東京都 PLATEAU 13113 (渋谷区) × 国土地理院 GIS</span>
+              <span id="gis-crs-badge">JGD2011 / DEM5A</span>
+            </div>
+            <div class="gis-row">
+              <span class="gis-label" id="gis-coord-label">座標 / 標高:</span>
+              <span class="gis-val" id="gis-coord-display"
+                >35.65720°N, 139.70290°E (TP +16.40m)</span
+              >
+            </div>
+            <div class="gis-row">
+              <span class="gis-label" id="gis-road-label">GSI 道路網:</span>
+              <span class="gis-val" id="gis-road-display"
+                >明治通り (都道305号芝新宿王子線・渋谷ストリーム前) [rID: 533935-88201]</span
+              >
+            </div>
+            <div class="gis-row">
+              <span class="gis-label" id="gis-bldg-label">PLATEAU 建築:</span>
+              <span class="gis-val" id="gis-bldg-display">渋谷ストリーム (179.95m / 35F)</span>
+            </div>
+            <div class="gis-row">
+              <span class="gis-label" id="gis-streaming-label">空間ストリーミング:</span>
+              <span class="gis-val" id="gis-streaming-display"
+                >shibuya-core [3/9 Chunks · 68.5/160 MB]</span
+              >
+            </div>
+          </div>
         </div>
 
-        <div class="hud-controls interactive">
+        <div class="hud-drawer-backdrop interactive" id="hud-drawer-backdrop"></div>
+
+        <div class="hud-controls interactive" id="hud-controls-drawer">
+          <div class="drawer-header-bar">
+            <span id="drawer-title-text">環境・視点・シミュレーター設定</span>
+            <button type="button" class="hud-btn" id="hud-drawer-close-btn">閉じる</button>
+          </div>
+
+          <!-- 表示言語切り替え（日本語 / 英語 / 中国語） -->
+          <div class="control-panel">
+            <span class="panel-label" id="lang-panel-label">表示言語 (Language) [N]</span>
+            <div class="btn-group" id="lang-buttons">
+              <button type="button" class="hud-btn active" data-lang="ja">日本語</button>
+              <button type="button" class="hud-btn" data-lang="en">English</button>
+              <button type="button" class="hud-btn" data-lang="zh">中文</button>
+            </div>
+          </div>
+
+          <!-- エリア切り替え（渋谷 / 東京駅・丸の内） -->
+          <div class="control-panel">
+            <span class="panel-label" id="area-panel-label">走行エリア (Area) [P]</span>
+            <div class="btn-group" id="area-buttons">
+              <button class="hud-btn active" data-area="shibuya">渋谷</button>
+              <button class="hud-btn" data-area="tokyo">東京駅・丸の内</button>
+            </div>
+          </div>
+
+          <!-- 時間帯切り替え -->
+          <div class="control-panel">
+            <span class="panel-label"
+              ><span id="time-panel-prefix">時間 (Time) [T] — </span
+              ><span id="hud-clock-badge">17:30</span></span
+            >
+            <div class="btn-group" id="time-buttons">
+              <button class="hud-btn" data-time="morning">朝 06:30</button>
+              <button class="hud-btn" data-time="day">昼 12:00</button>
+              <button class="hud-btn active" data-time="sunset">夕暮れ 17:30</button>
+              <button class="hud-btn" data-time="night">夜間 21:00</button>
+            </div>
+          </div>
+
           <!-- 天候切り替え -->
           <div class="control-panel">
-            <span class="panel-label">天候 (Weather)</span>
+            <span class="panel-label" id="weather-panel-label">天候 (Weather)</span>
             <div class="btn-group" id="weather-buttons">
               <button class="hud-btn active" data-weather="clear">晴天</button>
-              <button class="hud-btn" data-weather="sunset">夕暮れ</button>
+              <button class="hud-btn" data-weather="cloudy">曇天</button>
               <button class="hud-btn" data-weather="rain">雨天</button>
-              <button class="hud-btn" data-weather="night">夜間</button>
+            </div>
+          </div>
+
+          <!-- 路面状態切り替え -->
+          <div class="control-panel">
+            <span class="panel-label" id="road-surface-panel-label">路面状態 (Surface) [G]</span>
+            <div class="btn-group" id="road-surface-buttons">
+              <button class="hud-btn" data-surface="dry">乾燥</button>
+              <button class="hud-btn active" data-surface="wet">雨上がり</button>
+              <button class="hud-btn" data-surface="puddle">水たまり</button>
             </div>
           </div>
 
           <!-- 視点切り替え -->
           <div class="control-panel">
-            <span class="panel-label">カメラ視点 [C]</span>
+            <span class="panel-label" id="camera-panel-label">カメラ視点 [C]</span>
             <div class="btn-group" id="camera-buttons">
               <button class="hud-btn active" data-camera="cockpit">ドライバー視点</button>
               <button class="hud-btn" data-camera="chase">追従視点</button>
             </div>
           </div>
 
+          <!-- 視線・安全確認切り替え (UN R125 頭部・体幹回旋連動) -->
+          <div class="control-panel">
+            <span class="panel-label"
+              ><span id="gaze-panel-prefix">視線 (Gaze) [マウス移動 / L·Rスティック / V] — </span
+              ><span id="hud-gaze-badge">正面 (0°, 0°)</span></span
+            >
+            <div class="btn-group" id="gaze-buttons">
+              <button
+                class="hud-btn active"
+                data-gaze="forward"
+                title="正面リセット [V / ダブルクリック]"
+              >
+                正面 [V]
+              </button>
+              <button class="hud-btn" data-gaze="right_mirror" title="右ドアミラー確認 [Shift+E]">
+                右ミラー [Shift+E]
+              </button>
+              <button class="hud-btn" data-gaze="left_mirror" title="左ドアミラー確認 [Shift+Q]">
+                左ミラー [Shift+Q]
+              </button>
+              <button class="hud-btn" data-gaze="rearview_mirror" title="ルームミラー確認 [I]">
+                ルームミラー [I]
+              </button>
+              <button
+                class="hud-btn"
+                data-gaze="dashboard"
+                title="12.3型メーター・11型ナビ確認 [K]"
+              >
+                計器・ナビ [K]
+              </button>
+              <button class="hud-btn" data-gaze="right_shoulder" title="右後方目視 [O]">
+                右目視 [O]
+              </button>
+              <button class="hud-btn" data-gaze="left_shoulder" title="左後方目視 [U]">
+                左目視 [U]
+              </button>
+            </div>
+          </div>
+
+          <!-- ウインカー・ハザード (Q=左ウインカー / E=右ウインカー / Z=ハザード) -->
+          <div class="control-panel">
+            <span class="panel-label"
+              ><span id="turn-signal-panel-prefix">ウインカー (Turn Signal) [Q / E / Z] — </span>
+              <span id="hud-turn-signal-badge">OFF</span></span
+            >
+            <div class="btn-group" id="turn-signal-buttons">
+              <button type="button" class="hud-btn" data-turn-signal="left">◀ 左 [Q]</button>
+              <button type="button" class="hud-btn" data-turn-signal="hazard">
+                ⚠ ハザード [Z]
+              </button>
+              <button type="button" class="hud-btn" data-turn-signal="right">右 ▶ [E]</button>
+              <button type="button" class="hud-btn active" data-turn-signal="off">OFF</button>
+            </div>
+          </div>
+
           <!-- ワイパー -->
           <div class="control-panel">
-            <span class="panel-label">ワイパー [X]</span>
+            <span class="panel-label" id="wiper-panel-label">ワイパー [X]</span>
             <div class="btn-group" id="wiper-buttons">
               <button class="hud-btn" data-wiper="off">OFF</button>
               <button class="hud-btn active" data-wiper="slow">通常</button>
@@ -266,12 +1936,123 @@
             </div>
           </div>
 
+          <!-- エンジン音 (Web Audio 2.5L 直4 マルチステージハイブリッド音響合成) -->
+          <div class="control-panel">
+            <span class="panel-label"
+              ><span id="sound-panel-prefix">エンジン音 (Engine Sound) [H / [·]] — </span>
+              <span id="hud-sound-badge">ON (ACTIVE)</span></span
+            >
+            <div class="btn-group" id="sound-buttons">
+              <button type="button" class="hud-btn active" data-sound="on">ON</button>
+              <button type="button" class="hud-btn" data-sound="off">ミュート</button>
+            </div>
+            <div class="sound-volume-row">
+              <input
+                type="range"
+                id="sound-volume-slider"
+                class="sound-volume-slider"
+                min="0"
+                max="100"
+                step="5"
+                value="75"
+                aria-label="エンジン音量 (Engine Volume) [[ / ]]"
+              />
+              <span class="sound-volume-value" id="sound-volume-value">75%</span>
+            </div>
+          </div>
+
           <!-- モーションブラー -->
           <div class="control-panel">
-            <span class="panel-label">モーションブラー [B]</span>
+            <span class="panel-label" id="blur-panel-label">モーションブラー [B]</span>
             <div class="btn-group" id="blur-buttons">
               <button class="hud-btn active" data-blur="on">ON</button>
               <button class="hud-btn" data-blur="off">OFF</button>
+            </div>
+          </div>
+
+          <!-- グラフィック品質（高 / 中 / 低） -->
+          <div class="control-panel">
+            <span class="panel-label"
+              ><span id="graphics-panel-prefix">グラフィック品質 (Graphics) [F] — </span>
+              <span id="hud-graphics-badge">高 (HIGH)</span></span
+            >
+            <div class="btn-group" id="graphics-buttons">
+              <button type="button" class="hud-btn active" data-graphics="high">高</button>
+              <button type="button" class="hud-btn" data-graphics="medium">中</button>
+              <button type="button" class="hud-btn" data-graphics="low">低</button>
+            </div>
+          </div>
+
+          <!-- シェーダープレビルド (/boost) -->
+          <div class="control-panel">
+            <span class="panel-label"
+              ><span id="boost-panel-prefix">シェーダープレビルド (/boost) — </span>
+              <span id="hud-boost-badge">OFF</span></span
+            >
+            <div class="btn-group" id="boost-buttons">
+              <button type="button" class="hud-btn" data-boost="on">ON (/boost)</button>
+              <button type="button" class="hud-btn active" data-boost="off">OFF</button>
+            </div>
+          </div>
+
+          <!-- HUD UI 表示モード（UI ON / UI OFF 没入モード） -->
+          <div class="control-panel">
+            <span class="panel-label" id="ui-visibility-panel-label"
+              >HUD UI表示 (UI Mode) [Tab]</span
+            >
+            <div class="btn-group" id="ui-visibility-buttons">
+              <button type="button" class="hud-btn active" data-ui-visibility="on">
+                UI表示 (ON)
+              </button>
+              <button type="button" class="hud-btn" data-ui-visibility="off">
+                UI OFF (没入モード) [Tab]
+              </button>
+            </div>
+          </div>
+
+          <!-- タッチコントローラー表示モード -->
+          <div class="control-panel">
+            <span class="panel-label" id="touch-ui-panel-label">タッチ操作パッド (Touch UI)</span>
+            <div class="btn-group" id="touch-ui-mode-buttons">
+              <button type="button" class="hud-btn active" data-touch-ui-mode="auto">
+                自動検出
+              </button>
+              <button type="button" class="hud-btn" data-touch-ui-mode="on">常時表示</button>
+              <button type="button" class="hud-btn" data-touch-ui-mode="off">非表示</button>
+            </div>
+          </div>
+
+          <!-- 道路標識作成・配置システム -->
+          <div class="control-panel">
+            <span class="panel-label" id="sign-builder-panel-label">道路標識ビルダー [M]</span>
+            <div class="btn-group">
+              <button type="button" class="hud-btn" id="open-sign-creator-btn">
+                標識作成・配置
+              </button>
+            </div>
+          </div>
+
+          <!-- Webアセット管理システム (/boost シェーダーパイプライン連動) -->
+          <div class="control-panel">
+            <span class="panel-label" id="asset-manager-panel-label"
+              >Webアセット管理システム [Y]</span
+            >
+            <div class="btn-group">
+              <button type="button" class="hud-btn" id="open-asset-manager-btn">
+                アセット管理を開く
+              </button>
+            </div>
+          </div>
+
+          <!-- コントローラー (Nintendo Switch Pro Controller 第1世代) 接続ステータス -->
+          <div class="control-panel">
+            <span class="panel-label" id="gamepad-panel-label"
+              >コントローラー (Switch ProCon 1)</span
+            >
+            <div class="btn-group">
+              <span class="hud-btn" id="gamepad-status-badge"
+                >ProCon 1 待機中 (USB / Bluetooth 接続で自動認識)</span
+              >
             </div>
           </div>
         </div>
@@ -280,31 +2061,33 @@
       <!-- フッター -->
       <div class="hud-footer">
         <div class="footer-left-stack">
-          <div class="gis-telemetry-box" id="gis-telemetry-box">
-            <div class="gis-telemetry-header">
-              <span>東京都 PLATEAU 13101 × 国土地理院 GIS</span>
-              <span id="gis-crs-badge">JGD2011 / DEM5A</span>
-            </div>
-            <div class="gis-row">
-              <span class="gis-label">座標 / 標高:</span>
-              <span class="gis-val" id="gis-coord-display">35.681788°N, 139.764974°E (TP +3.18m)</span>
-            </div>
-            <div class="gis-row">
-              <span class="gis-label">GSI 道路網:</span>
-              <span class="gis-val" id="gis-road-display">行幸通り (都道404号) [rID: 50313-12843]</span>
-            </div>
-            <div class="gis-row">
-              <span class="gis-label">PLATEAU 建築:</span>
-              <span class="gis-val" id="gis-bldg-display">新丸の内ビルディング (199.9m / 37F)</span>
-            </div>
-          </div>
-
           <div class="controls-guide">
-            <div><kbd>W</kbd> / <kbd>↑</kbd> : 前進・加速</div>
-            <div><kbd>S</kbd> / <kbd>↓</kbd> : ブレーキ・後退</div>
-            <div><kbd>A</kbd> / <kbd>D</kbd> or <kbd>←</kbd> / <kbd>→</kbd> : ステアリング操舵</div>
-            <div><kbd>Space</kbd> : ハンドブレーキ | <kbd>R</kbd> : 車両リセット</div>
-            <div><kbd>C</kbd> : 視点切り替え | <kbd>X</kbd> : ワイパー切替 | <kbd>B</kbd> : モーションブラー</div>
+            <div id="controls-guide-line-1">
+              <kbd>W</kbd>/<kbd>↑</kbd> 加速 | <kbd>S</kbd>/<kbd>↓</kbd> 制動・後退 |
+              <kbd>A</kbd>/<kbd>D</kbd> 操舵 | <kbd>Q</kbd>/<kbd>E</kbd> 左右ウインカー |
+              <kbd>Z</kbd> ハザード | <kbd>Space</kbd> サイドブレーキ | <kbd>R</kbd> リセット
+            </div>
+            <div id="controls-guide-line-2">
+              <kbd>マウス移動</kbd> 自由視線 | <kbd>Shift+Q</kbd>/<kbd>Shift+E</kbd> 左右ミラー |
+              <kbd>I</kbd> ルームミラー | <kbd>K</kbd> 計器・ナビ | <kbd>U</kbd>/<kbd>O</kbd>
+              左右目視 | <kbd>J</kbd>/<kbd>L</kbd> 首振り | <kbd>V</kbd> 正面
+            </div>
+            <div id="controls-guide-line-3">
+              <kbd>Tab</kbd> UI OFF切替 | <kbd>P</kbd> エリア切替 | <kbd>C</kbd> 視点切替 |
+              <kbd>T</kbd> 時間切替 | <kbd>G</kbd> 路面状態 | <kbd>X</kbd> ワイパー切替 |
+              <kbd>H</kbd>/<kbd>[</kbd>/<kbd>]</kbd> エンジン音・音量 |
+              <kbd>B</kbd> モーションブラー | <kbd>F</kbd> 画質切替 | <kbd>M</kbd> 標識作成 |
+              <kbd>Y</kbd> アセット管理 | <kbd>N</kbd> 言語切替
+            </div>
+            <div id="controls-guide-line-4">
+              <kbd>Switch ProCon 1</kbd> <kbd>Lスティック</kbd> 操舵・視線 | <kbd>ZR</kbd>/<kbd
+                >A</kbd
+              >
+              加速 | <kbd>ZL</kbd>/<kbd>B</kbd> 制動 | <kbd>Y</kbd> サイド |
+              <kbd>Rスティック</kbd> 視線 | <kbd>L</kbd>/<kbd>R</kbd> 左右ミラー |
+              <kbd>十字</kbd> ミラー・ナビ・ワイパー・時間 | <kbd>L3</kbd> 路面 | <kbd>X</kbd> 視点
+              | <kbd>-</kbd>/<kbd>+</kbd> エリア/リセット | <kbd>Capture</kbd> 画質
+            </div>
           </div>
         </div>
 
@@ -314,10 +2097,250 @@
             <span class="speed-num" id="speed-display">0</span>
             <span class="speed-unit">km/h</span>
           </div>
+          <div class="turn-signal-hud-indicator" id="turn-signal-status">TURN SIGNAL: OFF</div>
+          <div class="motion-blur-indicator" id="sound-status">ENGINE AUDIO: ON</div>
           <div class="motion-blur-indicator" id="blur-status">MOTION BLUR: ACTIVE</div>
+          <div class="motion-blur-indicator" id="graphics-status">GRAPHICS: 高 (HIGH)</div>
+          <div class="motion-blur-indicator" id="boost-status">SHADER BOOST: OFF</div>
+          <div class="motion-blur-indicator" id="streaming-status">
+            STREAMING: 3/9 CHUNKS · 68.5 MB
+          </div>
+          <div class="motion-blur-indicator" id="gamepad-hud-status">
+            ProCon 1 待機中 (USB / Bluetooth 接続で自動認識)
+          </div>
+        </div>
+
+        <!-- スマートフォン・タブレット用 仮想マルチタッチ操作パッド -->
+        <div
+          class="virtual-touch-controls"
+          id="virtual-touch-controls"
+          aria-label="タッチ運転コントローラー"
+        >
+          <!-- 左親指: アナログステアリングスライダー + 左右ボタン -->
+          <div class="touch-cluster" id="touch-steer-cluster" aria-label="ステアリング操作">
+            <div class="touch-cluster-header">
+              <span>STEERING</span>
+              <span class="touch-steer-readout" id="touch-steer-readout">0%</span>
+            </div>
+            <div
+              class="touch-steer-pad"
+              id="touch-steer-pad"
+              role="slider"
+              aria-label="アナログステアリングパッド"
+              aria-valuemin="-100"
+              aria-valuemax="100"
+              aria-valuenow="0"
+            >
+              <div class="touch-steer-axis-labels">
+                <span>◀ L</span>
+                <span>R ▶</span>
+              </div>
+              <div class="touch-steer-center-mark"></div>
+              <div class="touch-steer-thumb" id="touch-steer-thumb"></div>
+            </div>
+            <div class="touch-steer-btn-row">
+              <button
+                type="button"
+                class="touch-control-btn"
+                id="touch-steer-left"
+                aria-label="左操舵"
+              >
+                <span id="touch-steer-left-main">◀ 左</span>
+                <span class="sub-caption" id="touch-steer-left-sub">STEER L</span>
+              </button>
+              <button
+                type="button"
+                class="touch-control-btn"
+                id="touch-steer-right"
+                aria-label="右操舵"
+              >
+                <span id="touch-steer-right-main">右 ▶</span>
+                <span class="sub-caption" id="touch-steer-right-sub">STEER R</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 右親指: サイドブレーキ / ブレーキ・後退 / アクセル -->
+          <div class="touch-cluster" id="touch-pedal-cluster" aria-label="ペダル操作">
+            <div class="touch-cluster-header">
+              <span>PEDALS</span>
+              <span>MULTI-TOUCH</span>
+            </div>
+            <div class="touch-pedal-grid">
+              <button
+                type="button"
+                class="touch-control-btn pedal-handbrake"
+                id="touch-handbrake-btn"
+                aria-label="サイドブレーキ"
+              >
+                <span>P</span>
+                <span class="sub-caption" id="touch-handbrake-sub">SIDE</span>
+              </button>
+              <button
+                type="button"
+                class="touch-control-btn pedal-brake"
+                id="touch-brake-btn"
+                aria-label="ブレーキ・後退"
+              >
+                <span>BRAKE</span>
+                <span class="sub-caption" id="touch-brake-sub">制動 / R</span>
+              </button>
+              <button
+                type="button"
+                class="touch-control-btn pedal-throttle"
+                id="touch-throttle-btn"
+                aria-label="アクセル"
+              >
+                <span>ACCEL</span>
+                <span class="sub-caption" id="touch-throttle-sub">加速</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
+
+    <!-- 道路標識作成・配置システム ネイティブモーダル (<dialog closedby="any">) -->
+    <dialog id="sign-creator-dialog" closedby="any" aria-labelledby="sign-creator-title">
+      <div class="sign-dialog-header">
+        <h2 id="sign-creator-title">道路標識作成・配置システム（JDM 道路標識令準拠）</h2>
+        <button type="button" class="hud-btn" id="close-sign-creator-btn">閉じる [Esc]</button>
+      </div>
+      <div class="sign-dialog-body">
+        <div class="sign-preview-pane">
+          <canvas id="sign-preview-canvas" width="280" height="240"></canvas>
+          <div class="sign-validation-box" id="sign-validation-status">
+            構造保証チェック待機中...
+          </div>
+        </div>
+        <div class="sign-form-pane">
+          <div class="sign-field-grid">
+            <div class="sign-field full-width">
+              <label for="sign-type-select" id="sign-field-type-label"
+                >標識種別（全15種カタログ）</label
+              >
+              <select id="sign-type-select"></select>
+            </div>
+            <div class="sign-field">
+              <label for="sign-label-input" id="sign-field-main-label"
+                >主ラベル（日本語名称 / 方面）</label
+              >
+              <input id="sign-label-input" type="text" value="行幸通り" />
+            </div>
+            <div class="sign-field">
+              <label for="sign-sublabel-input" id="sign-field-sub-label">英語サブラベル</label>
+              <input id="sign-sublabel-input" type="text" value="Gyoko-dori Ave." />
+            </div>
+            <div class="sign-field">
+              <label for="sign-aux-input" id="sign-field-aux-label"
+                >補助標識テキスト（空欄で省略）</label
+              >
+              <input id="sign-aux-input" type="text" value="ここまで" />
+            </div>
+            <div class="sign-field">
+              <label for="sign-speed-input" id="sign-field-speed-label">制限速度 (km/h)</label>
+              <input id="sign-speed-input" type="number" min="10" max="120" step="10" value="50" />
+            </div>
+            <div class="sign-field">
+              <label for="sign-distance-input" id="sign-field-distance-label"
+                >自車前方距離 (m)</label
+              >
+              <input id="sign-distance-input" type="number" min="5" max="120" step="1" value="18" />
+            </div>
+            <div class="sign-field">
+              <label for="sign-offset-input" id="sign-field-offset-label"
+                >左歩道オフセット (m)</label
+              >
+              <input
+                id="sign-offset-input"
+                type="number"
+                min="-20"
+                max="20"
+                step="0.5"
+                value="4.2"
+              />
+            </div>
+          </div>
+
+          <div class="sign-action-row">
+            <button type="button" class="hud-btn active" id="place-sign-ahead-btn">
+              自車の前方（左歩道・正対向き）に配置
+            </button>
+            <button type="button" class="hud-btn" id="copy-sign-yaml-btn">YAML定義をコピー</button>
+          </div>
+
+          <div class="sign-field full-width">
+            <label for="sign-yaml-textarea" id="sign-yaml-section-label"
+              >assets.yml 用 宣言的スニペット</label
+            >
+            <textarea id="sign-yaml-textarea" class="sign-yaml-output" readonly></textarea>
+          </div>
+
+          <div class="sign-field full-width">
+            <label id="sign-custom-list-label">配置済みカスタム標識（クリックで削除）</label>
+            <div class="sign-custom-list" id="sign-custom-list"></div>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Webアセット管理システム ネイティブモーダル (<dialog closedby="any">) -->
+    <dialog id="asset-manager-dialog" closedby="any" aria-labelledby="asset-manager-title">
+      <div class="asset-dialog-header">
+        <h2 id="asset-manager-title">
+          Webアセット管理システム（assets.yml × /boost シェーダーパイプライン）
+        </h2>
+        <div class="asset-header-actions">
+          <button type="button" class="hud-btn active" id="asset-manager-run-boost-btn">
+            ⚡ /boost シェーダープレビルド実行
+          </button>
+          <button type="button" class="hud-btn" id="asset-manager-reset-all-btn">
+            規定マニフェストにリセット
+          </button>
+          <button type="button" class="hud-btn" id="close-asset-manager-btn">閉じる [Esc]</button>
+        </div>
+      </div>
+
+      <div class="asset-summary-bar" id="asset-manager-summary-bar"></div>
+
+      <div class="asset-manager-toolbar">
+        <div class="btn-group" id="asset-manager-tabs" role="tablist">
+          <button type="button" class="hud-btn active" data-asset-tab="models">3Dモデル (4)</button>
+          <button type="button" class="hud-btn" data-asset-tab="textures3d">
+            3Dテクスチャ (2)
+          </button>
+          <button type="button" class="hud-btn" data-asset-tab="roads">道路定義 (4)</button>
+          <button type="button" class="hud-btn" data-asset-tab="signs">道路標識 (6)</button>
+          <button type="button" class="hud-btn" data-asset-tab="weather">環境・天候 (6)</button>
+          <button type="button" class="hud-btn" data-asset-tab="yaml">YAML検証・出力</button>
+        </div>
+        <input
+          type="search"
+          id="asset-manager-search-input"
+          class="asset-search-input"
+          placeholder="アセットID・パス・名称で検索..."
+          aria-label="アセット検索"
+        />
+      </div>
+
+      <div class="asset-manager-body">
+        <div class="asset-preview-column">
+          <canvas id="asset-manager-preview-canvas" width="280" height="220"></canvas>
+          <div
+            class="asset-status-banner"
+            id="asset-manager-status-banner"
+            data-tone="info"
+            role="status"
+          >
+            Zod AssetManifestSchema 検証済み — 変更は即座に 3D シーンと assets.yml に同期されます。
+          </div>
+        </div>
+
+        <div class="asset-list-column" id="asset-manager-item-list" role="listbox"></div>
+
+        <div class="asset-editor-column" id="asset-manager-editor-pane"></div>
+      </div>
+    </dialog>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

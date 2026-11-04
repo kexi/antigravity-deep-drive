@@ -3,7 +3,15 @@ import { TOKYO_MARUNOUCHI_OPEN_DATA } from "./tokyoMarunouchiOpenData";
 
 export type TokyoOpenDataBundle = typeof TOKYO_MARUNOUCHI_OPEN_DATA;
 export type PlateauBuildingRecord = TokyoOpenDataBundle["plateauBuildings"][number];
-export type GsiRoadSegmentRecord = TokyoOpenDataBundle["gsiRoadSegments"][number];
+export interface GsiRoadSegmentRecord {
+  readonly rID: string;
+  readonly rdCtg: string;
+  readonly rnkWidth: string;
+  readonly displayName: string;
+  readonly routeCode: string;
+  readonly start: { readonly x: number; readonly z: number };
+  readonly end: { readonly x: number; readonly z: number };
+}
 export type PlateauWaterBodyRecord = TokyoOpenDataBundle["waterBodies"][number];
 
 export interface Wgs84Coordinate {
@@ -139,10 +147,25 @@ export function wgs84ToLocal(lat: number, lon: number): LocalCoordinate {
 }
 
 /**
- * 東京駅丸の内ローカル3D座標 (x, z) を JGD2011 / WGS84 緯度経度 (lat, lon) に逆変換する。
+ * 東京駅丸の内 / 渋谷ストリームローカル3D座標 (x, z) を JGD2011 / WGS84 緯度経度 (lat, lon) に逆変換する。
  * How: 直交回転行列の転置（逆変換）により東西・南北メートル変位を復元し、緯度経度へ換算する。
+ * 渋谷ゾーン (x < -550) では渋谷ストリーム (35.65722°N, 139.70319°E, local: -695, -15) をアンカーとして実在座標へ変換する。
  */
 export function localToWgs84(x: number, z: number): Wgs84Coordinate {
+  const isShibuyaZone = x < -550;
+  if (isShibuyaZone) {
+    const shibuyaOriginLat = 35.65722;
+    const shibuyaOriginLon = 139.70319;
+    const eastM = x - -695.0;
+    const northM = -(z - -15.0);
+    const lon = shibuyaOriginLon + eastM / METERS_PER_DEG_LON;
+    const lat = shibuyaOriginLat + northM / METERS_PER_DEG_LAT;
+    return {
+      lat: Number(lat.toFixed(7)),
+      lon: Number(lon.toFixed(7)),
+    };
+  }
+
   const origin = activeOpenData.metadata.origin;
   const eastM = z * COS_THETA + x * SIN_THETA;
   const northM = z * SIN_THETA - x * COS_THETA;
@@ -160,6 +183,15 @@ export function localToWgs84(x: number, z: number): Wgs84Coordinate {
  * 国土地理院 地理院タイル DEM5A (5mメッシュ航空レーザ測量標高) から指定ローカル座標の標高 (TP +m) をバイリニア補間する。
  */
 export function sampleGsiDemElevation(x: number, z: number): number {
+  const isShibuyaZone = x < -550;
+  if (isShibuyaZone) {
+    // 渋谷川・明治通り谷底 (x=-750..-680: TP +15.2m) から東側宮益坂・ヒカリエ、西側桜丘町へのスリバチ地形標高モデル
+    const valleyOffset = Math.abs(x - -720.0);
+    const slopeGain = Math.max(0, valleyOffset - 35.0) * 0.065;
+    const northSouthSlope = Math.max(0, z + 50.0) * 0.008;
+    return Number((15.2 + slopeGain + northSouthSlope).toFixed(2));
+  }
+
   const dem = activeOpenData.dem5a;
   const clampedX = Math.max(dem.xMin, Math.min(dem.xMax, x));
   const clampedZ = Math.max(dem.zMin, Math.min(dem.zMax, z));
@@ -187,16 +219,434 @@ export function sampleGsiDemElevation(x: number, z: number): number {
   return Number(interpolated.toFixed(2));
 }
 
+export interface ShibuyaPlateauBuildingRecord {
+  buildingId: string;
+  gmlId: string;
+  name: string;
+  nameEn: string;
+  address: string;
+  usage: string;
+  measuredHeight: number;
+  podiumHeight: number;
+  storeysAboveGround: number;
+  storeysBelowGround: number;
+  roofEdgeAreaSqm: number;
+  groundElevationM: number;
+  lat: number;
+  lon: number;
+  localX: number;
+  localZ: number;
+  width: number;
+  depth: number;
+  color: number;
+  podiumColor: number;
+  glass: number;
+  warmInterior: number;
+}
+
+/**
+ * 東京都 Project PLATEAU 渋谷区 (13113) 渋谷ストリーム周辺の実在建築物レコード。
+ * How: 渋谷ストリーム（渋谷三丁目21-3, 180.0m, 35F/B4F）を中心に、明治通り・国道246号・渋谷川沿いの再開発高層ビル群を配置する。
+ */
+export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] = [
+  {
+    buildingId: "13113-bldg-shibuya-stream",
+    gmlId: "bldg_shibuya_stream_35f",
+    name: "渋谷ストリーム",
+    nameEn: "Shibuya Stream",
+    address: "東京都渋谷区渋谷三丁目21番3号",
+    usage: "業務施設・商業施設・宿泊施設",
+    measuredHeight: 179.95,
+    podiumHeight: 31.0,
+    storeysAboveGround: 35,
+    storeysBelowGround: 4,
+    roofEdgeAreaSqm: 3820.0,
+    groundElevationM: 15.2,
+    lat: 35.65722,
+    lon: 139.70319,
+    localX: -695.0,
+    localZ: -15.0,
+    width: 44.0,
+    depth: 92.0,
+    color: 0xe2e8f0,
+    podiumColor: 0x334155,
+    glass: 0x38bdf8,
+    warmInterior: 0xfef3c7,
+  },
+  {
+    buildingId: "13113-bldg-scramble-square",
+    gmlId: "bldg_shibuya_scramble_square_east_47f",
+    name: "渋谷スクランブルスクエア 東棟",
+    nameEn: "Shibuya Scramble Square East Tower",
+    address: "東京都渋谷区渋谷二丁目24番12号",
+    usage: "業務施設・商業施設",
+    measuredHeight: 229.7,
+    podiumHeight: 38.0,
+    storeysAboveGround: 47,
+    storeysBelowGround: 7,
+    roofEdgeAreaSqm: 4450.0,
+    groundElevationM: 15.8,
+    lat: 35.65845,
+    lon: 139.70225,
+    localX: -808.0,
+    localZ: 145.0,
+    width: 58.0,
+    depth: 62.0,
+    color: 0x1e293b,
+    podiumColor: 0x94a3b8,
+    glass: 0x7dd3fc,
+    warmInterior: 0xfef08a,
+  },
+  {
+    buildingId: "13113-bldg-shibuya-hikarie",
+    gmlId: "bldg_shibuya_hikarie_34f",
+    name: "渋谷ヒカリエ",
+    nameEn: "Shibuya Hikarie",
+    address: "東京都渋谷区渋谷二丁目21番1号",
+    usage: "業務施設・文化施設・商業施設",
+    measuredHeight: 182.5,
+    podiumHeight: 36.0,
+    storeysAboveGround: 34,
+    storeysBelowGround: 4,
+    roofEdgeAreaSqm: 4120.0,
+    groundElevationM: 21.4,
+    lat: 35.65902,
+    lon: 139.70348,
+    localX: -692.0,
+    localZ: 146.0,
+    width: 54.0,
+    depth: 56.0,
+    color: 0x25384e,
+    podiumColor: 0xcbd5e1,
+    glass: 0x93c5fd,
+    warmInterior: 0xfde68a,
+  },
+  {
+    buildingId: "13113-bldg-sakura-stage",
+    gmlId: "bldg_shibuya_sakura_stage_shibuya_tower_39f",
+    name: "渋谷サクラステージ SHIBUYAタワー",
+    nameEn: "Shibuya Sakura Stage SHIBUYA Tower",
+    address: "東京都渋谷区桜丘町1番1号",
+    usage: "業務施設・商業施設",
+    measuredHeight: 179.9,
+    podiumHeight: 32.0,
+    storeysAboveGround: 39,
+    storeysBelowGround: 4,
+    roofEdgeAreaSqm: 4380.0,
+    groundElevationM: 18.5,
+    lat: 35.65665,
+    lon: 139.70085,
+    localX: -812.0,
+    localZ: -25.0,
+    width: 56.0,
+    depth: 66.0,
+    color: 0x334155,
+    podiumColor: 0xd6d3d1,
+    glass: 0xfda4af,
+    warmInterior: 0xfef3c7,
+  },
+  {
+    buildingId: "13113-bldg-shibuya-fukuras",
+    gmlId: "bldg_shibuya_fukuras_18f",
+    name: "渋谷フクラス (東急プラザ渋谷)",
+    nameEn: "Shibuya Fukuras (Tokyu Plaza Shibuya)",
+    address: "東京都渋谷区道玄坂一丁目2番3号",
+    usage: "業務施設・商業施設",
+    measuredHeight: 103.3,
+    podiumHeight: 28.0,
+    storeysAboveGround: 18,
+    storeysBelowGround: 4,
+    roofEdgeAreaSqm: 3150.0,
+    groundElevationM: 17.6,
+    lat: 35.65798,
+    lon: 139.69952,
+    localX: -815.0,
+    localZ: 46.0,
+    width: 50.0,
+    depth: 48.0,
+    color: 0x2d3748,
+    podiumColor: 0x94a3b8,
+    glass: 0x60a5fa,
+    warmInterior: 0xfde68a,
+  },
+  {
+    buildingId: "13113-bldg-shibuya-cast",
+    gmlId: "bldg_shibuya_bridge_east_office",
+    name: "渋谷三丁目イーストビル (明治通り並木街区)",
+    nameEn: "Shibuya 3-Chome East Office Tower",
+    address: "東京都渋谷区渋谷三丁目",
+    usage: "業務施設",
+    measuredHeight: 112.0,
+    podiumHeight: 26.0,
+    storeysAboveGround: 24,
+    storeysBelowGround: 2,
+    roofEdgeAreaSqm: 2680.0,
+    groundElevationM: 14.8,
+    lat: 35.6552,
+    lon: 139.7042,
+    localX: -692.0,
+    localZ: -135.0,
+    width: 48.0,
+    depth: 52.0,
+    color: 0x273549,
+    podiumColor: 0xcbd5e1,
+    glass: 0x60a5fa,
+    warmInterior: 0xe0f2fe,
+  },
+  {
+    buildingId: "13113-bldg-meiji-dori-south-west",
+    gmlId: "bldg_shibuya_namikibashi_west_tower_18f",
+    name: "渋谷並木橋ウエストビル (桜丘南街区)",
+    nameEn: "Shibuya Namikibashi West Tower",
+    address: "東京都渋谷区桜丘町",
+    usage: "業務施設・商業施設",
+    measuredHeight: 84.0,
+    podiumHeight: 22.0,
+    storeysAboveGround: 18,
+    storeysBelowGround: 2,
+    roofEdgeAreaSqm: 2350.0,
+    groundElevationM: 15.0,
+    lat: 35.6548,
+    lon: 139.7012,
+    localX: -816.0,
+    localZ: -135.0,
+    width: 44.0,
+    depth: 50.0,
+    color: 0x334155,
+    podiumColor: 0xd6d3d1,
+    glass: 0x7dd3fc,
+    warmInterior: 0xfef3c7,
+  },
+  {
+    buildingId: "13113-bldg-aoyama-oval",
+    gmlId: "bldg_aoyama_oval_building_16f",
+    name: "青山オーバルビル (国道246号・表参道街区)",
+    nameEn: "Aoyama Oval Building",
+    address: "東京都渋谷区神宮前五丁目52番2号",
+    usage: "業務施設・商業施設",
+    measuredHeight: 72.0,
+    podiumHeight: 22.0,
+    storeysAboveGround: 16,
+    storeysBelowGround: 2,
+    roofEdgeAreaSqm: 2450.0,
+    groundElevationM: 28.5,
+    lat: 35.6625,
+    lon: 139.7088,
+    localX: -565.0,
+    localZ: 152.0,
+    width: 52.0,
+    depth: 42.0,
+    color: 0x334155,
+    podiumColor: 0xd6d3d1,
+    glass: 0x7dd3fc,
+    warmInterior: 0xfef3c7,
+  },
+  {
+    buildingId: "13113-bldg-shibuya-first-tower",
+    gmlId: "bldg_shibuya_first_tower_20f",
+    name: "渋谷ファーストタワー (金王坂・青山通り南街区)",
+    nameEn: "Shibuya First Tower",
+    address: "東京都渋谷区東一丁目2番20号",
+    usage: "業務施設",
+    measuredHeight: 95.0,
+    podiumHeight: 25.0,
+    storeysAboveGround: 20,
+    storeysBelowGround: 3,
+    roofEdgeAreaSqm: 2780.0,
+    groundElevationM: 24.2,
+    lat: 35.6588,
+    lon: 139.7076,
+    localX: -565.0,
+    localZ: 42.0,
+    width: 48.0,
+    depth: 44.0,
+    color: 0x1e293b,
+    podiumColor: 0x94a3b8,
+    glass: 0x38bdf8,
+    warmInterior: 0xfde68a,
+  },
+  {
+    buildingId: "13103-bldg-aoyama-twins",
+    gmlId: "bldg_shin_aoyama_building_23f",
+    name: "新青山ビル (青山ツイン・国道246号沿道)",
+    nameEn: "Shin-Aoyama Building (Aoyama Twin)",
+    address: "東京都港区南青山一丁目1番1号",
+    usage: "業務施設・商業施設",
+    measuredHeight: 92.4,
+    podiumHeight: 24.0,
+    storeysAboveGround: 23,
+    storeysBelowGround: 4,
+    roofEdgeAreaSqm: 3420.0,
+    groundElevationM: 29.8,
+    lat: 35.6722,
+    lon: 139.7245,
+    localX: -488.0,
+    localZ: 152.0,
+    width: 48.0,
+    depth: 42.0,
+    color: 0x273549,
+    podiumColor: 0xcbd5e1,
+    glass: 0x60a5fa,
+    warmInterior: 0xfef08a,
+  },
+  {
+    buildingId: "13103-bldg-akasaka-intercity",
+    gmlId: "bldg_akasaka_aoyama_avenue_tower_28f",
+    name: "青山通りアベニュータワー (赤坂・表参道街区)",
+    nameEn: "Aoyama-dori Avenue Tower",
+    address: "東京都港区北青山三丁目",
+    usage: "業務施設・商業施設",
+    measuredHeight: 118.0,
+    podiumHeight: 28.0,
+    storeysAboveGround: 28,
+    storeysBelowGround: 3,
+    roofEdgeAreaSqm: 2960.0,
+    groundElevationM: 27.4,
+    lat: 35.6685,
+    lon: 139.7185,
+    localX: -488.0,
+    localZ: 42.0,
+    width: 48.0,
+    depth: 44.0,
+    color: 0x1e3a5f,
+    podiumColor: 0x94a3b8,
+    glass: 0x93c5fd,
+    warmInterior: 0xfef3c7,
+  },
+];
+
+export const SHIBUYA_GSI_ROAD_SEGMENTS: readonly GsiRoadSegmentRecord[] = [
+  {
+    rID: "533935-shibuya-rdcl-30501",
+    rdCtg: "都道府県道",
+    rnkWidth: "19.5m以上",
+    displayName: "明治通り (都道305号芝新宿王子線・渋谷ストリーム前)",
+    routeCode: "東京都道305号",
+    start: { x: -750, z: -220 },
+    end: { x: -750, z: 240 },
+  },
+  {
+    rID: "533935-shibuya-rdcl-24601",
+    rdCtg: "国道",
+    rnkWidth: "19.5m以上",
+    displayName: "国道246号・青山通り・玉川通り (渋谷ストリーム北交差点)",
+    routeCode: "国道246号",
+    start: { x: -860, z: 95 },
+    end: { x: -268, z: 95 },
+  },
+  {
+    rID: "533935-shibuya-rdcl-river01",
+    rdCtg: "市区町村道等",
+    rnkWidth: "5.5m-13m未満",
+    displayName: "渋谷川遊歩道・稲荷橋広場通り (渋谷区道)",
+    routeCode: "渋谷区特別区道",
+    start: { x: -735, z: -180 },
+    end: { x: -735, z: 80 },
+  },
+  {
+    rID: "533935-shibuya-rdcl-inaribashi-st",
+    rdCtg: "市区町村道等",
+    rnkWidth: "5.5m-13m未満",
+    displayName: "稲荷橋通り・サクラステージ南通り (渋谷区道)",
+    routeCode: "渋谷区道稲荷橋線",
+    start: { x: -855, z: -95 },
+    end: { x: -645, z: -95 },
+  },
+  {
+    rID: "533935-shibuya-rdcl-namikibashi-st",
+    rdCtg: "市区町村道等",
+    rnkWidth: "5.5m-13m未満",
+    displayName: "並木橋・八幡通り連絡路 (渋谷区道)",
+    routeCode: "渋谷区道並木橋線",
+    start: { x: -855, z: -200 },
+    end: { x: -645, z: -200 },
+  },
+  {
+    rID: "533935-shibuya-rdcl-miyashita-st",
+    rdCtg: "市区町村道等",
+    rnkWidth: "5.5m-13m未満",
+    displayName: "宮下公園・美竹通り連絡路 (渋谷区道)",
+    routeCode: "渋谷区道美竹線",
+    start: { x: -855, z: 195 },
+    end: { x: -645, z: 195 },
+  },
+  {
+    rID: "533935-shibuya-rdcl-west-loop",
+    rdCtg: "市区町村道等",
+    rnkWidth: "5.5m-13m未満",
+    displayName: "渋谷西口・桜丘ウエスト通り (渋谷区道)",
+    routeCode: "渋谷区道桜丘西線",
+    start: { x: -855, z: -200 },
+    end: { x: -855, z: 195 },
+  },
+  {
+    rID: "533935-shibuya-rdcl-east-konnozaka",
+    rdCtg: "市区町村道等",
+    rnkWidth: "5.5m-13m未満",
+    displayName: "金王坂・渋谷三丁目イースト通り (渋谷区道)",
+    routeCode: "渋谷区道金王坂線",
+    start: { x: -645, z: -200 },
+    end: { x: -645, z: 195 },
+  },
+];
+
+/**
+ * 渋谷エリア（渋谷ストリーム周辺）の PLATEAU 建築物リストを取得する。
+ */
+export function getShibuyaPlateauBuildingsForMap(): PlateauBuildingRenderSpec[] {
+  return SHIBUYA_PLATEAU_BUILDINGS.map((b) => ({
+    buildingId: b.buildingId,
+    gmlId: b.gmlId,
+    name: b.name,
+    nameEn: b.nameEn,
+    usage: b.usage,
+    x: b.localX,
+    z: b.localZ,
+    w: b.width,
+    h: b.measuredHeight,
+    d: b.depth,
+    podiumHeight: b.podiumHeight,
+    groundElevationM: b.groundElevationM,
+    storeysAboveGround: b.storeysAboveGround,
+    color: b.color,
+    podiumColor: b.podiumColor,
+    glass: b.glass,
+    warmInterior: b.warmInterior,
+  }));
+}
+
 /**
  * 基礎地面メッシュ頂点向けの相対地形変位 (m) を計算する。
  * Why not: 車道・交差点の走行面に地形凹凸をそのまま適用すると平坦な Rapier コライダーと視覚メッシュに乖離が生じるため、
  * 道路コリドー外周のみで国土地理院 DEM5A の実測微地形へ滑らかにブレンドする。
  */
 export function getRelativeTerrainDisplacement(x: number, z: number): number {
-  const isNearGyokoDori = Math.abs(x) < 42 && z > -25 && z < 268;
-  const isNearCentralAve = Math.abs(z - 5) < 22 && Math.abs(x) < 130;
-  const isNearHibiyaDori = Math.abs(z - 250) < 26 && Math.abs(x) < 135;
-  const isOnRoadCorridor = isNearGyokoDori || isNearCentralAve || isNearHibiyaDori;
+  const isNearGyokoDori = Math.abs(x) < 42 && z > -35 && z < 385;
+  const isNearMarunouchiSideStreets =
+    (Math.abs(x - -156) < 20 || Math.abs(x - 156) < 20) && z > -15 && z < 275;
+  const isNearEitaiDori = Math.abs(x - -268) < 26 && z > -95 && z < 385;
+  const isNearBabasakimonDori = Math.abs(x - 270) < 26 && z > -95 && z < 385;
+  const isNearCentralAve = Math.abs(z - 5) < 22 && Math.abs(x) < 460;
+  const isNearNakadori = Math.abs(z - 165) < 20 && Math.abs(x) < 460;
+  const isNearHibiyaDori = Math.abs(z - 250) < 26 && Math.abs(x) < 500;
+  const isNearUchiboriDori = Math.abs(z - 365) < 42 && Math.abs(x) < 500;
+  const isNearKokyoGaienCurve = Math.abs(x) < 135 && z >= 250 && z <= 405;
+  const isNearShibuyaMeijiDori = Math.abs(x - -750) < 75 && z > -350 && z < 350;
+  const isNearShibuyaRoute246 = Math.abs(z - 95) < 58 && x >= -880 && x <= 30;
+  const isNearShibuyaUrbanGrid = x >= -885 && x <= -620 && z >= -230 && z <= 230;
+  const isOnRoadCorridor =
+    isNearGyokoDori ||
+    isNearMarunouchiSideStreets ||
+    isNearEitaiDori ||
+    isNearBabasakimonDori ||
+    isNearCentralAve ||
+    isNearNakadori ||
+    isNearHibiyaDori ||
+    isNearUchiboriDori ||
+    isNearKokyoGaienCurve ||
+    isNearShibuyaMeijiDori ||
+    isNearShibuyaRoute246 ||
+    isNearShibuyaUrbanGrid;
 
   if (isOnRoadCorridor) {
     return 0;
@@ -241,7 +691,10 @@ function pointToSegmentDistance(
  * 現在座標 (x, z) から最も近い国土地理院ベクトルタイル道路中心線 (experimental_rdcl) セグメントを検索する。
  */
 export function findNearestGsiRoad(x: number, z: number): NearestGsiRoadResult {
-  const segments = activeOpenData.gsiRoadSegments;
+  const segments: readonly GsiRoadSegmentRecord[] = [
+    ...activeOpenData.gsiRoadSegments,
+    ...SHIBUYA_GSI_ROAD_SEGMENTS,
+  ];
   let bestSegment: GsiRoadSegmentRecord = segments[0];
   let minDistance = Number.POSITIVE_INFINITY;
 
@@ -251,6 +704,28 @@ export function findNearestGsiRoad(x: number, z: number): NearestGsiRoadResult {
     if (isCloser) {
       minDistance = dist;
       bestSegment = seg;
+    }
+  }
+
+  // How: 国土地理院オープンデータの曲線・折れ線道路コリドー（国道246号青山通りカーブ、内堀通り皇居前カーブ、六本木通り等）の
+  // 各頂点間セグメントに対しても最短距離を評価し、曲線道路走行中も正確な路線名と距離を返すようにする
+  for (const corridor of NAVIGATION_ROAD_CORRIDORS) {
+    const isCurvedCorridor = corridor.points.length >= 3;
+    if (!isCurvedCorridor) {
+      continue;
+    }
+    for (let i = 0; i < corridor.points.length - 1; i++) {
+      const p0 = corridor.points[i];
+      const p1 = corridor.points[i + 1];
+      const dist = pointToSegmentDistance(x, z, p0.x, p0.z, p1.x, p1.z);
+      const isCloser = dist < minDistance;
+      if (isCloser) {
+        minDistance = dist;
+        const matchedSeg = segments.find((s) => s.routeCode === corridor.routeCode);
+        if (matchedSeg) {
+          bestSegment = matchedSeg;
+        }
+      }
     }
   }
 
@@ -265,11 +740,14 @@ export function findNearestGsiRoad(x: number, z: number): NearestGsiRoadResult {
 }
 
 /**
- * 現在座標 (x, z) から最も近い東京都 Project PLATEAU 千代田区 (13101) 建築物を検索する。
+ * 現在座標 (x, z) から最も近い東京都 Project PLATEAU 千代田区 (13101) / 渋谷区 (13113) 建築物を検索する。
  */
 export function findNearestPlateauBuilding(x: number, z: number): NearestPlateauBuildingResult {
-  const buildings = activeOpenData.plateauBuildings;
-  let bestBuilding: PlateauBuildingRecord = buildings[0];
+  const buildings: readonly (PlateauBuildingRecord | ShibuyaPlateauBuildingRecord)[] = [
+    ...activeOpenData.plateauBuildings,
+    ...SHIBUYA_PLATEAU_BUILDINGS,
+  ];
+  let bestBuilding: PlateauBuildingRecord | ShibuyaPlateauBuildingRecord = buildings[0];
   let minEdgeDistance = Number.POSITIVE_INFINITY;
   let bestCenterDistance = Number.POSITIVE_INFINITY;
 
@@ -394,16 +872,129 @@ export function getPlateauBuildingsForMap(): PlateauBuildingRenderSpec[] {
 
   return buildings.map((b) => {
     const palette = resolveBuildingPalette(b);
-    const x: number = b.localX;
+    let x: number = b.localX;
     let z: number = b.localZ;
-    const w: number = b.width;
+    let w: number = b.width;
     let d: number = b.depth;
 
-    // 日比谷通り (z = 250m, 幅員約32m → z ∈ [234, 266]) の車道・歩道クリアランス確保
-    const isNearHibiyaCorridor = Math.abs(x) < 140 && z + d / 2 > 226 && z < 260;
+    // 日比谷通り (z = 250m, 幅員約32m → z ∈ [228, 272]) の車道・歩道クリアランス確保
+    const isNearHibiyaCorridor = Math.abs(x) < 560 && z + d / 2 > 226 && z < 260;
     if (isNearHibiyaCorridor) {
-      d = Math.min(d, 52);
+      d = Math.min(d, 44);
       z = Math.min(z, 226 - d / 2);
+    }
+
+    // 丸の内仲通り (z = 165m, 幅員約20m → z ∈ [149, 181]) の車道・歩道クリアランス確保
+    const isEastOfNakadori = z < 165 && z + d / 2 > 147;
+    if (isEastOfNakadori) {
+      d = Math.min(d, 56);
+      z = Math.min(z, 147 - d / 2);
+    }
+    const isWestOfNakadori = z >= 165 && z - d / 2 < 183;
+    if (isWestOfNakadori) {
+      d = Math.min(d, 42);
+      z = Math.max(z, 183 + d / 2);
+    }
+
+    // 永代通り・大手町大通り (x = -268m, 幅員約28m → x ∈ [-286, -250]) のクリアランス確保
+    const isSouthOfEitaiDori = x > -268 && x - w / 2 < -248;
+    if (isSouthOfEitaiDori) {
+      w = Math.min(w, 64);
+      x = Math.max(x, -248 + w / 2);
+    }
+    const isNorthOfEitaiDori = x < -268 && x + w / 2 > -288;
+    if (isNorthOfEitaiDori) {
+      w = Math.min(w, 68);
+      x = Math.min(x, -288 - w / 2);
+    }
+
+    // 鍛冶橋通り・馬場先門通り (x = 270m, 幅員約28m → x ∈ [252, 288]) のクリアランス確保
+    const isNorthOfBabasakimonDori = x < 270 && x + w / 2 > 250;
+    if (isNorthOfBabasakimonDori) {
+      w = Math.min(w, 64);
+      x = Math.min(x, 250 - w / 2);
+    }
+    const isSouthOfBabasakimonDori = x > 270 && x - w / 2 < 290;
+    if (isSouthOfBabasakimonDori) {
+      w = Math.min(w, 68);
+      x = Math.max(x, 290 + w / 2);
+    }
+
+    // 国道246号・青山通り連絡路 (z = 95m, x < -268m, 幅員約25m → z ∈ [78, 112]) の車道・歩道クリアランス確保
+    const isNearRoute246Connector = x < -268 && z - d / 2 < 112 && z + d / 2 > 78;
+    if (isNearRoute246Connector) {
+      d = Math.min(d, 48);
+      z = Math.min(z, 78 - d / 2);
+    }
+
+    // 丸の内中央通り・東京駅前通り (z = 5m, 幅員約22m → z ∈ [-10, 20]) の車道・歩道クリアランス確保
+    const isSouthOfCentralAve = z < 5 && z + d / 2 > -10;
+    if (isSouthOfCentralAve) {
+      d = Math.min(d, 64);
+      z = Math.min(z, -10 - d / 2);
+    }
+    const isNorthOfCentralAve = z >= 5 && z - d / 2 < 20;
+    if (isNorthOfCentralAve) {
+      d = Math.min(d, 48);
+      z = Math.max(z, 20 + d / 2);
+    }
+
+    // 丸の内東通り (x = 156m, z ∈ [5, 250]) 周辺および同一街区内隣接ビル同士のクリアランス整序
+    const isNijubashiNorthBlock = b.buildingId === "13101-bldg-3741";
+    if (isNijubashiNorthBlock) {
+      w = 38;
+      x = 185;
+    }
+    const isKishimotoBlock = b.buildingId === "13101-bldg-768";
+    if (isKishimotoBlock) {
+      w = 42;
+      x = 229;
+    }
+    const isMarunouchi2ChomeBuilding = b.buildingId === "13101-bldg-881";
+    if (isMarunouchi2ChomeBuilding) {
+      w = 64;
+      x = 208;
+      d = 56;
+      z = 118;
+    }
+    const isMarunouchiNakadoriBuilding = b.buildingId === "13101-bldg-1849";
+    if (isMarunouchiNakadoriBuilding) {
+      w = 64;
+      x = 208;
+      d = 56;
+      z = 56;
+    }
+    const isYusenBuilding = b.buildingId === "13101-bldg-4149";
+    if (isYusenBuilding) {
+      w = 54;
+      x = 60;
+    }
+    const isMitsubishiCorpBuilding = b.buildingId === "13101-bldg-4184";
+    if (isMitsubishiCorpBuilding) {
+      w = 52;
+      x = 118;
+    }
+
+    // 丸の内西通り (x = -156m, z ∈ [5, 250], 幅員 9.5m → クリアランス x ∈ [-165, -147]) 周辺のクリアランス確保
+    const isTokyoBankersBuilding = b.buildingId === "13101-bldg-2033";
+    if (isTokyoBankersBuilding) {
+      w = 48;
+      x = -118;
+    }
+    const isOazoBuilding = b.buildingId === "13101-bldg-4002";
+    if (isOazoBuilding) {
+      w = 58;
+      x = -202;
+    }
+    const isEirakuBuilding = b.buildingId === "13101-bldg-1824";
+    if (isEirakuBuilding) {
+      w = 64;
+      x = -204;
+    }
+    const isIndustryClubBuilding = b.buildingId === "13101-bldg-1336";
+    if (isIndustryClubBuilding) {
+      w = 64;
+      x = -204;
     }
 
     return {
@@ -423,6 +1014,579 @@ export function getPlateauBuildingsForMap(): PlateauBuildingRenderSpec[] {
       ...palette,
     };
   });
+}
+
+/**
+ * カーナビ地図描画用の道路階層カテゴリ
+ */
+export type NavigationRoadCategory = "national_highway" | "major_avenue" | "local_street";
+
+/**
+ * カーナビ地図描画用の連続道路コリドー仕様
+ * Why: 国土地理院の未統合実験ベクトルタイル (`experimental_rdcl`) の細切れ折れ線・重複並行線・1.3m端数セグメントをそのまま1本ずつ枠線付き描画すると、
+ * 頂点ごとに暗い枠線が内部塗りを上書きしてソーセージ状の継ぎ目やビル貫通の斜め線（「カクカクで変な表現」）が生じるため、
+ * 3D走行空間の実道路網と完全一致する階層別連続コリドーを定義してマルチパス合成描画に供する。
+ */
+export interface NavigationRoadCorridorSpec {
+  id: string;
+  displayName: string;
+  routeCode: string;
+  category: NavigationRoadCategory;
+  widthMeters: number;
+  hasMedianLine: boolean;
+  points: ReadonlyArray<{ x: number; z: number }>;
+}
+
+/**
+ * カーナビ地図描画用の主要交差点仕様
+ */
+export interface NavigationIntersectionSpec {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  widthMeters: number;
+  depthMeters: number;
+}
+
+const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
+  // 1. 街区生活道路・仲通り・駅前広場外周 (local_street)
+  {
+    id: "nav-road-marunouchi-central",
+    displayName: "丸の内中央通り（駅前広場通り）",
+    routeCode: "千代田区道",
+    category: "local_street",
+    widthMeters: 11.5,
+    hasMedianLine: false,
+    points: [
+      { x: -450, z: 5 },
+      { x: 450, z: 5 },
+    ],
+  },
+  {
+    id: "nav-road-marunouchi-nakadori",
+    displayName: "丸の内仲通り",
+    routeCode: "特別区道千第110号",
+    category: "local_street",
+    widthMeters: 10.5,
+    hasMedianLine: false,
+    points: [
+      { x: -450, z: 165 },
+      { x: 450, z: 165 },
+    ],
+  },
+  {
+    id: "nav-road-marunouchi-east-st",
+    displayName: "丸の内東通り（大名小路）",
+    routeCode: "千代田区道",
+    category: "local_street",
+    widthMeters: 9.5,
+    hasMedianLine: false,
+    points: [
+      { x: 156, z: 5 },
+      { x: 156, z: 250 },
+    ],
+  },
+  {
+    id: "nav-road-marunouchi-west-st",
+    displayName: "丸の内西通り",
+    routeCode: "千代田区道",
+    category: "local_street",
+    widthMeters: 9.5,
+    hasMedianLine: false,
+    points: [
+      { x: -156, z: 5 },
+      { x: -156, z: 250 },
+    ],
+  },
+  {
+    id: "nav-road-shibuya-sakuragaoka",
+    displayName: "稲荷橋通り・サクラステージ南通り",
+    routeCode: "渋谷区道稲荷橋線",
+    category: "local_street",
+    widthMeters: 10.0,
+    hasMedianLine: false,
+    points: [
+      { x: -855, z: -95 },
+      { x: -750, z: -95 },
+      { x: -645, z: -95 },
+    ],
+  },
+  {
+    id: "nav-road-shibuya-namikibashi",
+    displayName: "並木橋・八幡通り連絡路",
+    routeCode: "渋谷区道並木橋線",
+    category: "local_street",
+    widthMeters: 10.0,
+    hasMedianLine: false,
+    points: [
+      { x: -855, z: -200 },
+      { x: -750, z: -200 },
+      { x: -645, z: -200 },
+    ],
+  },
+  {
+    id: "nav-road-shibuya-miyashita",
+    displayName: "宮下公園・美竹通り連絡路",
+    routeCode: "渋谷区道美竹線",
+    category: "local_street",
+    widthMeters: 10.0,
+    hasMedianLine: false,
+    points: [
+      { x: -855, z: 195 },
+      { x: -750, z: 195 },
+      { x: -645, z: 195 },
+    ],
+  },
+  {
+    id: "nav-road-shibuya-west-st",
+    displayName: "渋谷西口・桜丘ウエスト通り",
+    routeCode: "渋谷区道桜丘西線",
+    category: "local_street",
+    widthMeters: 10.0,
+    hasMedianLine: false,
+    points: [
+      { x: -855, z: -95 },
+      { x: -855, z: 95 },
+      { x: -855, z: 195 },
+    ],
+  },
+  {
+    id: "nav-road-shibuya-east-konnozaka",
+    displayName: "金王坂・渋谷三丁目イースト通り",
+    routeCode: "渋谷区道金王坂線",
+    category: "local_street",
+    widthMeters: 10.0,
+    hasMedianLine: false,
+    points: [
+      { x: -645, z: -200 },
+      { x: -645, z: -95 },
+      { x: -645, z: 95 },
+      { x: -645, z: 195 },
+    ],
+  },
+  {
+    id: "nav-road-shibuya-sakuragaoka-loop",
+    displayName: "渋谷桜丘・八幡通りループ線（渋谷区道）",
+    routeCode: "渋谷区特別区道",
+    category: "local_street",
+    widthMeters: 11.0,
+    hasMedianLine: false,
+    points: [
+      { x: -855, z: -95 },
+      { x: -862, z: -138 },
+      { x: -862, z: -176 },
+      { x: -855, z: -200 },
+    ],
+  },
+  {
+    id: "nav-road-kokyo-gaien-plaza-curve",
+    displayName: "皇居外苑・楠公通り曲線アプローチ（皇居前広場）",
+    routeCode: "皇居外苑苑路",
+    category: "local_street",
+    widthMeters: 12.0,
+    hasMedianLine: false,
+    points: [
+      { x: -24, z: 265 },
+      { x: -46, z: 302 },
+      { x: -46, z: 338 },
+      { x: -24, z: 365 },
+    ],
+  },
+
+  // 2. 主要幹線都道 (major_avenue)
+  {
+    id: "nav-road-gyoko-dori",
+    displayName: "行幸通り（都道404号）",
+    routeCode: "東京都道404号",
+    category: "major_avenue",
+    widthMeters: 19.0,
+    hasMedianLine: true,
+    points: [
+      { x: 0, z: 5 },
+      { x: 0, z: 365 },
+    ],
+  },
+  {
+    id: "nav-road-uchibori-dori",
+    displayName: "内堀通り（都道301号・皇居外苑）",
+    routeCode: "東京都道301号",
+    category: "major_avenue",
+    widthMeters: 18.0,
+    hasMedianLine: true,
+    points: [
+      { x: -500, z: 365 },
+      { x: -268, z: 365 },
+      { x: -165, z: 378 },
+      { x: 0, z: 390 },
+      { x: 165, z: 378 },
+      { x: 270, z: 365 },
+      { x: 500, z: 365 },
+    ],
+  },
+  {
+    id: "nav-road-babasakimon-dori",
+    displayName: "鍛冶橋通り・馬場先門通り（都道406号）",
+    routeCode: "東京都道406号",
+    category: "major_avenue",
+    widthMeters: 17.0,
+    hasMedianLine: true,
+    points: [
+      { x: 270, z: -100 },
+      { x: 270, z: 365 },
+    ],
+  },
+  {
+    id: "nav-road-meiji-dori",
+    displayName: "明治通り（都道305号）",
+    routeCode: "東京都道305号",
+    category: "major_avenue",
+    widthMeters: 21.0,
+    hasMedianLine: true,
+    points: [
+      { x: -750, z: -200 },
+      { x: -750, z: 195 },
+    ],
+  },
+  {
+    id: "nav-road-meiji-dori-ebisu-curve",
+    displayName: "明治通り（並木橋・恵比寿方面カーブ区間）",
+    routeCode: "東京都道305号",
+    category: "major_avenue",
+    widthMeters: 19.0,
+    hasMedianLine: true,
+    points: [
+      { x: -750, z: -200 },
+      { x: -756, z: -242 },
+      { x: -772, z: -286 },
+      { x: -796, z: -332 },
+    ],
+  },
+  {
+    id: "nav-road-meiji-dori-harajuku-curve",
+    displayName: "明治通り（宮下公園・原宿方面カーブ区間）",
+    routeCode: "東京都道305号",
+    category: "major_avenue",
+    widthMeters: 19.0,
+    hasMedianLine: true,
+    points: [
+      { x: -750, z: 195 },
+      { x: -753, z: 235 },
+      { x: -758, z: 275 },
+      { x: -764, z: 315 },
+    ],
+  },
+
+  // 3. 国道幹線 (national_highway)
+  {
+    id: "nav-road-hibiya-dori",
+    displayName: "日比谷通り（国道1号・大手町〜日比谷）",
+    routeCode: "国道1号",
+    category: "national_highway",
+    widthMeters: 22.0,
+    hasMedianLine: true,
+    points: [
+      { x: -500, z: 250 },
+      { x: 500, z: 250 },
+    ],
+  },
+  {
+    id: "nav-road-eitai-dori",
+    displayName: "永代通り・大手町大通り（国道1号）",
+    routeCode: "国道1号",
+    category: "national_highway",
+    widthMeters: 17.5,
+    hasMedianLine: true,
+    points: [
+      { x: -268, z: -100 },
+      { x: -268, z: 365 },
+    ],
+  },
+  {
+    id: "nav-road-route246",
+    displayName: "国道246号（青山通り・渋谷駅東口連絡路）",
+    routeCode: "国道246号",
+    category: "national_highway",
+    widthMeters: 18.0,
+    hasMedianLine: true,
+    points: [
+      { x: -870, z: 95 },
+      { x: -640, z: 95 },
+      { x: -545, z: 108 },
+      { x: -450, z: 108 },
+      { x: -355, z: 98 },
+      { x: -268, z: 95 },
+    ],
+  },
+];
+
+const NAVIGATION_INTERSECTIONS: ReadonlyArray<NavigationIntersectionSpec> = [
+  {
+    id: "nav-int-tokyo-central",
+    name: "東京駅中央口",
+    x: 0,
+    z: 5,
+    widthMeters: 19,
+    depthMeters: 12,
+  },
+  {
+    id: "nav-int-gyoko-nakadori",
+    name: "行幸通り仲通り",
+    x: 0,
+    z: 165,
+    widthMeters: 19,
+    depthMeters: 11,
+  },
+  { id: "nav-int-wadakuramon", name: "和田倉門", x: 0, z: 250, widthMeters: 20, depthMeters: 22 },
+  { id: "nav-int-kokyogaien", name: "皇居外苑", x: 0, z: 365, widthMeters: 19, depthMeters: 18 },
+  { id: "nav-int-otemachi", name: "大手町", x: -268, z: 250, widthMeters: 18, depthMeters: 22 },
+  {
+    id: "nav-int-otemachi-central",
+    name: "大手町駅前",
+    x: -268,
+    z: 5,
+    widthMeters: 18,
+    depthMeters: 12,
+  },
+  {
+    id: "nav-int-otemachi-r246",
+    name: "大手町R246分岐",
+    x: -268,
+    z: 95,
+    widthMeters: 18,
+    depthMeters: 18,
+  },
+  { id: "nav-int-babasakimon", name: "馬場先門", x: 270, z: 250, widthMeters: 17, depthMeters: 22 },
+  {
+    id: "nav-int-kajibashi-central",
+    name: "丸の内南口",
+    x: 270,
+    z: 5,
+    widthMeters: 17,
+    depthMeters: 12,
+  },
+  {
+    id: "nav-int-marunouchi-east-central",
+    name: "丸の内東通り入口",
+    x: 156,
+    z: 5,
+    widthMeters: 10,
+    depthMeters: 12,
+  },
+  {
+    id: "nav-int-marunouchi-east-nakadori",
+    name: "丸の内東通り仲通り",
+    x: 156,
+    z: 165,
+    widthMeters: 10,
+    depthMeters: 11,
+  },
+  {
+    id: "nav-int-marunouchi-east-hibiya",
+    name: "二重橋前",
+    x: 156,
+    z: 250,
+    widthMeters: 10,
+    depthMeters: 22,
+  },
+  {
+    id: "nav-int-marunouchi-west-central",
+    name: "丸の内北口前",
+    x: -156,
+    z: 5,
+    widthMeters: 10,
+    depthMeters: 12,
+  },
+  {
+    id: "nav-int-marunouchi-west-nakadori",
+    name: "丸の内西通り仲通り",
+    x: -156,
+    z: 165,
+    widthMeters: 10,
+    depthMeters: 11,
+  },
+  {
+    id: "nav-int-marunouchi-west-hibiya",
+    name: "丸の内一丁目",
+    x: -156,
+    z: 250,
+    widthMeters: 10,
+    depthMeters: 22,
+  },
+  {
+    id: "nav-int-shibuya-east",
+    name: "渋谷駅東口",
+    x: -750,
+    z: 95,
+    widthMeters: 21,
+    depthMeters: 18,
+  },
+  {
+    id: "nav-int-shibuya-stream",
+    name: "稲荷橋（渋谷ストリーム前）",
+    x: -750,
+    z: -95,
+    widthMeters: 21,
+    depthMeters: 11,
+  },
+  {
+    id: "nav-int-shibuya-namikibashi",
+    name: "並木橋",
+    x: -750,
+    z: -200,
+    widthMeters: 21,
+    depthMeters: 11,
+  },
+  {
+    id: "nav-int-shibuya-miyashita",
+    name: "宮下公園前",
+    x: -750,
+    z: 195,
+    widthMeters: 21,
+    depthMeters: 11,
+  },
+  {
+    id: "nav-int-shibuya-west-r246",
+    name: "渋谷フクラス西",
+    x: -855,
+    z: 95,
+    widthMeters: 11,
+    depthMeters: 18,
+  },
+  {
+    id: "nav-int-shibuya-sakuragaoka-west",
+    name: "桜丘西口",
+    x: -855,
+    z: -95,
+    widthMeters: 11,
+    depthMeters: 11,
+  },
+  {
+    id: "nav-int-shibuya-konnozaka",
+    name: "金王坂上",
+    x: -645,
+    z: 95,
+    widthMeters: 11,
+    depthMeters: 18,
+  },
+  {
+    id: "nav-int-shibuya-stream-east",
+    name: "渋谷ストリーム東",
+    x: -645,
+    z: -95,
+    widthMeters: 11,
+    depthMeters: 11,
+  },
+];
+
+/**
+ * カーナビ地図ペイン描画用の連続道路コリドー一覧を取得する。
+ */
+export function getNavigationRoadCorridors(): ReadonlyArray<NavigationRoadCorridorSpec> {
+  return NAVIGATION_ROAD_CORRIDORS;
+}
+
+/**
+ * 国土地理院 (GSI) オープンデータの曲線・多頂点ポリライン道路コリドー一覧を取得する。
+ * How: 3D 道路メッシュおよび縁石・ガードレール物理コライダーを生成する際、交差点フラットパッド（明治通り x=-750、永代通り x=-268 等）と
+ * 重複して交差道路を塞がないよう、交差点手前で適切にトリミングされた3D曲線ポリライン座標を返す。
+ */
+export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCorridorSpec> {
+  return [
+    {
+      id: "nav-road-shibuya-sakuragaoka-loop",
+      displayName: "渋谷桜丘・八幡通りループ線（渋谷区道）",
+      routeCode: "渋谷区特別区道",
+      category: "local_street",
+      widthMeters: 11.0,
+      hasMedianLine: false,
+      points: [
+        { x: -855, z: -106 },
+        { x: -862, z: -138 },
+        { x: -862, z: -176 },
+        { x: -855, z: -189 },
+      ],
+    },
+    {
+      id: "nav-road-kokyo-gaien-plaza-curve",
+      displayName: "皇居外苑・楠公通り曲線アプローチ（皇居前広場）",
+      routeCode: "皇居外苑苑路",
+      category: "local_street",
+      widthMeters: 12.0,
+      hasMedianLine: false,
+      points: [
+        { x: -24, z: 265 },
+        { x: -46, z: 302 },
+        { x: -46, z: 338 },
+        { x: -24, z: 355 },
+      ],
+    },
+    {
+      id: "nav-road-uchibori-dori",
+      displayName: "内堀通り（都道301号・皇居外苑カーブ区間）",
+      routeCode: "東京都道301号",
+      category: "major_avenue",
+      widthMeters: 18.0,
+      hasMedianLine: true,
+      points: [
+        { x: -253, z: 365 },
+        { x: -165, z: 378 },
+        { x: 0, z: 390 },
+        { x: 165, z: 378 },
+        { x: 255, z: 365 },
+      ],
+    },
+    {
+      id: "nav-road-meiji-dori-ebisu-curve",
+      displayName: "明治通り（並木橋・恵比寿方面カーブ区間）",
+      routeCode: "東京都道305号",
+      category: "major_avenue",
+      widthMeters: 19.0,
+      hasMedianLine: true,
+      points: [
+        { x: -750, z: -211 },
+        { x: -756, z: -242 },
+        { x: -772, z: -286 },
+        { x: -796, z: -332 },
+      ],
+    },
+    {
+      id: "nav-road-meiji-dori-harajuku-curve",
+      displayName: "明治通り（宮下公園・原宿方面カーブ区間）",
+      routeCode: "東京都道305号",
+      category: "major_avenue",
+      widthMeters: 19.0,
+      hasMedianLine: true,
+      points: [
+        { x: -750, z: 206 },
+        { x: -753, z: 245 },
+        { x: -758, z: 280 },
+        { x: -764, z: 315 },
+      ],
+    },
+    {
+      id: "nav-road-route246",
+      displayName: "国道246号（青山通り・渋谷駅東口連絡路）",
+      routeCode: "国道246号",
+      category: "national_highway",
+      widthMeters: 18.0,
+      hasMedianLine: true,
+      points: [
+        { x: -632, z: 95 },
+        { x: -545, z: 108 },
+        { x: -450, z: 108 },
+        { x: -355, z: 98 },
+        { x: -283, z: 95 },
+      ],
+    },
+  ];
+}
+
+/**
+ * カーナビ地図ペイン描画用の主要交差点一覧を取得する。
+ */
+export function getNavigationIntersections(): ReadonlyArray<NavigationIntersectionSpec> {
+  return NAVIGATION_INTERSECTIONS;
 }
 
 /**

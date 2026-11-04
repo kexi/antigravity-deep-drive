@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare": "lefthook install",
     "dev": "pnpm --filter web dev",
     "build": "pnpm -r build",
     "preview": "pnpm --filter web preview",

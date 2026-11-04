@@ -11,3 +11,5 @@ tags:
     description: 日本の道路規格・プロシージャル道路生成・路面シェーダー
   - name: ci-cd
     description: CI/CDパイプライン・自動デプロイ・GitHub Actions
+  - name: ui
+    description: UI/HUD設計・レスポンシブ表示・マルチタッチ入力制御

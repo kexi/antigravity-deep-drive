@@ -1,0 +1,23 @@
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      run: gitleaks git --pre-commit --staged --redact
+    pinact:
+      glob: ".github/workflows/*.{yml,yaml}"
+      run: pinact run --check
+    actionlint:
+      glob: ".github/workflows/*.{yml,yaml}"
+      run: actionlint
+    justfile:
+      glob: "justfile"
+      run: just --fmt --check --unstable
+    typecheck:
+      glob: "*.{ts,tsx}"
+      run: pnpm -r typecheck
+    lint:
+      glob: "*.{js,jsx,ts,tsx,json,html,md,yml,yaml}"
+      run: pnpm -r lint
+    ruff:
+      glob: "*.py"
+      run: ruff check blender/scripts/ && ruff format --check blender/scripts/

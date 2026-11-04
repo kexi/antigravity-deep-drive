@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { Procedural3DTextureGenerator } from "../textures/procedural3DTexture";
 
 export interface WaterShaderOptions {
   shallowColor?: number;
@@ -13,12 +14,13 @@ export interface WaterShaderOptions {
  * 【特徴・視覚表現】
  * 1. トロコイド・Gerstner 波 (Gerstner Waves):
  *    頂点シェーダーにおいて複数の風向・波長・振幅の波を合成し、波頭が尖るリアルな水面起伏を生成。
- * 2. 解析的法線計算 (Analytical Normals):
- *    頂点変位の偏微分から水面の正確な法線ベクトルを算出し、微細なさざ波（Micro Ripples）とブレンド。
- * 3. 光の水中吸光減衰 (Water Depth Absorption):
- *    浅瀬のエメラルドグリーンから深部のダークティールへの色減衰（Beer-Lambert 則）。
- * 4. フレネル鏡面反射 (Fresnel Specular):
- *    水の物理屈折率 (IOR 1.33) に基づく視線角に応じた反射率の急上昇と、太陽・街灯の強いきらめき。
+ * 2. 解析的法線計算 (Analytical Normals) & 3D マイクロ毛細管波紋:
+ *    頂点変位の偏微分から水面の正確な法線ベクトルを算出し、`uWaterVolumeTex` (Gチャンネル) の3D毛細管リップルおよび雨滴波紋とブレンド。
+ * 3. 光の水中吸光減衰 (Water Depth Absorption) & 3D 水中コースティクス・プランクトン散乱:
+ *    浅瀬のエメラルドグリーンから深部のダークティールへの色減衰（Beer-Lambert 則）に加え、
+ *    `uWaterVolumeTex` の Rチャンネル（3Dコースティクス網目）と Bチャンネル（水中浮遊粒子散乱）で立体的な水中サブサーフェス輝きを表現。
+ * 4. フレネル鏡面反射 (Fresnel Specular) & 水際マイクロフォーム:
+ *    水の物理屈折率 (IOR 1.33) に基づく反射と、`uWaterVolumeTex` の Aチャンネルによる石垣際・波頂の微細気泡ディテール。
  * 5. 雨滴着水波紋連動:
  *    雨天時に水面全体に広がる雨滴リップルの動的合成。
  */
@@ -30,6 +32,7 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
   public uSunDirection: { value: THREE.Vector3 };
   public uShallowColor: { value: THREE.Color };
   public uDeepColor: { value: THREE.Color };
+  public uWaterVolumeTex: { value: THREE.Data3DTexture };
 
   constructor(options: WaterShaderOptions = {}) {
     super({
@@ -47,6 +50,9 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
     this.uSunDirection = { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() };
     this.uShallowColor = { value: new THREE.Color(options.shallowColor ?? 0x14708c) };
     this.uDeepColor = { value: new THREE.Color(options.deepColor ?? 0x031e2b) };
+    this.uWaterVolumeTex = {
+      value: Procedural3DTextureGenerator.getSharedWaterCaustics3DTexture(),
+    };
 
     this.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = this.uTime;
@@ -56,6 +62,7 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
       shader.uniforms.uSunDirection = this.uSunDirection;
       shader.uniforms.uShallowColor = this.uShallowColor;
       shader.uniforms.uDeepColor = this.uDeepColor;
+      shader.uniforms.uWaterVolumeTex = this.uWaterVolumeTex;
 
       // 頂点シェーダー: Gerstner 波による頂点変位と法線計算
       shader.vertexShader = shader.vertexShader.replace(
@@ -124,7 +131,9 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
         `,
       );
 
-      // フラグメントシェーダー: 水色減衰、フレネル、雨滴リップルの合成
+      // フラグメントシェーダー: 水色減衰、3Dコースティクス・散乱、フレネル、雨滴リップルの合成
+      // Why not: 2D UVスクロールだけでは波高(Y)方向の立体的な干渉や水中深度による散乱変化が表現できないため、
+      // 3Dワールド座標 vWorldPos と uTime で sampler3D uWaterVolumeTex を直接サンプリングする
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <common>",
         /* glsl */ `
@@ -134,6 +143,7 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
         uniform vec3 uSunDirection;
         uniform vec3 uShallowColor;
         uniform vec3 uDeepColor;
+        uniform sampler3D uWaterVolumeTex;
         varying vec3 vWorldPosition;
         varying vec3 vWaveNormal;
 
@@ -171,17 +181,27 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
         `,
       );
 
-      // 法線マップ部の変調: Gerstner 波法線とリップルのブレンド
+      // 法線マップ部の変調: Gerstner 波法線、3Dマイクロ毛細管波紋(Gチャンネル)、雨滴リップルのブレンド
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <normal_fragment_maps>",
         /* glsl */ `
         #include <normal_fragment_maps>
 
-        vec3 baseN = normalize(mat3(viewMatrix) * vWaveNormal);
+        vec3 vWorldPos = vWorldPosition;
+        vec3 capCoordA = vWorldPos * vec3(0.18, 0.36, 0.18) + vec3(uTime * 0.045, uTime * 0.02, -uTime * 0.035);
+        vec3 capCoordB = vWorldPos * vec3(0.42, 0.68, 0.42) + vec3(-uTime * 0.06, -uTime * 0.025, uTime * 0.05);
+        float capSampleA = texture(uWaterVolumeTex, capCoordA).g;
+        float capSampleB = texture(uWaterVolumeTex, capCoordB).g;
+
+        // Gチャンネルの3Dマイクロ毛細管波紋で法線 N に繊細な高周波3Dゆらぎを加える
+        float capPerturbX = (capSampleA - 0.5) * 0.14 + (capSampleB - 0.5) * 0.09;
+        float capPerturbZ = (capSampleB - 0.5) * 0.14 - (capSampleA - 0.5) * 0.09;
+        vec3 capillaryWorldNormal = normalize(vWaveNormal + vec3(capPerturbX, 0.0, capPerturbZ));
+        vec3 baseN = normalize(mat3(viewMatrix) * capillaryWorldNormal);
 
         // 雨滴波紋のブレンド
         if (uRainWetness > 0.01) {
-          vec3 rip = waterRainRipples(vWorldPosition.xz, uTime, uRainWetness);
+          vec3 rip = waterRainRipples(vWorldPos.xz, uTime, uRainWetness);
           vec3 perturbedN = vec3(rip.x, rip.z, rip.y);
           baseN = normalize(mix(baseN, normalize(mat3(viewMatrix) * perturbedN), uRainWetness * 0.5));
         }
@@ -190,7 +210,7 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
         `,
       );
 
-      // カラー・吸光グラデーション・鏡面反射
+      // カラー・吸光グラデーション・3D水中コースティクス＆プランクトン散乱・水際マイクロフォーム・鏡面反射
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <metalnessmap_fragment>",
         /* glsl */ `
@@ -199,10 +219,44 @@ export class WaterSurfaceMaterial extends THREE.MeshStandardMaterial {
         // 波の高さに基づく浅瀬・深部カラーグラデーション
         float waveHeightFactor = clamp((vWorldPosition.y + 0.2) * 1.5, 0.0, 1.0);
         vec3 waterColor = mix(uDeepColor, uShallowColor, waveHeightFactor);
+
+        // How: vWorldPos と uTime で 3D ボリュームテクスチャを2スケール干渉サンプリングし、
+        // R(コースティクス網目)・B(浮遊粒子散乱)・A(石垣際マイクロフォーム気泡)を合成する
+        vec3 vWorldPosVol = vWorldPosition;
+        vec4 waterVol1 = texture(
+          uWaterVolumeTex,
+          vWorldPosVol * vec3(0.15, 0.32, 0.15) + vec3(uTime * 0.038, -uTime * 0.016, uTime * 0.028)
+        );
+        vec4 waterVol2 = texture(
+          uWaterVolumeTex,
+          vWorldPosVol * vec3(0.33, 0.52, 0.33) + vec3(-uTime * 0.048, uTime * 0.022, -uTime * 0.036)
+        );
+
+        // Rチャンネル: 3D水中コースティクス網目 & Bチャンネル: 水中浮遊微粒子・プランクトン散乱
+        float causticNetwork = pow(clamp(waterVol1.r * 0.62 + waterVol2.r * 0.58, 0.0, 1.0), 1.65);
+        float planktonScatter = mix(waterVol1.b, waterVol2.b, 0.5);
+        float sunLightFactor = max(uSunDirection.y, 0.18);
+        vec3 subsurfaceEmerald = vec3(0.06, 0.44, 0.38) * (0.42 + planktonScatter * 0.78) * sunLightFactor;
+        vec3 causticRadiance = vec3(0.16, 0.66, 0.58) * causticNetwork * (0.30 + waveHeightFactor * 0.52) * sunLightFactor;
+
+        // Aチャンネル: お堀石垣際（abs(vWorldPos.x) が岸に近い領域や波頂）の微細な水泡・水面ミクロディテール
+        float innerBankFactor = 1.0 - smoothstep(14.0, 26.0, abs(vWorldPosVol.x - 18.0));
+        float outerBankFactor = smoothstep(92.0, 118.0, abs(vWorldPosVol.x));
+        float bankEdgeProximity = clamp(innerBankFactor + outerBankFactor, 0.0, 1.0);
+        float waveCrestMask = smoothstep(0.60, 0.94, waveHeightFactor);
+        float microFoamIntensity = clamp(
+          (bankEdgeProximity * 0.55 + waveCrestMask * 0.45) * waterVol1.a * waterVol2.a * 1.75,
+          0.0,
+          0.38
+        );
+        vec3 microFoamColor = vec3(0.74, 0.86, 0.88);
+
+        waterColor += subsurfaceEmerald * 0.30 + causticRadiance * 0.36;
+        waterColor = mix(waterColor, microFoamColor, microFoamIntensity);
         diffuseColor.rgb = waterColor;
 
-        // 水面フレネル反射（鏡面度 0.03）
-        roughnessFactor = 0.03;
+        // 水面フレネル反射（鏡面度 0.03 + マイクロフォーム・毛細管波紋による微細ラフネス変調）
+        roughnessFactor = clamp(0.03 + microFoamIntensity * 0.16 + (waterVol2.g - 0.5) * 0.015, 0.02, 0.32);
         metalnessFactor = 0.25;
         `,
       );

@@ -59,6 +59,8 @@ export class LensFlarePass {
       uGhostIntensity: { value: options.ghostIntensity ?? 0.8 },
       uHaloIntensity: { value: options.haloIntensity ?? 0.5 },
       uAspectRatio: { value: width / height },
+      uCameraNear: { value: 0.1 },
+      uCameraFar: { value: 1000.0 },
       uEnabled: { value: (options.enabled ?? true) ? 1.0 : 0.0 },
     };
 
@@ -81,33 +83,60 @@ export class LensFlarePass {
       uniform float uGhostIntensity;
       uniform float uHaloIntensity;
       uniform float uAspectRatio;
+      uniform float uCameraNear;
+      uniform float uCameraFar;
       uniform float uEnabled;
 
       varying vec2 vUv;
 
-      // 太陽周辺の深度サンプリングによる遮蔽度判定 (Soft Occlusion)
+      // 非線形デプスバッファ値 (0~1) を線形アイスペース深度 (m) へ復元
+      // Why not: camera.near = 0.1, camera.far = 1000.0 の透視投影では、距離 100m のビルでも
+      // 非線形深度値 d が 0.9991 (>= 0.999) になるため、生値の d >= 0.999 判定では
+      // 100m 先のビルの背後に隠れた夕日が「遮蔽なし（空）」と誤判定されてフレアが貫通してしまう。
+      float linearizeDepth(float d) {
+        float zNdc = d * 2.0 - 1.0;
+        return (2.0 * uCameraNear * uCameraFar) / max(0.0001, uCameraFar + uCameraNear - zNdc * (uCameraFar - uCameraNear));
+      }
+
+      // 単一UVサンプルが空（無限遠背景）まで抜けているか判定
+      float isSkySample(vec2 sampleUv) {
+        if (sampleUv.x < 0.001 || sampleUv.x > 0.999 || sampleUv.y < 0.001 || sampleUv.y > 0.999) {
+          return 0.0;
+        }
+        float d = texture2D(tDepth, sampleUv).r;
+        float linearDepth = linearizeDepth(d);
+        // AtmosphericSky は depthWrite: false のため、ビル・樹木・標識・車体に遮られていない空ピクセルは
+        // d >= 0.99995 かつ linearDepth >= uCameraFar * 0.95 (950m以上) となる
+        return (d >= 0.99995 && linearDepth >= uCameraFar * 0.95) ? 1.0 : 0.0;
+      }
+
+      // 太陽周辺の線形深度サンプリングによる遮蔽度判定 (Linear-Depth Soft Occlusion)
       float calculateOcclusion(vec2 sunUv) {
         // 画面外またはカメラ背後の場合は完全に遮蔽
-        if (sunUv.x < -0.2 || sunUv.x > 1.2 || sunUv.y < -0.2 || sunUv.y > 1.2 || uSunScreenPos.z <= 0.0) {
+        if (sunUv.x <= 0.0 || sunUv.x >= 1.0 || sunUv.y <= 0.0 || sunUv.y >= 1.0 || uSunScreenPos.z <= 0.0) {
           return 0.0;
         }
 
-        // 3x3 深度サンプリング
-        float visibleSamples = 0.0;
-        float totalSamples = 9.0;
-        vec2 offsetStep = vec2(0.003, 0.003 * uAspectRatio);
+        // 太陽中心点がビル等で完全に遮蔽されている場合は、周辺サンプルの漏れ込みを抑止
+        float centerVisible = isSkySample(sunUv);
 
-        for (int y = -1; y <= 1; y++) {
-          for (int x = -1; x <= 1; x++) {
-            vec2 sampleUv = clamp(sunUv + vec2(float(x), float(y)) * offsetStep, 0.001, 0.999);
-            float d = texture2D(tDepth, sampleUv).r;
-            // 深度値が 0.999 以上（空・無限遠背景）であれば遮蔽物なし
-            if (d >= 0.999) {
-              visibleSamples += 1.0;
-            }
+        // 5x5 グリッドによる太陽ディスク周辺のソフトオクルージョン判定
+        float visibleSamples = 0.0;
+        float totalSamples = 25.0;
+        vec2 offsetStep = vec2(0.0025, 0.0025 * uAspectRatio);
+
+        for (int y = -2; y <= 2; y++) {
+          for (int x = -2; x <= 2; x++) {
+            vec2 sampleUv = sunUv + vec2(float(x), float(y)) * offsetStep;
+            visibleSamples += isSkySample(sampleUv);
           }
         }
-        return visibleSamples / totalSamples;
+
+        float diskVisibility = visibleSamples / totalSamples;
+        // 太陽コアがビルの向こうにあるときはフレアが出ず、ビルの輪郭から太陽ディスクが覗いたときだけ滑らかに立ち上がる
+        float edgeFadeX = smoothstep(0.0, 0.04, sunUv.x) * smoothstep(1.0, 0.96, sunUv.x);
+        float edgeFadeY = smoothstep(0.0, 0.04, sunUv.y) * smoothstep(1.0, 0.96, sunUv.y);
+        return diskVisibility * mix(0.25, 1.0, centerVisible) * smoothstep(0.15, 0.65, diskVisibility) * edgeFadeX * edgeFadeY;
       }
 
       // 画面中心軸上のゴースト生成
@@ -191,11 +220,11 @@ export class LensFlarePass {
         float halo = exp(-pow(haloDist / haloThickness, 2.0)) * uHaloIntensity;
         vec3 haloColor = vec3(halo * 0.8, halo * 0.6, halo * 1.0) * uFlareColor;
 
-        // 全フレアエレメントの合成
-        vec3 totalFlare = (sunBurst + streakColor + ghosts + haloColor) * occlusion * uIntensity;
+        // 全フレアエレメントの合成（過度な白飛びを防ぐため上限クランプ）
+        vec3 totalFlare = clamp((sunBurst + streakColor + ghosts + haloColor) * occlusion * uIntensity, vec3(0.0), vec3(1.5));
 
         // 加算合成（シーン色 + フレア）
-        gl_FragColor = vec4(sceneColor.rgb + totalFlare, sceneColor.a);
+        gl_FragColor = vec4(clamp(sceneColor.rgb, vec3(0.0), vec3(4.0)) + totalFlare, sceneColor.a);
       }
     `;
 
@@ -223,22 +252,40 @@ export class LensFlarePass {
   }
 
   /**
-   * カメラに基づいて太陽のスクリーン座標を更新する。
-   * How: ワールド座標からカメラのクリップ空間へ射影し、正規化デバイス座標 (NDC) を UV 空間 (0~1) に変換する。
+   * カメラに基づいて太陽のスクリーン座標とNear/Farクリップ面を更新する。
+   * - Why not: `this.sunWorldPos` (例: `[60, 42, 180]`) を有限座標のまま直接 `project(camera)` すると、
+   *   車両（カメラ）が移動した際に無限遠の太陽方向（`AtmosphericSky` の `normalize(uSunPosition)`）と視差ズレが生じ、
+   *   空の太陽ディスク位置とフレアの発生位置が食い違ってしまうため。
+   * - How: カメラ位置から太陽方向単位ベクトルへ `camera.far * 0.9` 離れた無限遠相当座標を算出し、
+   *   クリップ空間へ射影して正規化デバイス座標 (NDC) を UV 空間 (0~1) に変換する。
    */
   public updateSunPosition(camera: THREE.PerspectiveCamera): void {
-    // 太陽の方向ベクトルから遠方の擬似ワールド座標を算出
-    const tempPos = this.sunWorldPos.clone();
+    this.material.uniforms.uCameraNear.value = camera.near;
+    this.material.uniforms.uCameraFar.value = camera.far;
+
+    const sunDir = this.sunWorldPos.clone();
+    const hasLength = sunDir.lengthSq() > 0.0001;
+    if (hasLength) {
+      sunDir.normalize();
+    } else {
+      sunDir.set(0, 1, -1).normalize();
+    }
+
+    // カメラ位置を起点に太陽方向ベクトル上の遠方点（スカイドーム半径相当）を算出
+    const farDistance = Math.max(100.0, camera.far * 0.9);
+    const tempPos = camera.position.clone().addScaledVector(sunDir, farDistance);
 
     // カメラのクリップ空間へ射影
     tempPos.project(camera);
+
+    // カメラの前方ベクトルと太陽方向ベクトルの内積で前方/背後を厳密判定
+    const cameraForward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const isForward = cameraForward.dot(sunDir) > 0.0 && tempPos.z < 1.0;
 
     // NDC (-1~1) から スクリーンUV (0~1) へ変換
     const screenX = (tempPos.x + 1.0) * 0.5;
     const screenY = (tempPos.y + 1.0) * 0.5;
 
-    // カメラ前方判定 (NDC z < 1.0 かつカメラの前方)
-    const isForward = tempPos.z < 1.0;
     this.sunScreenPos.set(screenX, screenY, isForward ? 1.0 : -1.0);
 
     this.material.uniforms.uSunScreenPos.value.copy(this.sunScreenPos);

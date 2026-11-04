@@ -1,3 +1,12 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = "==3.11.*"
+# dependencies = [
+#   "bpy>=5.0.1",
+# ]
+# [tool.uv]
+# exclude-newer = "1 day"
+# ///
 """
 Blender Procedural Modeling Script: 行幸通りイチョウ街路樹 (Gyoko-dori Ginkgo Biloba Tree - Pure 3D Fan-Leaf Modeling)
 Tokyo Station Deep Drive 用 3D アセット生成
@@ -21,10 +30,15 @@ GinkgoTreeRoot (Empty)
 └── Tree_Guard (メッシュ: 歩道埋設型の御影石縁石＆同心円・放射状鋳鉄製ツリーサークル格子)
 """
 
-import bpy
-import bmesh
 import math
 import os
+
+import bpy
+
+# isort: split
+# Why not: bpy 単体 wheel (PyPI) では import bpy 実行時に初めて bmesh / mathutils が
+# sys.modules に登録されるため、アルファベット順で bmesh を先に import すると ModuleNotFoundError になる。
+import bmesh
 from mathutils import Vector
 
 
@@ -170,7 +184,7 @@ def add_tapered_tube(
                 Vector((u_br, v1_coord)),
                 Vector((u_bl, v1_coord)),
             ]
-            for loop, uv in zip(face.loops, uvs):
+            for loop, uv in zip(face.loops, uvs, strict=True):
                 loop[uv_layer].uv = uv
 
     top_ring = [pair[0] for pair in rings[-1]]
@@ -217,17 +231,31 @@ def get_branch_skeleton():
         p2 = p0 + dir_xy * (reach_r * 0.78) - side_xy * 0.03 + Vector((0.0, 0.0, rise_z * 0.62))
         p3 = p0 + dir_xy * reach_r + Vector((0.0, 0.0, rise_z))
 
-        primary_branches.append(([p0, p1, p2, p3], [base_r, base_r * 0.75, base_r * 0.52, base_r * 0.24]))
+        primary_branches.append(
+            ([p0, p1, p2, p3], [base_r, base_r * 0.75, base_r * 0.52, base_r * 0.24])
+        )
 
         height_ratio = b_idx / len(branch_configs)
         main_lobe_rxy = 0.74 * (1.0 - 0.26 * height_ratio)
         main_lobe_rz = 0.58 * (1.0 - 0.20 * height_ratio)
-        foliage_anchors.append((p3 + Vector((0.0, 0.0, 0.06)), main_lobe_rxy, main_lobe_rz, b_idx * 1.7 + 0.5))
+        foliage_anchors.append(
+            (
+                p3 + Vector((0.0, 0.0, 0.06)),
+                main_lobe_rxy,
+                main_lobe_rz,
+                b_idx * 1.7 + 0.5,
+            )
+        )
 
         # 主枝の中腹にも短枝葉束アンカーを追加して枝沿いの葉密度を高める
         mid_branch_pt = p1.lerp(p2, 0.60)
         foliage_anchors.append(
-            (mid_branch_pt + Vector((0.0, 0.0, 0.08)), main_lobe_rxy * 0.70, main_lobe_rz * 0.70, b_idx * 2.3 + 4.1)
+            (
+                mid_branch_pt + Vector((0.0, 0.0, 0.08)),
+                main_lobe_rxy * 0.70,
+                main_lobe_rz * 0.70,
+                b_idx * 2.3 + 4.1,
+            )
         )
 
         # 主枝先端から放射状に広がる小枝 (Twigs) — 先端 tp1 に必ず葉束ロゼットを配置
@@ -253,7 +281,12 @@ def get_branch_skeleton():
             sub_lobe_rxy = main_lobe_rxy * (0.82 if sub_idx == 0 else 0.76)
             sub_lobe_rz = main_lobe_rz * 0.84
             foliage_anchors.append(
-                (sp2 + Vector((0.0, 0.0, 0.05)), sub_lobe_rxy, sub_lobe_rz, b_idx * 3.1 + sub_idx * 1.3)
+                (
+                    sp2 + Vector((0.0, 0.0, 0.05)),
+                    sub_lobe_rxy,
+                    sub_lobe_rz,
+                    b_idx * 3.1 + sub_idx * 1.3,
+                )
             )
 
             # 副枝先端の小枝 — 先端 stp1 に必ず葉束ロゼットを配置
@@ -265,7 +298,13 @@ def get_branch_skeleton():
                 tertiary_twigs.append(([stp0, stp1], [base_r * 0.17, 0.010]))
                 twig_tip_rosettes.append((stp1, st_dir, b_idx * 7.3 + sub_idx * 2.9 + st_i * 1.1))
 
-    return primary_branches, secondary_branches, tertiary_twigs, foliage_anchors, twig_tip_rosettes
+    return (
+        primary_branches,
+        secondary_branches,
+        tertiary_twigs,
+        foliage_anchors,
+        twig_tip_rosettes,
+    )
 
 
 def build_tree_trunk(materials) -> bpy.types.Object:
@@ -415,13 +454,13 @@ def add_ginkgo_fan_leaf_3d(
 
     # Row 3: 扇形外縁＋中央二股切れ込み (7頂点 — 1対1のクリーンな6枚の放射クアッドを形成)
     o_specs = [
-        (0.00, 0.80, 1.00, 0.006, 0.86),   # 0: 左外端
-        (0.17, 0.99, 0.97, 0.012, 0.98),   # 1: 左裂片 外ピーク
-        (0.34, 1.03, 0.94, 0.008, 1.00),   # 2: 左裂片 内ピーク
+        (0.00, 0.80, 1.00, 0.006, 0.86),  # 0: 左外端
+        (0.17, 0.99, 0.97, 0.012, 0.98),  # 1: 左裂片 外ピーク
+        (0.34, 1.03, 0.94, 0.008, 1.00),  # 2: 左裂片 内ピーク
         (0.50, 0.65, 0.90, -0.014, 0.68),  # 3: 中央二股切れ込み (Biloba Notch!)
-        (0.66, 1.03, 0.94, 0.008, 1.00),   # 4: 右裂片 内ピーク
-        (0.83, 0.99, 0.97, 0.012, 0.98),   # 5: 右裂片 外ピーク
-        (1.00, 0.80, 1.00, 0.006, 0.86),   # 6: 右外端
+        (0.66, 1.03, 0.94, 0.008, 1.00),  # 4: 右裂片 内ピーク
+        (0.83, 0.99, 0.97, 0.012, 0.98),  # 5: 右裂片 外ピーク
+        (1.00, 0.80, 1.00, 0.006, 0.86),  # 6: 右外端
     ]
     o_verts = []
     o_uvs = []
@@ -434,7 +473,7 @@ def add_ginkgo_fan_leaf_3d(
         f = bm.faces.new(v_list)
         f.material_index = mat_idx
         f.smooth = True
-        for lp, uv in zip(f.loops, uv_list):
+        for lp, uv in zip(f.loops, uv_list, strict=True):
             lp[uv_layer].uv = uv
 
     # 1. 葉柄 (Petiole) クアッド (1面)
@@ -488,9 +527,7 @@ def add_ginkgo_spur_rosette(
 
         roll_angle = 0.24 * math.sin(seed * 3.7 + i * 1.9)
         leaf_up = (
-            n_dir * 0.42
-            + Vector((0.0, 0.0, 0.88))
-            + radial_tangent * roll_angle
+            n_dir * 0.42 + Vector((0.0, 0.0, 0.88)) + radial_tangent * roll_angle
         ).normalized()
 
         len_var = base_leaf_len * (0.86 + 0.26 * ((i * 37 + int(seed * 13)) % 7) / 6.0)
@@ -537,7 +574,9 @@ def add_foliage_cluster_with_leaves(
         z_norm = -0.35 + 0.95 * t
         xy_proj = math.sqrt(max(0.1, 1.0 - z_norm * z_norm))
         azim = seed_offset * 1.3 + r_idx * golden_angle * 1.5
-        local_dir = Vector((math.cos(azim) * xy_proj, math.sin(azim) * xy_proj, z_norm)).normalized()
+        local_dir = Vector(
+            (math.cos(azim) * xy_proj, math.sin(azim) * xy_proj, z_norm)
+        ).normalized()
         spur_pos = center + Vector(
             (
                 local_dir.x * radius_xy * 0.28,
@@ -719,7 +758,9 @@ def build_tree_guard(materials) -> bpy.types.Object:
     inner_half = 0.56
     curb_h = 0.11
 
-    def add_oriented_uv_box(center: Vector, dir_x: Vector, dir_y: Vector, size: Vector, mat_idx: int):
+    def add_oriented_uv_box(
+        center: Vector, dir_x: Vector, dir_y: Vector, size: Vector, mat_idx: int
+    ):
         hx, hy, hz = size.x * 0.5, size.y * 0.5, size.z * 0.5
         dx = dir_x.normalized()
         dy = dir_y.normalized()
@@ -749,6 +790,7 @@ def build_tree_guard(materials) -> bpy.types.Object:
             for lp, uv in zip(
                 f.loops,
                 [Vector((0, 0)), Vector((1, 0)), Vector((1, 1)), Vector((0, 1))],
+                strict=True,
             ):
                 lp[uv_layer].uv = uv
 
@@ -757,10 +799,34 @@ def build_tree_guard(materials) -> bpy.types.Object:
     mid_offset = (outer_half + inner_half) * 0.5
     ux = Vector((1.0, 0.0, 0.0))
     uy = Vector((0.0, 1.0, 0.0))
-    add_oriented_uv_box(Vector((0.0, -mid_offset, curb_h * 0.5)), ux, uy, Vector((outer_half * 2.0, border_w, curb_h)), mat_idx=0)
-    add_oriented_uv_box(Vector((0.0, mid_offset, curb_h * 0.5)), ux, uy, Vector((outer_half * 2.0, border_w, curb_h)), mat_idx=0)
-    add_oriented_uv_box(Vector((-mid_offset, 0.0, curb_h * 0.5)), ux, uy, Vector((border_w, inner_half * 2.0, curb_h)), mat_idx=0)
-    add_oriented_uv_box(Vector((mid_offset, 0.0, curb_h * 0.5)), ux, uy, Vector((border_w, inner_half * 2.0, curb_h)), mat_idx=0)
+    add_oriented_uv_box(
+        Vector((0.0, -mid_offset, curb_h * 0.5)),
+        ux,
+        uy,
+        Vector((outer_half * 2.0, border_w, curb_h)),
+        mat_idx=0,
+    )
+    add_oriented_uv_box(
+        Vector((0.0, mid_offset, curb_h * 0.5)),
+        ux,
+        uy,
+        Vector((outer_half * 2.0, border_w, curb_h)),
+        mat_idx=0,
+    )
+    add_oriented_uv_box(
+        Vector((-mid_offset, 0.0, curb_h * 0.5)),
+        ux,
+        uy,
+        Vector((border_w, inner_half * 2.0, curb_h)),
+        mat_idx=0,
+    )
+    add_oriented_uv_box(
+        Vector((mid_offset, 0.0, curb_h * 0.5)),
+        ux,
+        uy,
+        Vector((border_w, inner_half * 2.0, curb_h)),
+        mat_idx=0,
+    )
 
     # 2. 鋳鉄製ツリーガード格子（3重の同心円リング + 16本の放射状リブバー）
     seg_count = 24
@@ -771,7 +837,13 @@ def build_tree_guard(materials) -> bpy.types.Object:
             radial_dir = Vector((math.cos(ang), math.sin(ang), 0.0))
             tangent_dir = Vector((-math.sin(ang), math.cos(ang), 0.0))
             center = radial_dir * ring_r + Vector((0.0, 0.0, 0.035))
-            add_oriented_uv_box(center, tangent_dir, radial_dir, Vector((arc_len, 0.036, 0.042)), mat_idx=1)
+            add_oriented_uv_box(
+                center,
+                tangent_dir,
+                radial_dir,
+                Vector((arc_len, 0.036, 0.042)),
+                mat_idx=1,
+            )
 
     radial_bars = 16
     for b in range(radial_bars):
@@ -779,7 +851,9 @@ def build_tree_guard(materials) -> bpy.types.Object:
         radial_dir = Vector((math.cos(ang), math.sin(ang), 0.0))
         tangent_dir = Vector((-math.sin(ang), math.cos(ang), 0.0))
         center = radial_dir * 0.43 + Vector((0.0, 0.0, 0.035))
-        add_oriented_uv_box(center, radial_dir, tangent_dir, Vector((0.24, 0.032, 0.040)), mat_idx=1)
+        add_oriented_uv_box(
+            center, radial_dir, tangent_dir, Vector((0.24, 0.032, 0.040)), mat_idx=1
+        )
 
     bm.to_mesh(mesh)
     bm.free()
@@ -810,12 +884,16 @@ def generate_street_tree():
     guard_obj = build_tree_guard(materials)
     guard_obj.parent = root
 
-    print("High-precision Street Tree (Ginkgo Biloba with Real-Scale 3D Fan Leaves) modeling complete! Hierarchy created:")
+    print(
+        "High-precision Street Tree (Ginkgo Biloba with Real-Scale 3D Fan Leaves) modeling complete! Hierarchy created:"
+    )
     for obj in bpy.data.objects:
         p_name = obj.parent.name if obj.parent else "None"
         v_cnt = len(obj.data.vertices) if obj.type == "MESH" else 0
         f_cnt = len(obj.data.polygons) if obj.type == "MESH" else 0
-        print(f"  - {obj.name} (Type: {obj.type}, Parent: {p_name}, Verts: {v_cnt}, Faces: {f_cnt})")
+        print(
+            f"  - {obj.name} (Type: {obj.type}, Parent: {p_name}, Verts: {v_cnt}, Faces: {f_cnt})"
+        )
 
     script_file = globals().get("__file__")
     repo_root = (
@@ -836,7 +914,9 @@ def generate_street_tree():
         export_normals=True,
         export_extras=True,
     )
-    print(f"Successfully exported Street Tree model to: {out_path} ({os.path.getsize(out_path):,} bytes)")
+    print(
+        f"Successfully exported Street Tree model to: {out_path} ({os.path.getsize(out_path):,} bytes)"
+    )
 
 
 if __name__ == "__main__":

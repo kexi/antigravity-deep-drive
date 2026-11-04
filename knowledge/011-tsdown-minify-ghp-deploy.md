@@ -19,6 +19,7 @@ trust_signals:
 ## 2. アーキテクチャと処理フロー
 
 ### 2.1 ビルド・Minify パイプライン
+
 1. **TypeScript 型検査 (`tsc --noEmit`)**: 全ソースコードの型安全性を検証。
 2. **Vite プロダクションバンドル (`vite build`)**: HTML エントリーポイント・WASM・YAML・静的アセット・GitHub Pages 向けベースパス（`/antigravity-deep-drive/`）の解決と基本バンドル生成。
 3. **tsdown Minification 最適化 (`tsx scripts/minify.ts`)**:
@@ -28,11 +29,13 @@ trust_signals:
    - 一時ディレクトリを安全に破棄。
 
 ### 2.2 依存関係とサプライチェーン管理
+
 - `.npmrc` の `minimumReleaseAge=1440` および `strictDepBuilds=true` 規範に準拠。
 - `pnpm-workspace.yaml` の `allowBuilds` に `esbuild: true`（tsx の依存）を明示し、安全にスクリプト実行を許可。
 - `apps/web/package.json` の devDependencies に `tsdown: ^0.23.4`, `tsx: ^4.23.15` を追加。
 
 ### 2.3 GitHub Actions CI/CD 連動
+
 - `.github/workflows/deploy.yml` 内の `pnpm -r build` ステップにて、Vite ビルドから `tsdown` による minify までが一括自動実行。
 - minify 済みの `apps/web/dist` が `upload-pages-artifact` を経由して GitHub Pages 環境へデプロイ。
 

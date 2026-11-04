@@ -11,13 +11,25 @@ export const ModelAssetSchema = z.object({
 
 export const Texture3DAssetSchema = z.object({
   id: z.string(),
-  resolution: z.number().int().positive().default(32),
-  type: z.enum(["asphalt_pbr", "volumetric_fog"]),
-  roughnessScale: z.number().default(1.0),
+  resolution: z.number().int().min(8).max(128).default(32),
+  type: z.enum([
+    "asphalt_pbr",
+    "foliage_bark",
+    "architecture_stone",
+    "volumetric_fog",
+    "volumetric_cloud",
+    "crown_interior",
+    "road_marking_prop",
+    "vehicle_exterior",
+    "water_caustics",
+  ]),
+  roughnessScale: z.number().min(0.1).max(10.0).default(1.0),
 });
 
 export const RoadMarkingConfigSchema = z.object({
-  centerLineType: z.enum(["solid_yellow", "dashed_white", "none"]).default("solid_yellow"),
+  centerLineType: z
+    .enum(["solid_white", "solid_yellow", "dashed_white", "none"])
+    .default("solid_white"),
   hasCrosswalks: z.boolean().default(true),
   hasTactilePaving: z.boolean().default(true),
   hasShoulderLines: z.boolean().default(true),
@@ -55,25 +67,27 @@ export const RoadDefinitionSchema = z.object({
   }),
 });
 
+export const RoadSignTypeSchema = z.enum([
+  "overhead_guide",
+  "speed_limit",
+  "stop",
+  "no_entry",
+  "direction_mandatory",
+  "traffic_light_ahead",
+  "crosswalk",
+  "street_name",
+  "no_parking",
+  "no_stopping",
+  "no_uturn",
+  "one_way",
+  "lane_direction",
+  "intersection_name",
+  "delineator",
+]);
+
 export const RoadSignPlacementSchema = z.object({
   id: z.string(),
-  type: z.enum([
-    "overhead_guide",
-    "speed_limit",
-    "stop",
-    "no_entry",
-    "direction_mandatory",
-    "traffic_light_ahead",
-    "crosswalk",
-    "street_name",
-    "no_parking",
-    "no_stopping",
-    "no_uturn",
-    "one_way",
-    "lane_direction",
-    "intersection_name",
-    "delineator",
-  ]),
+  type: RoadSignTypeSchema,
   position: z.tuple([z.number(), z.number(), z.number()]),
   rotationY: z.number().default(0),
   label: z.string().optional(),
@@ -81,6 +95,16 @@ export const RoadSignPlacementSchema = z.object({
   auxiliaryText: z.string().optional(),
   speedLimit: z.number().int().optional(),
   arrowDirections: z.array(z.string()).optional(),
+  leftLabel: z.string().optional(),
+  leftSubLabel: z.string().optional(),
+  rightLabel: z.string().optional(),
+  rightSubLabel: z.string().optional(),
+  intersectionName: z.string().optional(),
+  roadNumber: z.string().optional(),
+  subRoadNumber: z.string().optional(),
+  supportType: z.enum(["cantilever", "portal"]).optional(),
+  spanWidth: z.number().positive().optional(),
+  directionType: z.enum(["straight-left", "straight-right", "straight-only"]).optional(),
 });
 
 export const WeatherPresetSchema = z.object({
@@ -119,6 +143,7 @@ export const AssetManifestSchema = z.object({
 export type ModelAsset = z.infer<typeof ModelAssetSchema>;
 export type Texture3DAsset = z.infer<typeof Texture3DAssetSchema>;
 export type RoadDefinition = z.infer<typeof RoadDefinitionSchema>;
+export type RoadSignType = z.infer<typeof RoadSignTypeSchema>;
 export type RoadSignPlacement = z.infer<typeof RoadSignPlacementSchema>;
 export type WeatherPreset = z.infer<typeof WeatherPresetSchema>;
 export type AssetManifest = z.infer<typeof AssetManifestSchema>;

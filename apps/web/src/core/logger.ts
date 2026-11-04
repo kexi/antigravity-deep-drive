@@ -65,8 +65,8 @@ export class StructuredLogger {
   }
 
   private syncBrowserGlobal(): void {
-    const isWindowAvailable = typeof window !== "undefined";
-    if (!isWindowAvailable) {
+    const isMissingWindow = typeof window === "undefined";
+    if (isMissingWindow) {
       return;
     }
     window.__DEEP_DRIVE_LOGS__ = this.logs;
@@ -211,7 +211,8 @@ export class StructuredLogger {
     }
     this.syncBrowserGlobal();
 
-    if (this.consoleOutputEnabled) {
+    const shouldLogToConsole = this.consoleOutputEnabled;
+    if (shouldLogToConsole) {
       const jsonLine = JSON.stringify(validatedEntry);
       const isErrorLevel = level === "error";
       const isWarnLevel = level === "warn";

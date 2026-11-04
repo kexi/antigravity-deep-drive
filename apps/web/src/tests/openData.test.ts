@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   findNearestGsiRoad,
   findNearestPlateauBuilding,
+  getNavigationIntersections,
+  getNavigationRoadCorridors,
+  getOpenDataCurvedRoadCorridors,
   getPlateauBuildingsForMap,
   getPlateauWaterBodies,
   getRelativeTerrainDisplacement,
+  getShibuyaPlateauBuildingsForMap,
   getTokyoOpenData,
   localToWgs84,
   sampleGsiDemElevation,
@@ -51,10 +55,14 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
     expect(isGyokoElevationRealistic).toBe(true);
     expect(isMoatLowerThanPlaza).toBe(true);
 
-    // 車道コリドー上（行幸通り・丸の内中央通り・日比谷通り）では物理コライダーとの乖離を防ぐため変位 0 であること
+    // 車道コリドー上（行幸通り・丸の内中央通り・丸の内仲通り・日比谷通り・内堀通り・永代通り・馬場先門通り）では物理コライダーとの乖離を防ぐため変位 0 であること
     expect(getRelativeTerrainDisplacement(0, 100)).toBe(0);
     expect(getRelativeTerrainDisplacement(-10, 5)).toBe(0);
+    expect(getRelativeTerrainDisplacement(120, 165)).toBe(0);
     expect(getRelativeTerrainDisplacement(20, 250)).toBe(0);
+    expect(getRelativeTerrainDisplacement(0, 365)).toBe(0);
+    expect(getRelativeTerrainDisplacement(-268, 120)).toBe(0);
+    expect(getRelativeTerrainDisplacement(270, 120)).toBe(0);
   });
 
   it("国土地理院 ベクトルタイル道路中心線 (experimental_rdcl) から走行位置に応じた実在路線名・rID・幅員区分が検索できることを保証する", () => {
@@ -73,9 +81,16 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
     // 丸の内仲通り付近 (x = 154, z = 100)
     const nakadoriRoad = findNearestGsiRoad(154, 100);
     expect(nakadoriRoad.displayName).toContain("丸の内仲通り");
+
+    // 拡張エリア：内堀通り (z = 365) および永代通り (x = -268)
+    const uchiboriRoad = findNearestGsiRoad(60, 365);
+    expect(uchiboriRoad.displayName).toContain("内堀通り");
+
+    const eitaiRoad = findNearestGsiRoad(-268, 100);
+    expect(eitaiRoad.displayName).toContain("永代通り");
   });
 
-  it("東京都 Project PLATEAU 千代田区 (13101) の実在建築物18棟から最寄りビルと正確な属性（buildingId, 実測高 measuredHeight, 地上階数）が取得できることを保証する", () => {
+  it("東京都 Project PLATEAU 千代田区 (13101) の実在建築物28棟（丸の内・大手町・有楽町・日比谷）から最寄りビルと正確な属性（buildingId, 実測高 measuredHeight, 地上階数）が取得できることを保証する", () => {
     // 丸の内ビルディング付近 (x = 60, z = 111)
     const maruBldg = findNearestPlateauBuilding(60, 111);
     expect(maruBldg.buildingId).toBe("13101-bldg-1194");
@@ -94,11 +109,22 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
     const jpTower = findNearestPlateauBuilding(180, -14);
     expect(jpTower.buildingId).toBe("13101-bldg-2287");
     expect(jpTower.measuredHeight).toBeCloseTo(205.2, 1);
+
+    // 拡張エリア北側：大手町タワー (x = -335, z = 110)
+    const otemachiTower = findNearestPlateauBuilding(-335, 110);
+    expect(otemachiTower.buildingId).toBe("13101-bldg-5101");
+    expect(otemachiTower.name).toContain("大手町タワー");
+    expect(otemachiTower.measuredHeight).toBeCloseTo(199.7, 1);
+
+    // 拡張エリア南側：東京ミッドタウン日比谷 (x = 535, z = 108)
+    const midtownHibiya = findNearestPlateauBuilding(535, 108);
+    expect(midtownHibiya.buildingId).toBe("13101-bldg-5205");
+    expect(midtownHibiya.name).toContain("東京ミッドタウン日比谷");
   });
 
-  it("3D都市マップ用の PLATEAU 建築物18棟および皇居内濠データが道路コリドーを塞がずに配置されることを保証する", () => {
+  it("3D都市マップ用の PLATEAU 建築物28棟および皇居内濠5水域データが拡張道路コリドーを塞がずに配置されることを保証する", () => {
     const mapBuildings = getPlateauBuildingsForMap();
-    expect(mapBuildings.length).toBe(18);
+    expect(mapBuildings.length).toBe(28);
 
     for (const b of mapBuildings) {
       const minX = b.x - b.w / 2;
@@ -110,14 +136,160 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
       const overlapsGyoko = minX < 24 && maxX > -24 && maxZ > 10 && minZ < 240;
       expect(overlapsGyoko).toBe(false);
 
-      // 日比谷通り車道 (|x| < 120, z ∈ [230, 266]) に建物コライダーが侵入していないこと
-      const overlapsHibiya = Math.abs(b.x) < 120 && maxZ > 230 && minZ < 266;
+      // 日比谷通り車道 (z ∈ [236, 264]) に建物コライダーが侵入していないこと
+      const overlapsHibiya = maxZ > 236 && minZ < 264;
       expect(overlapsHibiya).toBe(false);
+
+      // 丸の内仲通り車道 (z ∈ [157, 173]) に建物コライダーが侵入していないこと
+      const overlapsNakadori = maxZ > 157 && minZ < 173;
+      expect(overlapsNakadori).toBe(false);
+
+      // 丸の内中央通り車道 (z ∈ [-8, 18]) に建物コライダーが侵入していないこと
+      const overlapsCentralAve = maxZ > -8 && minZ < 18;
+      expect(overlapsCentralAve).toBe(false);
+
+      // 永代通り車道 (x ∈ [-284, -252]) に建物コライダーが侵入していないこと
+      const overlapsEitai = maxX > -284 && minX < -252;
+      expect(overlapsEitai).toBe(false);
+
+      // 鍛冶橋通り・馬場先門通り車道 (x ∈ [256, 284]) に建物コライダーが侵入していないこと
+      const overlapsBabasakimon = maxX > 256 && minX < 284;
+      expect(overlapsBabasakimon).toBe(false);
+
+      // 国道246号・青山通り連絡車道 (x < -268, z ∈ [78, 112]) に建物コライダーが侵入していないこと
+      const overlapsRoute246Connector = maxX < -268 && maxZ > 78 && minZ < 112;
+      expect(overlapsRoute246Connector).toBe(false);
     }
 
     const waterBodies = getPlateauWaterBodies();
-    expect(waterBodies.length).toBe(2);
+    expect(waterBodies.length).toBe(5);
     expect(waterBodies[0].waterSurfaceElevationM).toBeCloseTo(1.56, 2);
     expect(waterBodies[0].relativeWaterY).toBeLessThan(0);
+  });
+
+  it("東京都 Project PLATEAU 渋谷区 (13113) の渋谷ストリームおよび明治通り・渋谷川周辺の GIS/DEM データが正確に取得でき、明治通り車道コリドーを塞がないことを保証する", () => {
+    const shibuyaStream = findNearestPlateauBuilding(-695, -15);
+    expect(shibuyaStream.buildingId).toBe("13113-bldg-shibuya-stream");
+    expect(shibuyaStream.name).toBe("渋谷ストリーム");
+    expect(shibuyaStream.name).not.toContain("Google");
+    expect(shibuyaStream.measuredHeight).toBeCloseTo(179.95, 2);
+    expect(shibuyaStream.storeysAboveGround).toBe(35);
+
+    const meijiRoad = findNearestGsiRoad(-746.5, -15);
+    expect(meijiRoad.displayName).toContain("明治通り");
+    expect(meijiRoad.displayName).not.toContain("Google");
+    expect(meijiRoad.routeCode).toBe("東京都道305号");
+
+    const r246ConnectorRoad = findNearestGsiRoad(-348, 95);
+    expect(r246ConnectorRoad.displayName).toContain("国道246号");
+    expect(r246ConnectorRoad.routeCode).toBe("国道246号");
+
+    const r246CurvedPeakRoad = findNearestGsiRoad(-545, 108);
+    expect(r246CurvedPeakRoad.routeCode).toBe("国道246号");
+    expect(r246CurvedPeakRoad.distanceMeters).toBe(0);
+
+    const curvedCorridors = getOpenDataCurvedRoadCorridors();
+    expect(curvedCorridors.length).toBeGreaterThanOrEqual(5);
+    for (const curved of curvedCorridors) {
+      expect(curved.points.length).toBeGreaterThanOrEqual(3);
+    }
+
+    const wgs = localToWgs84(-695, -15);
+    expect(wgs.lat).toBeCloseTo(35.65726, 3);
+    expect(wgs.lon).toBeCloseTo(139.70312, 3);
+
+    const shibuyaDem = sampleGsiDemElevation(-695, -15);
+    const isShibuyaValleyElevation = shibuyaDem >= 14.0 && shibuyaDem <= 16.5;
+    expect(isShibuyaValleyElevation).toBe(true);
+    expect(getRelativeTerrainDisplacement(-750, -15)).toBe(0);
+
+    const shibuyaSurrounding = getShibuyaPlateauBuildingsForMap();
+    expect(shibuyaSurrounding.length).toBeGreaterThanOrEqual(10);
+    for (const b of shibuyaSurrounding) {
+      const minX = b.x - b.w / 2;
+      const maxX = b.x + b.w / 2;
+      // 明治通り車道 (x ∈ [-764, -736]) に建物コライダーが侵入していないこと
+      const overlapsMeijiDori = maxX > -764 && minX < -736;
+      expect(overlapsMeijiDori).toBe(false);
+    }
+
+    // 渋谷街中周回ストリート（稲荷橋通り・並木橋通り・宮下公園通り・桜丘西通り・金王坂通り）が GSI 道路検索で特定できること
+    const inaribashiRoad = findNearestGsiRoad(-695, -95);
+    expect(inaribashiRoad.routeCode).toBe("渋谷区道稲荷橋線");
+    const konnozakaRoad = findNearestGsiRoad(-645, -15);
+    expect(konnozakaRoad.routeCode).toBe("渋谷区道金王坂線");
+    const miyashitaRoad = findNearestGsiRoad(-795, 195);
+    expect(miyashitaRoad.routeCode).toBe("渋谷区道美竹線");
+    expect(getRelativeTerrainDisplacement(-156, 100)).toBe(0);
+    expect(getRelativeTerrainDisplacement(156, 100)).toBe(0);
+    expect(getRelativeTerrainDisplacement(-645, -95)).toBe(0);
+  });
+
+  it("カーナビ地図描画用の階層別道路コリドー (getNavigationRoadCorridors) と主要交差点 (getNavigationIntersections) が丸の内・渋谷の全主要路線を網羅し、細切れ端数セグメントを持たないことを保証する", () => {
+    const corridors = getNavigationRoadCorridors();
+    expect(corridors.length).toBeGreaterThanOrEqual(10);
+
+    for (const c of corridors) {
+      expect(c.points.length).toBeGreaterThanOrEqual(2);
+      expect(c.widthMeters).toBeGreaterThanOrEqual(9);
+      let totalLen = 0;
+      for (let i = 1; i < c.points.length; i++) {
+        totalLen += Math.hypot(
+          c.points[i].x - c.points[i - 1].x,
+          c.points[i].z - c.points[i - 1].z,
+        );
+      }
+      // 1.3m等の細切れ端数セグメントが存在せず、全コリドーが100m以上の連続路線であること
+      expect(totalLen).toBeGreaterThanOrEqual(100);
+    }
+
+    const intersections = getNavigationIntersections();
+    expect(intersections.length).toBeGreaterThanOrEqual(14);
+    const hasWadakuramon = intersections.some((i) => i.id === "nav-int-wadakuramon");
+    const hasShibuyaEast = intersections.some((i) => i.id === "nav-int-shibuya-east");
+    expect(hasWadakuramon).toBe(true);
+    expect(hasShibuyaEast).toBe(true);
+
+    // 東京駅赤レンガ駅舎 (x ∈ [-155, 155], z ∈ [-48, -24]) および全 PLATEAU ビルと道路コリドーが一切干渉しないこと
+    const allMapBuildings = [
+      ...getPlateauBuildingsForMap(),
+      { buildingId: "13101-bldg-tokyo-station", x: 0, z: -36, w: 310, d: 24, h: 46 },
+      ...getShibuyaPlateauBuildingsForMap(),
+    ];
+
+    for (const c of corridors) {
+      const halfRoad = c.widthMeters * 0.5 + 3.0; // 縁石ケーシング＋歩道クリアランス込み
+      const p0 = c.points[0];
+      const p1 = c.points[c.points.length - 1];
+      const roadMinX = Math.min(p0.x, p1.x) - halfRoad;
+      const roadMaxX = Math.max(p0.x, p1.x) + halfRoad;
+      const roadMinZ = Math.min(p0.z, p1.z) - halfRoad;
+      const roadMaxZ = Math.max(p0.z, p1.z) + halfRoad;
+
+      for (const b of allMapBuildings) {
+        const bMinX = b.x - b.w * 0.5;
+        const bMaxX = b.x + b.w * 0.5;
+        const bMinZ = b.z - b.d * 0.5;
+        const bMaxZ = b.z + b.d * 0.5;
+        const isOverlappingRoad =
+          roadMaxX > bMinX && roadMinX < bMaxX && roadMaxZ > bMinZ && roadMinZ < bMaxZ;
+        expect(isOverlappingRoad, `${c.id} overlaps ${b.buildingId}`).toBe(false);
+      }
+    }
+
+    // 同一街区内の隣接 PLATEAU ビル同士が互いにめり込んで重複していないこと
+    const marunouchiBuildings = getPlateauBuildingsForMap();
+    for (let i = 0; i < marunouchiBuildings.length; i++) {
+      for (let j = i + 1; j < marunouchiBuildings.length; j++) {
+        const a = marunouchiBuildings[i];
+        const b = marunouchiBuildings[j];
+        const overlapX =
+          Math.min(a.x + a.w / 2, b.x + b.w / 2) - Math.max(a.x - a.w / 2, b.x - b.w / 2);
+        const overlapZ =
+          Math.min(a.z + a.d / 2, b.z + b.d / 2) - Math.max(a.z - a.d / 2, b.z - b.d / 2);
+        const isOverlappingEachOther = overlapX > 0 && overlapZ > 0;
+        expect(isOverlappingEachOther).toBe(false);
+      }
+    }
   });
 });

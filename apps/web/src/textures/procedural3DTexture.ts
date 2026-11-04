@@ -6,23 +6,33 @@ import * as THREE from "three";
  *
  * 【3Dテクスチャの利点と設計方針】
  * 1. UV展開歪み・タイリングシームの完全根絶:
- *    2Dテクスチャでは複雑な曲面（樹皮・根張り・多層樹冠・広大な道路網）でUV歪みや継ぎ目が発生するが、
+ *    2Dテクスチャでは複雑な曲面（樹皮・根張り・多層樹冠・広大な道路網・車両・建築・水面）でUV歪みや継ぎ目が発生するが、
  *    3次元ワールド座標 / ローカル座標 (x, y, z) で直接 sampler3D をサンプリングすることで、
  *    どのような形状のジオメトリに対しても完全シームレスな立体質感を付与できる。
  * 2. 数学的 3D トーラス周期性 (Toroidal 3D Tileability):
  *    Why not: 非周期的な perlin3D(fx * scale) では RepeatWrapping の境界 (0.0 <-> 1.0) で不連続な段差が生じるため、
  *    全オクターブの格子座標を整数周期 P で剰余ラップ (Modulo Period) し、3次元トーラス T^3 上で完全連続にする。
- * 3. 用途別 4 種の 3D ボリュームテクスチャ:
+ * 3. 用途別 9 種の 3D ボリュームテクスチャ:
  *    - Asphalt3DTexture (RGBA): 道路・石畳の骨材バンプ(R)、3D Worleyクラック(G)、補修パッチ(B)、水たまり盆地深度(A)
  *    - FoliageBark3DTexture (RGBA): イチョウ樹皮の3D縦溝(R)、葉肉SSS透過厚(G)、根元コケ群落(B)、3D風乱流・色彩変調(A)
  *    - Architecture3DTexture (RGBA): 御影石・赤レンガ結晶粒子(R)、3D石垣・レンガ目地(G)、雨水風化パティナ(B)、微細気孔ラフネス(A)
  *    - Fog3DTexture (Red): 雨煙・大気ボリュメトリックフォグ用の 3D Perlin-Worley 密度場
+ *    - Cloud3DTexture (RGBA): SIGGRAPH Nubis 方式の 3D Perlin-Worley 積雲密度場
+ *    - CrownInterior3DTexture (RGBA): トヨタ クラウン内装の3D異方性杢目ウッドグレイン(R)、3D Worley本革シボ(G)、3Dパンチングレザー＆ステッチ粒子(B)、3Dサテンヘアライン＆クリアコート変調(A)
+ *    - RoadMarkingProp3DTexture (RGBA): 路面標示ガラスビーズ再帰反射(R)、ペイント摩耗・点字ブロック粒子(G)、ガードレール亜鉛めっき・アルミヘアライン(B)、鋳鉄マンホール・縁石コンクリート風化(A)
+ *    - VehicleExterior3DTexture (RGBA): 外装メタリックマイカ塗装フレーク(R)、クリアコートオレンジピール(G)、タイヤトレッド＆サイドウォール加硫ゴム粒子(B)、アルミホイール切削＆ブレーキローター摺動痕(A)
+ *    - WaterCaustics3DTexture (RGBA): 3D水中コースティクス網目(R)、3Dマイクロ毛細管波紋(G)、皇居お堀水中浮遊粒子・プランクトン散乱(B)、水際マイクロフォーム気泡(A)
  */
 export class Procedural3DTextureGenerator {
   private static sharedAsphalt3D: THREE.Data3DTexture | null = null;
   private static sharedFoliageBark3D: THREE.Data3DTexture | null = null;
   private static sharedArchitecture3D: THREE.Data3DTexture | null = null;
   private static sharedFog3D: THREE.Data3DTexture | null = null;
+  private static sharedCloud3D: THREE.Data3DTexture | null = null;
+  private static sharedCrownInterior3D: THREE.Data3DTexture | null = null;
+  private static sharedRoadMarkingProp3D: THREE.Data3DTexture | null = null;
+  private static sharedVehicleExterior3D: THREE.Data3DTexture | null = null;
+  private static sharedWaterCaustics3D: THREE.Data3DTexture | null = null;
 
   /**
    * 共有アスファルト・石畳用 3D ボリュームテクスチャを取得する（シングルトンキャッシュ）
@@ -75,12 +85,76 @@ export class Procedural3DTextureGenerator {
   }
 
   /**
-   * 1. 日本のアスファルト路面・石畳広場用 3D ボリュームテクスチャ
+   * 共有ボリュメトリック雲シェーダー用 3D Perlin-Worley ボリュームテクスチャを取得する（シングルトンキャッシュ）
+   */
+  public static getSharedCloud3DTexture(size = 32): THREE.Data3DTexture {
+    const hasCached = this.sharedCloud3D !== null && this.sharedCloud3D.image.width === size;
+    if (hasCached) {
+      return this.sharedCloud3D!;
+    }
+    this.sharedCloud3D = this.generateCloud3DTexture(size);
+    return this.sharedCloud3D;
+  }
+
+  /**
+   * 共有トヨタ クラウン（AZSH32）車内内装用 3D ボリュームテクスチャを取得する（シングルトンキャッシュ）
+   */
+  public static getSharedCrownInterior3DTexture(size = 32): THREE.Data3DTexture {
+    const hasCached =
+      this.sharedCrownInterior3D !== null && this.sharedCrownInterior3D.image.width === size;
+    if (hasCached) {
+      return this.sharedCrownInterior3D!;
+    }
+    this.sharedCrownInterior3D = this.generateCrownInterior3DTexture(size);
+    return this.sharedCrownInterior3D;
+  }
+
+  /**
+   * 共有道路標示・ストリートファニチャー・標識・縁石用 3D ボリュームテクスチャを取得する（シングルトンキャッシュ）
+   */
+  public static getSharedRoadMarkingProp3DTexture(size = 32): THREE.Data3DTexture {
+    const hasCached =
+      this.sharedRoadMarkingProp3D !== null && this.sharedRoadMarkingProp3D.image.width === size;
+    if (hasCached) {
+      return this.sharedRoadMarkingProp3D!;
+    }
+    this.sharedRoadMarkingProp3D = this.generateRoadMarkingProp3DTexture(size);
+    return this.sharedRoadMarkingProp3D;
+  }
+
+  /**
+   * 共有車両エクステリア（メタリックマイカ塗装・タイヤ加硫ゴム・ホイール切削・ブレーキローター）用 3D ボリュームテクスチャを取得する（シングルトンキャッシュ）
+   */
+  public static getSharedVehicleExterior3DTexture(size = 32): THREE.Data3DTexture {
+    const hasCached =
+      this.sharedVehicleExterior3D !== null && this.sharedVehicleExterior3D.image.width === size;
+    if (hasCached) {
+      return this.sharedVehicleExterior3D!;
+    }
+    this.sharedVehicleExterior3D = this.generateVehicleExterior3DTexture(size);
+    return this.sharedVehicleExterior3D;
+  }
+
+  /**
+   * 共有水面・水中コースティクス・マイクロ波紋用 3D ボリュームテクスチャを取得する（シングルトンキャッシュ）
+   */
+  public static getSharedWaterCaustics3DTexture(size = 32): THREE.Data3DTexture {
+    const hasCached =
+      this.sharedWaterCaustics3D !== null && this.sharedWaterCaustics3D.image.width === size;
+    if (hasCached) {
+      return this.sharedWaterCaustics3D!;
+    }
+    this.sharedWaterCaustics3D = this.generateWaterCaustics3DTexture(size);
+    return this.sharedWaterCaustics3D;
+  }
+
+  /**
+   * 1. 日本の密粒度アスファルト路面（JIS A 5308 / 13mm 砕石骨材）・石畳広場用 3D ボリュームテクスチャ
    * 4チャンネル構成 (RGBAFormat):
-   * - R: 周期的 3D Perlin FBM（アスファルト砕石・御影石結晶のザラつきバンプ）
-   * - G: 周期的 3D Worley F2-F1 ノイズ（経年劣化ひび割れ・クラック溝）
-   * - B: 周期的 3D パッチワークノイズ（舗装切り貼り補修跡の領域と境界）
-   * - A: 周期的 3D フラクタルノイズ（雨水が溜まる水たまり盆地・わだち深度）
+   * - R: 周期的 3D Worley 砕石骨材セル (F1) + 高周波 3D Perlin マイクログリット（安山岩・硬質砂岩・白珪石チップの立体凸凹）
+   * - G: 周期的 3D Worley F2-F1 骨材間タール空隙・ポーラス微細孔 ＋ 経年ヘアクラック網
+   * - B: 周期的 3D 異方性ローラー転圧タールバインダー濃淡・舗装打設ムラ・補修パッチ境界
+   * - A: 周期的 3D マルチスケール水たまり盆地・わだち保水深度
    */
   public static generateAsphalt3DTexture(size = 64): THREE.Data3DTexture {
     const totalVoxels = size * size * size;
@@ -97,26 +171,32 @@ export class Procedural3DTextureGenerator {
         for (let x = 0; x < size; x++) {
           const fx = x * invSize;
 
-          // 1. Rチャンネル: 骨材ノイズ（周期16の3DシームレスFBM）
-          const rNoise = this.fbm3DPeriodic(fx, fy, fz, 16, perm, 3);
-          const rVal = this.toByte(rNoise * 0.5 + 0.5);
+          // 1. R & G: 周期16の 3D Worley 砕石骨材セル（F1 と F2-F1 空隙を1パス計算）
+          const [coarseF1, aggregateVoid] = this.worleyCellF1AndVoidPeriodic(fx, fy, fz, 16);
+          const stoneCrown = Math.pow(Math.max(1.0 - coarseF1 * 1.12, 0.0), 0.78);
+          const microGrit = this.perlin3DPeriodic(fx * 32, fy * 32, fz * 32, 32, perm) * 0.5 + 0.5;
+          const rAggregate = Math.min(Math.max(stoneCrown * 0.66 + microGrit * 0.34, 0.0), 1.0);
 
-          // 2. Gチャンネル: クラック（ひび割れ）ノイズ（周期4の3D Worleyセル境界）
-          const worleyCrack = this.worleyCrack3DPeriodic(fx, fy, fz, 4);
-          const gVal = this.toByte(worleyCrack);
+          // 2. G: 骨材間タール空隙 + 周期4の経年ヘアクラック
+          const hairCrack = this.worleyCrack3DPeriodic(fx + 0.23, fy + 0.41, fz + 0.67, 4);
+          const gVoidCrack = Math.min(Math.max(aggregateVoid * 0.52 + hairCrack * 0.78, 0.0), 1.0);
 
-          // 3. Bチャンネル: 補修パッチワーク境界ノイズ（周期2のグリッド切り貼り跡）
-          const patch = this.patchwork3DPeriodic(fx, fy, fz, 2, perm);
-          const bVal = this.toByte(patch);
+          // 3. B: ローラー転圧方向（Z軸）の異方性バインダー濃淡 + 補修パッチ
+          const rollerStreak =
+            this.fbm3DAnisotropicPeriodic(fx, fy, fz, 8, 4, 2, perm, 2) * 0.5 + 0.5;
+          const patchTone = this.patchwork3DPeriodic(fx, fy, fz, 2, perm);
+          const bBinder = Math.min(Math.max(rollerStreak * 0.48 + patchTone * 0.52, 0.0), 1.0);
 
-          // 4. Aチャンネル: 水たまり深度（周期3の低周波広域3Dノイズ）
-          const puddleNoise = this.fbm3DPeriodic(fx, fy, fz, 3, perm, 3);
-          const aVal = this.toByte(puddleNoise * 0.5 + 0.5);
+          // 4. A: マルチスケール水たまり盆地深度
+          const puddleMacro = this.fbm3DPeriodic(fx, fy, fz, 2, perm, 3) * 0.5 + 0.5;
+          const puddleMeso =
+            this.fbm3DPeriodic(fx + 0.37, fy + 0.19, fz + 0.83, 6, perm, 2) * 0.5 + 0.5;
+          const aPuddle = Math.min(Math.max(puddleMacro * 0.74 + puddleMeso * 0.26, 0.0), 1.0);
 
-          data[ptr] = rVal;
-          data[ptr + 1] = gVal;
-          data[ptr + 2] = bVal;
-          data[ptr + 3] = aVal;
+          data[ptr] = this.toByte(rAggregate);
+          data[ptr + 1] = this.toByte(gVoidCrack);
+          data[ptr + 2] = this.toByte(bBinder);
+          data[ptr + 3] = this.toByte(aPuddle);
           ptr += 4;
         }
       }
@@ -286,6 +366,330 @@ export class Procedural3DTextureGenerator {
     texture.needsUpdate = true;
 
     return texture;
+  }
+
+  /**
+   * 5. SIGGRAPH Nubis / Horizon Zero Dawn 方式の 3D ボリュメトリック雲テクスチャ (RGBAFormat)
+   * - R: Perlin-Worley 基本積雲シェイプ密度
+   * - G: 低周波 Worley F1 反転（カリフラワー状の塊隆起）
+   * - B: 中周波 Worley F1 反転（雲縁のモクモクしたディテール）
+   * - A: 高周波 Perlin-Worley 乱流浸食ノイズ（雲の輪郭を削る微細ウィスプ）
+   */
+  public static generateCloud3DTexture(size = 32): THREE.Data3DTexture {
+    const totalVoxels = size * size * size;
+    const data = new Uint8Array(totalVoxels * 4);
+    const perm = this.createPermutationTable(7741);
+
+    let ptr = 0;
+    const invSize = 1.0 / size;
+
+    for (let z = 0; z < size; z++) {
+      const fz = z * invSize;
+      for (let y = 0; y < size; y++) {
+        const fy = y * invSize;
+        for (let x = 0; x < size; x++) {
+          const fx = x * invSize;
+
+          const basePerlin = this.fbm3DPeriodic(fx, fy, fz, 4, perm, 4) * 0.5 + 0.5;
+          const worleyLow = 1.0 - this.worleyCellF1Periodic(fx, fy, fz, 4);
+          const worleyMid = 1.0 - this.worleyCellF1Periodic(fx + 0.17, fy + 0.31, fz + 0.53, 8);
+          const worleyHigh = 1.0 - this.worleyCellF1Periodic(fx + 0.43, fy + 0.67, fz + 0.19, 12);
+
+          const worleyFbm = worleyLow * 0.625 + worleyMid * 0.25 + worleyHigh * 0.125;
+          const perlinWorley = Math.min(Math.max(basePerlin * 0.58 + worleyFbm * 0.42, 0.0), 1.0);
+
+          data[ptr] = this.toByte(perlinWorley);
+          data[ptr + 1] = this.toByte(worleyLow);
+          data[ptr + 2] = this.toByte(worleyMid);
+          data[ptr + 3] = this.toByte(worleyHigh * 0.7 + basePerlin * 0.3);
+          ptr += 4;
+        }
+      }
+    }
+
+    return this.createRgbaData3DTexture(data, size);
+  }
+
+  /**
+   * 6. トヨタ クラウン（AZSH32）ラグジュアリー車内内装用 3D ボリュームテクスチャ (RGBAFormat)
+   * - R: 3D 異方性オープンポア杢目ウッドグレイン（ウッディブラウンパネル用：カテドラル年輪＋深彫り導管ピット＋リボン杢）
+   * - G: 3D Worley ペブル本革シボ（セミアニリンナッパレザー・ダッシュボードソフトパッド用：立体セルドーム＋深いシボ溝）
+   * - B: 3D パンチングレザー＆ダイヤモンドキルティング織り目（シート座面・背もたれ・ガングリップ用）
+   * - A: 3D サテンシルバー異方性ヘアライン＆ウルトラスエード（アルカンターラ調）微細起毛ナップ
+   */
+  public static generateCrownInterior3DTexture(size = 32): THREE.Data3DTexture {
+    const totalVoxels = size * size * size;
+    const data = new Uint8Array(totalVoxels * 4);
+    const perm = this.createPermutationTable(5123);
+
+    let ptr = 0;
+    const invSize = 1.0 / size;
+    const twoPi = Math.PI * 2.0;
+
+    for (let z = 0; z < size; z++) {
+      const fz = z * invSize;
+      for (let y = 0; y < size; y++) {
+        const fy = y * invSize;
+        for (let x = 0; x < size; x++) {
+          const fx = x * invSize;
+
+          // R: 3D 異方性オープンポア杢目ウッドグレイン（ウッディブラウンパネル用）
+          const warpX = this.fbm3DPeriodic(fx + 0.11, fy + 0.27, fz + 0.43, 3, perm, 3) * 0.28;
+          const warpY = this.fbm3DPeriodic(fx + 0.53, fy + 0.19, fz + 0.71, 3, perm, 3) * 0.26;
+          const ringPhase = (fy * 3.0 + fz * 2.0 + fx * 1.0 + warpX + warpY) * twoPi;
+          const woodRings = Math.pow(Math.sin(ringPhase) * 0.5 + 0.5, 1.45);
+          const woodPoreFiber =
+            this.fbm3DAnisotropicPeriodic(fx, fy, fz, 14, 3, 8, perm, 3) * 0.5 + 0.5;
+          // 導管の鋭い凹みピット（オープンポア特有の繊維方向の微細溝）
+          const openPorePit = woodPoreFiber < 0.34 ? (0.34 - woodPoreFiber) * 1.35 : 0.0;
+          const ribbonShimmer = Math.sin((fx * 2.0 - fy * 1.0 + warpX * 0.6) * twoPi) * 0.08 + 0.08;
+          const woodGrain = Math.min(
+            Math.max(woodRings * 0.66 + woodPoreFiber * 0.34 + ribbonShimmer - openPorePit, 0.0),
+            1.0,
+          );
+
+          // G: 3D Worley ペブル本革シボ（セミアニリンナッパレザー・ダッシュボードソフトパッド用）
+          const f1Dist = this.worleyCellF1Periodic(fx + 0.17, fy + 0.39, fz + 0.61, 8);
+          const pebbleDome = Math.pow(Math.max(1.0 - f1Dist * 1.12, 0.0), 0.72);
+          const pebbleCrease = Math.pow(
+            this.worleyCrack3DPeriodic(fx + 0.17, fy + 0.39, fz + 0.61, 8),
+            1.2,
+          );
+          const microPore =
+            this.fbm3DPeriodic(fx + 0.31, fy + 0.67, fz + 0.13, 14, perm, 2) * 0.5 + 0.5;
+          const leatherPebble = Math.min(
+            Math.max(pebbleDome * 0.76 + microPore * 0.24 - pebbleCrease * 0.58, 0.0),
+            1.0,
+          );
+
+          // B: 3D パンチングレザー＆マイクロファブリック織り目（シートセンター・ステアリングガングリップ用）
+          const perfGridX = Math.cos(fx * 10.0 * twoPi) * 0.5 + 0.5;
+          const perfGridY = Math.cos(fy * 10.0 * twoPi) * 0.5 + 0.5;
+          const perfGridZ = Math.cos(fz * 10.0 * twoPi) * 0.5 + 0.5;
+          const holeCluster = Math.pow(perfGridX * perfGridY * perfGridZ, 1.35);
+          const perfDimple = 1.0 - holeCluster * 0.88;
+          const weaveNoise =
+            this.fbm3DPeriodic(fx + 0.73, fy + 0.19, fz + 0.47, 10, perm, 3) * 0.5 + 0.5;
+          const perforatedWeave = Math.min(
+            Math.max(perfDimple * 0.72 + weaveNoise * 0.28, 0.0),
+            1.0,
+          );
+
+          // A: 3D サテンシルバー微細ヘアライン＆ウルトラスエード起毛マイクロファイバー変調
+          const brushedHairline =
+            this.fbm3DAnisotropicPeriodic(fx + 0.29, fy + 0.83, fz + 0.41, 18, 4, 5, perm, 2) *
+              0.5 +
+            0.5;
+          const fineSheen =
+            this.fbm3DPeriodic(fx + 0.61, fy + 0.11, fz + 0.89, 12, perm, 2) * 0.5 + 0.5;
+          const satinSpecMod = Math.min(
+            Math.max(brushedHairline * 0.68 + fineSheen * 0.32, 0.0),
+            1.0,
+          );
+
+          data[ptr] = this.toByte(woodGrain);
+          data[ptr + 1] = this.toByte(leatherPebble);
+          data[ptr + 2] = this.toByte(perforatedWeave);
+          data[ptr + 3] = this.toByte(satinSpecMod);
+          ptr += 4;
+        }
+      }
+    }
+
+    return this.createRgbaData3DTexture(data, size);
+  }
+
+  /**
+   * 7. 道路標示ペイント・縁石・ガードレール・鋳鉄マンホール・道路標識用 3D ボリュームテクスチャ
+   * 4チャンネル構成 (RGBAFormat):
+   * - R: 路面標示ペイント・標識フィルムの再帰反射ガラスビーズ＆マイクロプリズム粒子（3D Worley F1 + 高周波スパークル）
+   * - G: 溶融式トラフィックペイント厚み・タイヤ通過摩耗剥離マスク＆点字ブロック滑り止め粒子（3D FBM + 3D クラック）
+   * - B: ガードレール溶融亜鉛めっき結晶（スパングル）・標識アルミ裏面ヘアライン・信号機筐体微細凹凸（3D 異方性 FBM + Worley）
+   * - A: 鋳鉄マンホール・側溝グレーチングの砂型鋳造ディンプル肌＆縁石コンクリートの風化雨だれ・骨材（3D Worley F1 + 3D Perlin）
+   */
+  public static generateRoadMarkingProp3DTexture(size = 32): THREE.Data3DTexture {
+    const totalVoxels = size * size * size;
+    const data = new Uint8Array(totalVoxels * 4);
+    const perm = this.createPermutationTable(9182);
+    const invSize = 1.0 / size;
+    let ptr = 0;
+
+    for (let z = 0; z < size; z++) {
+      const fz = z * invSize;
+      for (let y = 0; y < size; y++) {
+        const fy = y * invSize;
+        for (let x = 0; x < size; x++) {
+          const fx = x * invSize;
+
+          // R: 再帰反射ガラスビーズ＆プリズム粒子
+          const beadCell = 1.0 - this.worleyCellF1Periodic(fx + 0.13, fy + 0.29, fz + 0.47, 10);
+          const microSparkle =
+            this.perlin3DPeriodic(fx * 16, fy * 16, fz * 16, 16, perm) * 0.5 + 0.5;
+          const glassBead = Math.min(
+            Math.max(Math.pow(beadCell, 1.5) * 0.68 + microSparkle * 0.32, 0.0),
+            1.0,
+          );
+
+          // G: ペイント塗膜厚み・摩耗剥離マスク＆点字ブロック粒子
+          const paintBody =
+            this.fbm3DPeriodic(fx + 0.37, fy + 0.19, fz + 0.61, 6, perm, 3) * 0.5 + 0.5;
+          const wearCrack = this.worleyCrack3DPeriodic(fx + 0.41, fy + 0.53, fz + 0.23, 6);
+          const paintWearMask = Math.min(
+            Math.max(paintBody * 0.85 - wearCrack * 0.35 + 0.12, 0.0),
+            1.0,
+          );
+
+          // B: 溶融亜鉛めっきスパングル・アルミヘアライン
+          const spangleCell = 1.0 - this.worleyCellF1Periodic(fx + 0.59, fy + 0.71, fz + 0.17, 6);
+          const metalGrain =
+            this.fbm3DAnisotropicPeriodic(fx + 0.23, fy + 0.43, fz + 0.83, 12, 4, 8, perm, 2) *
+              0.5 +
+            0.5;
+          const galvanizedMetal = Math.min(
+            Math.max(spangleCell * 0.52 + metalGrain * 0.48, 0.0),
+            1.0,
+          );
+
+          // A: 鋳鉄砂型ディンプル・縁石コンクリート骨材＆雨だれ風化
+          const castDimple = 1.0 - this.worleyCellF1Periodic(fx + 0.83, fy + 0.11, fz + 0.37, 8);
+          const curbWeathering =
+            this.fbm3DAnisotropicPeriodic(fx + 0.17, fy + 0.67, fz + 0.29, 4, 12, 4, perm, 3) *
+              0.5 +
+            0.5;
+          const castAndCurb = Math.min(
+            Math.max(castDimple * 0.58 + curbWeathering * 0.42, 0.0),
+            1.0,
+          );
+
+          data[ptr] = this.toByte(glassBead);
+          data[ptr + 1] = this.toByte(paintWearMask);
+          data[ptr + 2] = this.toByte(galvanizedMetal);
+          data[ptr + 3] = this.toByte(castAndCurb);
+          ptr += 4;
+        }
+      }
+    }
+
+    return this.createRgbaData3DTexture(data, size);
+  }
+
+  /**
+   * 8. 車両エクステリア（外装メタリックマイカ塗装・タイヤ加硫ゴム・ホイール切削・ブレーキローター）用 3D ボリュームテクスチャ
+   * 4チャンネル構成 (RGBAFormat):
+   * - R: ボディ塗装の 3D メタリック・マイカフレーク（真珠光沢・アルミフレーク微細スパークル粒子）
+   * - G: クリアコート層の 3D マイクロオレンジピール（塗装肌法線ゆらぎ）
+   * - B: タイヤトレッド＆サイドウォール加硫ゴムの 3D マイクログレイン・シリカ配合粒子・摩耗質感
+   * - A: アルミホイール切削スピンヘアライン＆ベンチレーテッドブレーキローター鋳鉄摺動痕（3D 異方性ノイズ）
+   */
+  public static generateVehicleExterior3DTexture(size = 32): THREE.Data3DTexture {
+    const totalVoxels = size * size * size;
+    const data = new Uint8Array(totalVoxels * 4);
+    const perm = this.createPermutationTable(6421);
+    const invSize = 1.0 / size;
+    let ptr = 0;
+
+    for (let z = 0; z < size; z++) {
+      const fz = z * invSize;
+      for (let y = 0; y < size; y++) {
+        const fy = y * invSize;
+        for (let x = 0; x < size; x++) {
+          const fx = x * invSize;
+
+          // R: メタリック・マイカフレーク粒子
+          const flakeCell = 1.0 - this.worleyCellF1Periodic(fx + 0.21, fy + 0.47, fz + 0.73, 12);
+          const flakeShimmer =
+            this.perlin3DPeriodic(fx * 16, fy * 16, fz * 16, 16, perm) * 0.5 + 0.5;
+          const micaFlake = Math.min(
+            Math.max(Math.pow(flakeCell, 1.8) * 0.65 + flakeShimmer * 0.35, 0.0),
+            1.0,
+          );
+
+          // G: クリアコート・オレンジピール微細ゆらぎ
+          const orangePeel =
+            this.fbm3DPeriodic(fx + 0.33, fy + 0.59, fz + 0.14, 6, perm, 3) * 0.5 + 0.5;
+
+          // B: タイヤトレッド＆サイドウォール加硫ゴム粒子
+          const rubberPore = 1.0 - this.worleyCellF1Periodic(fx + 0.63, fy + 0.19, fz + 0.41, 10);
+          const treadCompound =
+            this.fbm3DPeriodic(fx + 0.11, fy + 0.83, fz + 0.57, 8, perm, 3) * 0.5 + 0.5;
+          const tireRubber = Math.min(Math.max(rubberPore * 0.55 + treadCompound * 0.45, 0.0), 1.0);
+
+          // A: アルミホイール切削ヘアライン＆ブレーキローター摺動痕
+          const machinedSpin =
+            this.fbm3DAnisotropicPeriodic(fx + 0.49, fy + 0.27, fz + 0.69, 16, 16, 4, perm, 2) *
+              0.5 +
+            0.5;
+          const rotorGroove =
+            this.fbm3DPeriodic(fx + 0.77, fy + 0.39, fz + 0.91, 8, perm, 2) * 0.5 + 0.5;
+          const wheelAlloy = Math.min(Math.max(machinedSpin * 0.66 + rotorGroove * 0.34, 0.0), 1.0);
+
+          data[ptr] = this.toByte(micaFlake);
+          data[ptr + 1] = this.toByte(orangePeel);
+          data[ptr + 2] = this.toByte(tireRubber);
+          data[ptr + 3] = this.toByte(wheelAlloy);
+          ptr += 4;
+        }
+      }
+    }
+
+    return this.createRgbaData3DTexture(data, size);
+  }
+
+  /**
+   * 9. 皇居お堀・水面用 3D コースティクス・マイクロ波紋・水中散乱ボリュームテクスチャ
+   * 4チャンネル構成 (RGBAFormat):
+   * - R: 3D 水中コースティクス（集光模様）セルラーネットワーク（周期的 3D Worley F1 反転＋クラック強調）
+   * - G: 3D マイクロ毛細管波紋（風波による多方向干渉リップルハイト）
+   * - B: 水中浮遊微粒子・プランクトン散乱（サブサーフェス・スキャタリング深度濃度）
+   * - A: 水際マイクロフォーム（気泡）＆水草揺らぎ変調マスク
+   */
+  public static generateWaterCaustics3DTexture(size = 32): THREE.Data3DTexture {
+    const totalVoxels = size * size * size;
+    const data = new Uint8Array(totalVoxels * 4);
+    const perm = this.createPermutationTable(3571);
+    const invSize = 1.0 / size;
+    let ptr = 0;
+
+    for (let z = 0; z < size; z++) {
+      const fz = z * invSize;
+      for (let y = 0; y < size; y++) {
+        const fy = y * invSize;
+        for (let x = 0; x < size; x++) {
+          const fx = x * invSize;
+
+          // R: 3D 水中コースティクス網目
+          const [f1, voidBridge] = this.worleyCellF1AndVoidPeriodic(
+            fx + 0.19,
+            fy + 0.43,
+            fz + 0.67,
+            6,
+          );
+          const causticRidge = Math.pow(Math.min(f1 * 1.35, 1.0), 2.2);
+          const caustics = Math.min(Math.max(causticRidge * 0.65 + voidBridge * 0.45, 0.0), 1.0);
+
+          // G: 3D マイクロ毛細管リップル
+          const capillaryRipple =
+            this.fbm3DAnisotropicPeriodic(fx + 0.31, fy + 0.73, fz + 0.13, 8, 4, 8, perm, 3) * 0.5 +
+            0.5;
+
+          // B: 水中浮遊粒子・プランクトン散乱密度
+          const suspendedTurbidity =
+            this.fbm3DPeriodic(fx + 0.57, fy + 0.21, fz + 0.89, 4, perm, 3) * 0.5 + 0.5;
+
+          // A: 水際マイクロフォーム気泡
+          const foamBubble = 1.0 - this.worleyCellF1Periodic(fx + 0.79, fy + 0.17, fz + 0.53, 8);
+          const foamMask = Math.min(Math.max(foamBubble * 0.6 + capillaryRipple * 0.4, 0.0), 1.0);
+
+          data[ptr] = this.toByte(caustics);
+          data[ptr + 1] = this.toByte(capillaryRipple);
+          data[ptr + 2] = this.toByte(suspendedTurbidity);
+          data[ptr + 3] = this.toByte(foamMask);
+          ptr += 4;
+        }
+      }
+    }
+
+    return this.createRgbaData3DTexture(data, size);
   }
 
   // --- 内部ヘルパー & 3D トーラス周期ノイズ数学関数群 ---
@@ -531,30 +935,25 @@ export class Procedural3DTextureGenerator {
           const wrappedCy = this.modPositive(cy, period);
           const wrappedCz = this.modPositive(cz, period);
 
-          const rx =
-            (Math.sin(wrappedCx * 12.9898 + wrappedCy * 78.233 + wrappedCz * 45.164) * 43758.5453) %
-            1;
-          const ry =
-            (Math.sin(wrappedCx * 39.346 + wrappedCy * 11.135 + wrappedCz * 83.155) * 43758.5453) %
-            1;
-          const rz =
-            (Math.sin(wrappedCx * 73.156 + wrappedCy * 52.459 + wrappedCz * 21.234) * 43758.5453) %
-            1;
+          const h = (wrappedCx * 73856093) ^ (wrappedCy * 19349663) ^ (wrappedCz * 83492791);
+          const rx = ((h & 0x7fffffff) % 1009) * 0.00099108;
+          const ry = ((((h >> 5) ^ (wrappedCx * 49979693)) & 0x7fffffff) % 1009) * 0.00099108;
+          const rz = ((((h >> 11) ^ (wrappedCy * 29986577)) & 0x7fffffff) % 1009) * 0.00099108;
 
-          const diffX = cx + Math.abs(rx) - x;
-          const diffY = cy + Math.abs(ry) - y;
-          const diffZ = cz + Math.abs(rz) - z;
+          const diffX = cx + rx - x;
+          const diffY = cy + ry - y;
+          const diffZ = cz + rz - z;
 
-          const dist = Math.sqrt(diffX * diffX + diffY * diffY + diffZ * diffZ);
-          const isCloser = dist < d1;
+          const distSq = diffX * diffX + diffY * diffY + diffZ * diffZ;
+          const isCloser = distSq < d1;
           if (isCloser) {
-            d1 = dist;
+            d1 = distSq;
           }
         }
       }
     }
 
-    return Math.min(d1, 1.0);
+    return Math.min(Math.sqrt(d1), 1.0);
   }
 
   /**
@@ -574,8 +973,8 @@ export class Procedural3DTextureGenerator {
     const iy = Math.floor(y);
     const iz = Math.floor(z);
 
-    let d1 = 999.0;
-    let d2 = 999.0;
+    let d1Sq = 999.0;
+    let d2Sq = 999.0;
 
     for (let dz = -1; dz <= 1; dz++) {
       for (let dy = -1; dy <= 1; dy++) {
@@ -588,29 +987,24 @@ export class Procedural3DTextureGenerator {
           const wrappedCy = this.modPositive(cy, period);
           const wrappedCz = this.modPositive(cz, period);
 
-          const rx =
-            (Math.sin(wrappedCx * 12.9898 + wrappedCy * 78.233 + wrappedCz * 45.164) * 43758.5453) %
-            1;
-          const ry =
-            (Math.sin(wrappedCx * 39.346 + wrappedCy * 11.135 + wrappedCz * 83.155) * 43758.5453) %
-            1;
-          const rz =
-            (Math.sin(wrappedCx * 73.156 + wrappedCy * 52.459 + wrappedCz * 21.234) * 43758.5453) %
-            1;
+          const h = (wrappedCx * 73856093) ^ (wrappedCy * 19349663) ^ (wrappedCz * 83492791);
+          const rx = ((h & 0x7fffffff) % 1009) * 0.00099108;
+          const ry = ((((h >> 5) ^ (wrappedCx * 49979693)) & 0x7fffffff) % 1009) * 0.00099108;
+          const rz = ((((h >> 11) ^ (wrappedCy * 29986577)) & 0x7fffffff) % 1009) * 0.00099108;
 
-          const diffX = cx + Math.abs(rx) - x;
-          const diffY = cy + Math.abs(ry) - y;
-          const diffZ = cz + Math.abs(rz) - z;
+          const diffX = cx + rx - x;
+          const diffY = cy + ry - y;
+          const diffZ = cz + rz - z;
 
-          const dist = Math.sqrt(diffX * diffX + diffY * diffY + diffZ * diffZ);
+          const distSq = diffX * diffX + diffY * diffY + diffZ * diffZ;
 
-          const isClosest = dist < d1;
-          const isSecondClosest = dist < d2;
+          const isClosest = distSq < d1Sq;
+          const isSecondClosest = distSq < d2Sq;
           if (isClosest) {
-            d2 = d1;
-            d1 = dist;
+            d2Sq = d1Sq;
+            d1Sq = distSq;
           } else if (isSecondClosest) {
-            d2 = dist;
+            d2Sq = distSq;
           }
         }
       }
@@ -619,9 +1013,70 @@ export class Procedural3DTextureGenerator {
     // 境界の繊細なクラック線 (d2 - d1)
     // Why not: 0.14 のような広い閾値にすると道路全面に 20cm 幅の太い亀甲・キリン柄ネット模様が出現するため、
     // 0.045 の極細境界に絞り、かつべき乗で滑らかに減衰させる
-    const crack = d2 - d1;
+    const crack = Math.sqrt(d2Sq) - Math.sqrt(d1Sq);
     const isEdge = crack < 0.045;
     return isEdge ? Math.pow(1.0 - crack / 0.045, 2.2) : 0.0;
+  }
+
+  /**
+   * 周期的 3D Worley 砕石骨材ハイト (F1) と骨材間の微細空隙 (F2 - F1) を1パスで同時に算出する
+   */
+  private static worleyCellF1AndVoidPeriodic(
+    normX: number,
+    normY: number,
+    normZ: number,
+    period: number,
+  ): [number, number] {
+    const x = normX * period;
+    const y = normY * period;
+    const z = normZ * period;
+
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    const iz = Math.floor(z);
+
+    let d1Sq = 999.0;
+    let d2Sq = 999.0;
+
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const cx = ix + dx;
+          const cy = iy + dy;
+          const cz = iz + dz;
+
+          const wrappedCx = this.modPositive(cx, period);
+          const wrappedCy = this.modPositive(cy, period);
+          const wrappedCz = this.modPositive(cz, period);
+
+          const h = (wrappedCx * 73856093) ^ (wrappedCy * 19349663) ^ (wrappedCz * 83492791);
+          const rx = ((h & 0x7fffffff) % 1009) * 0.00099108;
+          const ry = ((((h >> 5) ^ (wrappedCx * 49979693)) & 0x7fffffff) % 1009) * 0.00099108;
+          const rz = ((((h >> 11) ^ (wrappedCy * 29986577)) & 0x7fffffff) % 1009) * 0.00099108;
+
+          const diffX = cx + rx - x;
+          const diffY = cy + ry - y;
+          const diffZ = cz + rz - z;
+
+          const distSq = diffX * diffX + diffY * diffY + diffZ * diffZ;
+
+          const isClosest = distSq < d1Sq;
+          const isSecondClosest = distSq < d2Sq;
+          if (isClosest) {
+            d2Sq = d1Sq;
+            d1Sq = distSq;
+          } else if (isSecondClosest) {
+            d2Sq = distSq;
+          }
+        }
+      }
+    }
+
+    const d1 = Math.sqrt(d1Sq);
+    const gap = Math.sqrt(d2Sq) - d1;
+    const isVoid = gap < 0.22;
+    const voidVal = isVoid ? Math.pow(1.0 - gap / 0.22, 1.6) : 0.0;
+    return [Math.min(d1, 1.0), voidVal];
   }
 
   /**

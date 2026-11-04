@@ -122,37 +122,46 @@ export class DepthFogPass {
         vec3 worldPos = worldPos4.xyz;
 
         vec3 rayVec = worldPos - uCameraPosition;
-        float rayDist = length(rayVec);
-        vec3 rayDir = normalize(rayVec);
+        float rayDist = max(0.001, length(rayVec));
+        vec3 rayDir = rayVec / rayDist;
 
         // フォグ開始距離のクリップ
         float effectiveDist = max(0.0, rayDist - uStartDistance);
 
         // 高度減衰フォグの視線積分 (Analytical Height Falloff Fog Integral)
-        float camY = uCameraPosition.y;
-        float targetY = worldPos.y;
+        // Why camY / deltaY の指数項を clamp するか:
+        // 万一 depth 復元値やカメラ高度が異常値になった場合に exp() が Inf / NaN へ発散し
+        // 画面全体が白飛び（NaN フラッシュ）するのを防ぐため。
+        float camY = clamp(uCameraPosition.y, -50.0, 500.0);
+        float targetY = clamp(worldPos.y, -50.0, 800.0);
         float deltaY = targetY - camY;
+        float safeFalloff = max(0.0001, uHeightFalloff);
 
         float opticalDepth = 0.0;
         if (abs(deltaY) > 0.001) {
-          // 指数高度積分の解析解
-          opticalDepth = (uDensity / uHeightFalloff) * exp(-uHeightFalloff * camY) * (1.0 - exp(-uHeightFalloff * deltaY)) / (deltaY / rayDist);
+          // 指数高度積分の解析解: exp(-uHeightFalloff * camY)
+          float expCam = exp(clamp(-uHeightFalloff * camY, -20.0, 20.0));
+          float expDelta = exp(clamp(-uHeightFalloff * deltaY, -20.0, 20.0));
+          opticalDepth = (uDensity / safeFalloff) * expCam * (1.0 - expDelta) / (deltaY / effectiveDist);
         } else {
-          opticalDepth = uDensity * exp(-uHeightFalloff * camY) * rayDist;
+          float expCam = exp(clamp(-uHeightFalloff * camY, -20.0, 20.0));
+          opticalDepth = uDensity * expCam * effectiveDist;
         }
 
         // 透過率 (Beer's Law)
-        float fogFactor = clamp(1.0 - exp(-max(0.0, opticalDepth)), 0.0, 1.0);
+        float fogFactor = clamp(1.0 - exp(-clamp(opticalDepth, 0.0, 20.0)), 0.0, 1.0);
 
         // 太陽光前方ミー散乱 (Sun In-Scattering)
-        float cosTheta = dot(rayDir, normalize(uSunDirection));
+        float sunDirLen = max(0.0001, length(uSunDirection));
+        float cosTheta = clamp(dot(rayDir, uSunDirection / sunDirLen), -1.0, 1.0);
         float phase = henyeyGreenstein(cosTheta, 0.65) * 3.14159265;
         vec3 inscatterColor = mix(uFogColor, uSunColor, clamp(phase * uInscatteringIntensity, 0.0, 1.0));
 
-        // 最終合成カラー
-        vec3 finalColor = mix(sceneColor.rgb, inscatterColor, fogFactor);
+        // 最終合成カラー（万一の HDR 異常値・負値を安全範囲にクランプ）
+        vec3 safeSceneRgb = clamp(sceneColor.rgb, vec3(0.0), vec3(4.0));
+        vec3 finalColor = mix(safeSceneRgb, inscatterColor, fogFactor);
 
-        gl_FragColor = vec4(finalColor, sceneColor.a);
+        gl_FragColor = vec4(clamp(finalColor, vec3(0.0), vec3(2.0)), sceneColor.a);
       }
     `;
 
@@ -181,6 +190,7 @@ export class DepthFogPass {
     sunDirection?: THREE.Vector3;
     density?: number;
     heightFalloff?: number;
+    inscatteringIntensity?: number;
   }): void {
     const hasFogColor = params.fogColor !== undefined;
     if (hasFogColor) {
@@ -205,6 +215,11 @@ export class DepthFogPass {
     const hasFalloff = params.heightFalloff !== undefined;
     if (hasFalloff) {
       this.material.uniforms.uHeightFalloff.value = params.heightFalloff!;
+    }
+
+    const hasInscattering = params.inscatteringIntensity !== undefined;
+    if (hasInscattering) {
+      this.material.uniforms.uInscatteringIntensity.value = params.inscatteringIntensity!;
     }
   }
 

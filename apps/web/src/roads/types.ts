@@ -23,6 +23,7 @@ export interface JapaneseRoadSegmentConfig {
   hasStreetLights?: boolean; // 街灯の有無
   hasTrafficLights?: boolean; // 信号機の有無
   speedLimitSign?: number; // 速度制限標識値
+  points?: ReadonlyArray<{ x: number; z: number }>; // オープンデータ道路中心線ポリライン頂点列 (ワールドまたはローカル座標)
 }
 
 export interface RoadMeshOutput {

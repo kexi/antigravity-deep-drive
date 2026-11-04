@@ -100,6 +100,7 @@ describe("PuddleMaterial & JapaneseRoadMaterial - Physically Based Puddles, Ripp
     const hasEmissivePlanarMirror = mockShader.fragmentShader.includes(
       "totalEmissiveRadiance += puddleEnvReflection * puddleCore",
     );
+    const hasCloudProjection = mockShader.fragmentShader.includes("skyCloudUv");
 
     expect(hasRippleFunction).toBe(true);
     expect(hasCapillaryWaves).toBe(true);
@@ -108,9 +109,10 @@ describe("PuddleMaterial & JapaneseRoadMaterial - Physically Based Puddles, Ripp
     expect(hasNormalModulation).toBe(true);
     expect(hasRoughnessMirroring).toBe(true);
     expect(hasEmissivePlanarMirror).toBe(true);
+    expect(hasCloudProjection).toBe(true);
   });
 
-  it("JapaneseRoadMaterial でも車線の轍（Wheel Ruts）水たまりと解析的平面鏡面反射GLSLコードが注入されることを保証する", () => {
+  it("JapaneseRoadMaterial でも車線の轍（Wheel Ruts）水たまりと解析的平面鏡面反射GLSLコードが遠距離（175m〜185m）まで注入されることを保証する", () => {
     const roadMat = new JapaneseRoadMaterial();
     roadMat.syncEnvironment({
       wetness: 0.78,
@@ -155,15 +157,26 @@ describe("PuddleMaterial & JapaneseRoadMaterial - Physically Based Puddles, Ripp
     );
     const hasMultiScaleSampling =
       mockShader.fragmentShader.includes("coordFine") &&
+      mockShader.fragmentShader.includes("coordCoarse") &&
       mockShader.fragmentShader.includes("coordMacro");
     const hasUpwardBumpNormal = mockShader.fragmentShader.includes(
-      "vec3(dX + crackVal * 0.06, 1.0, dZ + crackVal * 0.06)",
+      "vec3(dX + crackVal * 0.08, 1.0, dZ + crackVal * 0.08)",
     );
+    const hasLongRangePuddleNormal = mockShader.fragmentShader.includes(
+      "if (puddleCoreMask > 0.01 && roadCamDist < 175.0)",
+    );
+    const hasMeniscusRing = mockShader.fragmentShader.includes("meniscusRing");
+    const hasZeroRippleWhenNotRaining =
+      mockShader.fragmentShader.includes("(uRainWetness * uRippleIntensity) * rippleLod") &&
+      !mockShader.fragmentShader.includes("(0.18 + uRainWetness * uRippleIntensity)");
 
     expect(hasWheelRutBasin).toBe(true);
     expect(hasRoadPuddleReflection).toBe(true);
     expect(hasRoadEmissiveMirror).toBe(true);
     expect(hasMultiScaleSampling).toBe(true);
     expect(hasUpwardBumpNormal).toBe(true);
+    expect(hasLongRangePuddleNormal).toBe(true);
+    expect(hasMeniscusRing).toBe(true);
+    expect(hasZeroRippleWhenNotRaining).toBe(true);
   });
 });

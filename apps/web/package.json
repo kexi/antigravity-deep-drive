@@ -10,8 +10,8 @@
     "fetch-open-data": "tsx scripts/fetch-open-data.ts",
     "preview": "vite preview",
     "test": "vitest run",
-    "lint": "oxlint src",
-    "format": "oxfmt --write src",
+    "lint": "oxlint --deny-warnings . && oxfmt --check .",
+    "format": "oxfmt --write .",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

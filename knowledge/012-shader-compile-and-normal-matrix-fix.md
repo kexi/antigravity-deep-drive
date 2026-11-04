@@ -24,12 +24,14 @@ ERROR: 'metalnessFactor' : undeclared identifier
 ## 原因の分析
 
 ### 1. `normalMatrix` は Fragment Shader には存在しない
+
 Three.js の組み込み uniform において、法線変換行列 `normalMatrix` (`mat3`) は **Vertex Shader 専用** である。
 Fragment Shader のスコープでワールド法線やリップル法線をビュー空間（法線ベクトル）に変換しようと `normalMatrix` を直接参照すると、スコープ未定義となりシェーダーのコンパイルが失敗する。
 
 - **解決策**: Fragment Shader 内ではカメラのビュー行列 `viewMatrix` (`mat4`) が組み込み uniform として利用可能である。したがって、`mat3(viewMatrix)` を用いて 3x3 回転成分を取り出し、`normalize(mat3(viewMatrix) * worldNormal)` としてビュー空間へ変換する。
 
 ### 2. `metalnessFactor` の宣言タイミングと include 順序
+
 Three.js の `MeshStandardMaterial` のフラグメントシェーダーチャンクの include 順序は以下の通りである:
 
 ```glsl
@@ -43,12 +45,14 @@ Three.js の `MeshStandardMaterial` のフラグメントシェーダーチャ�
 - **解決策**: 両方のファクターを変更する場合は、`#include <metalnessmap_fragment>` の直後に注入フックを配置する。この位置であれば `roughnessFactor` と `metalnessFactor` の双方が宣言済みであり、安全に上書きできる。
 
 ### 3. `cameraPosition` は ShaderMaterial の自動注入 uniform（明示宣言で再定義エラー）
+
 Three.js の `ShaderMaterial` において、`cameraPosition` (`vec3`) は Three.js レンダラーが自動的にヘッダーに注入するビルトイン uniform である。
 そのため、ユーザーの GLSL フラグメントシェーダーで `uniform vec3 cameraPosition;` を手動宣言すると `ERROR: 'cameraPosition' : redefinition` が発生する。
 
 - **解決策**: ユーザー定義 uniform の名前を `uCameraPosition` に改名し、競合を防止する。
 
 ### 4. Blender glTF (`export_yup=True`) の前後軸変換と車内コックピット視界遮蔽
+
 Blender の `bpy.ops.export_scene.gltf(export_yup=True)` は、Blender の Z-up 座標系 `(X, Y, Z)_blender` を Three.js の Y-up 座標系 `(X, Z, -Y)_threejs` に変換する。
 そのため、Blender スクリプト側で車両前方を `+Y` としてモデリングすると、Three.js 上では `-Z` が前方（前後 180 度逆向き）となり、運転席シートの黒い背もたれ (`Y_blender = -0.45` -> `Z_three = +0.45`) がコックピットカメラ (`Z_three = -0.05`) の直前 50cm に配置され、画面全体を黒く塞いでいた。また、キャビン上部が中身の詰まったソリッド直方体だったため、カメラがメッシュ内部に埋まっていた。
 
@@ -59,6 +63,7 @@ Blender の `bpy.ops.export_scene.gltf(export_yup=True)` は、Blender の Z-up 
   - `blender/scripts/generate_3d_pbr_textures.py` にて Blender 5.2+ で非推奨となった `mat.use_nodes = True` の無条件代入を `has_node_tree = mat.node_tree is not None` ガード付きに変更し、`just generate-textures` 実行時の `DeprecationWarning` を解消。
 
 ### 5. Three.js `PCFSoftShadowMap` 廃止警告と Favicon 404 の解消
+
 - Three.js r182+ で `THREE.PCFSoftShadowMap` が廃止され `THREE.PCFShadowMap` に統合されたため、`apps/web/src/main.ts` の `renderer.shadowMap.type` を `THREE.PCFShadowMap` に更新。
 - `apps/web/index.html` にインライン SVG Data URI の `<link rel="icon">` を追加し、ブラウザ起動時の `/favicon.ico` 404 エラーを根絶。
 

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type RAPIER from "@dimforge/rapier3d-compat";
-import type { VehicleInput, VehicleState, WheelTelemetry } from "../types";
+import type { RoadSurfaceCondition, VehicleInput, VehicleState, WheelTelemetry } from "../types";
 
 /**
  * 車両物理コントローラー
@@ -17,6 +17,11 @@ export class VehiclePhysics {
   private currentSpeedKmh = 0;
   private engineRpm = 800;
   private gear = "D 1";
+  private roadSurfaceCondition: RoadSurfaceCondition = "wet";
+  private smoothedVisualY = 0.0;
+  private hasInitializedVisualFilter = false;
+  private smoothedQuat = new THREE.Quaternion();
+  private obstacleColliderHandleSet = new Set<number>();
 
   // 4輪レイキャストサスペンション・タイヤ仕様
   public readonly wheelRadius = 0.38;
@@ -37,25 +42,27 @@ export class VehiclePhysics {
   constructor(world: RAPIER.World, rapier: typeof RAPIER, startPos: THREE.Vector3) {
     this.rapier = rapier;
 
-    // 1. 車両シャシーの動的剛体を作成
+    // 1. 車両シャシーの動的剛体を作成（クラウン セダンの電子制御 AVS フラットライド特性に合わせ回転減衰を強化、CCDで高速衝突時のすり抜けを防止）
     const bodyDesc = rapier.RigidBodyDesc.dynamic()
       .setTranslation(startPos.x, startPos.y, startPos.z)
-      .setLinearDamping(0.18)
-      .setAngularDamping(1.8)
+      .setLinearDamping(0.22)
+      .setAngularDamping(3.8)
+      .setCcdEnabled(true)
       .setCanSleep(false);
 
     this.rigidBody = world.createRigidBody(bodyDesc);
 
-    // 2. シャシーコライダー（サスペンションストロークを確保するため車体中心から上方にオフセット配置）
-    // Why not: コライダー下端をタイヤ接地面まで下げると、サスペンション圧縮時にシャシー自身が地面と衝突して跳ねるため
-    const halfWidth = 0.92;
+    // 2. シャシーコライダー（サスペンションストロークを確保しつつ、高さ0.85mのボラード・ガードレール・街路樹・標識柱に確実に衝突するよう配置）
+    // Why not: コライダー下端をタイヤ接地面まで下げると、サスペンション圧縮時にシャシー自身が地面と衝突して跳ねるため、
+    // 地面からは十分なクリアランスを確保しつつ、実車（クラウン セダン 全長4.72m × 全幅1.84m）の外形に合わせて設定する
+    const halfWidth = 0.88;
     const halfHeight = 0.38;
-    const halfLength = 2.12;
+    const halfLength = 2.26;
     const colliderDesc = rapier.ColliderDesc.cuboid(halfWidth, halfHeight, halfLength)
-      .setTranslation(0.0, 0.28, 0.0)
+      .setTranslation(0.0, 0.24, 0.0)
       .setMass(1450.0) // スポーツセダン総重量 1,450kg
-      .setFriction(0.4)
-      .setRestitution(0.05);
+      .setFriction(0.32)
+      .setRestitution(0.12);
 
     this.collider = world.createCollider(colliderDesc, this.rigidBody);
 
@@ -80,14 +87,42 @@ export class VehiclePhysics {
         this.wheelRadius,
       );
 
-      // サスペンションバネ定数・減衰力・トラベル量・タイヤグリップの設定
-      this.vehicleController.setWheelSuspensionStiffness(i, 38.0);
-      this.vehicleController.setWheelSuspensionCompression(i, 4.2);
-      this.vehicleController.setWheelSuspensionRelaxation(i, 4.8);
-      this.vehicleController.setWheelMaxSuspensionTravel(i, 0.24);
-      this.vehicleController.setWheelMaxSuspensionForce(i, 14000.0);
+      // サスペンションバネ定数・減衰力・トラベル量・タイヤグリップの設定（高減衰 AVS でピッチ・ロールの微細振動を抑制）
+      this.vehicleController.setWheelSuspensionStiffness(i, 42.0);
+      this.vehicleController.setWheelSuspensionCompression(i, 6.4);
+      this.vehicleController.setWheelSuspensionRelaxation(i, 7.2);
+      this.vehicleController.setWheelMaxSuspensionTravel(i, 0.22);
+      this.vehicleController.setWheelMaxSuspensionForce(i, 15000.0);
       this.vehicleController.setWheelFrictionSlip(i, 3.6);
       this.vehicleController.setWheelSideFrictionStiffness(i, 2.4);
+    }
+  }
+
+  /**
+   * 垂直障害物（ビル・ガードレール・ボラード・街路樹・街灯・標識支柱・石垣等）のコライダーハンドルを登録し、
+   * 4輪サスペンションの下向きレイキャストから除外する。
+   * Why not 障害物もサスペンションレイキャスト対象に含めるか:
+   * ガードレールやボラード・木に側面接触した際、ホイールのレイが障害物の上端から下向きに発射されて
+   * 障害物上面を「高さ 0.85m〜3m の地面」と誤認し、強烈なサスペンション反力で車体が空中に跳ね上がるため。
+   */
+  public setObstacleColliderHandles(handles: Iterable<number>): void {
+    this.obstacleColliderHandleSet = new Set(handles);
+  }
+
+  /**
+   * 路面状態（乾燥 `dry` / 雨上がり・湿潤 `wet` / 水たまり `puddle`）に応じて4輪の摩擦係数を更新する。
+   */
+  public setRoadSurfaceCondition(surface: RoadSurfaceCondition): void {
+    this.roadSurfaceCondition = surface;
+    const isDry = surface === "dry";
+    const isPuddle = surface === "puddle";
+    const frictionSlip = isDry ? 4.1 : isPuddle ? 2.85 : 3.45;
+    const sideStiffness = isDry ? 2.65 : isPuddle ? 1.95 : 2.3;
+
+    const numWheels = this.vehicleController.numWheels();
+    for (let i = 0; i < numWheels; i++) {
+      this.vehicleController.setWheelFrictionSlip(i, frictionSlip);
+      this.vehicleController.setWheelSideFrictionStiffness(i, sideStiffness);
     }
   }
 
@@ -164,18 +199,35 @@ export class VehiclePhysics {
       const rearHandbrake = !isFront && isHandbrakeEngaged ? this.maxBrakeForce * 2.2 : 0;
       this.vehicleController.setWheelBrake(i, wheelBrake + rearHandbrake);
 
-      const sideFriction = !isFront && isHandbrakeEngaged ? 0.65 : 2.4;
+      const isDry = this.roadSurfaceCondition === "dry";
+      const isPuddle = this.roadSurfaceCondition === "puddle";
+      const baseSideFriction = isDry ? 2.65 : isPuddle ? 1.95 : 2.3;
+      const sideFriction = !isFront && isHandbrakeEngaged ? 0.65 : baseSideFriction;
       this.vehicleController.setWheelSideFrictionStiffness(i, sideFriction);
     }
 
-    // 4. Rapier 車両物理コントローラーのステップ実行（自車シャシーコライダーをレイキャストから除外）
+    // 4. Rapier 車両物理コントローラーのステップ実行（自車シャシーおよび垂直障害物コライダーをレイキャストから除外）
     const chassisColliderHandle = this.collider.handle;
-    this.vehicleController.updateVehicle(
-      dt,
-      undefined,
-      undefined,
-      (collider) => collider.handle !== chassisColliderHandle,
-    );
+    this.vehicleController.updateVehicle(dt, undefined, undefined, (collider) => {
+      const isSelfChassis = collider.handle === chassisColliderHandle;
+      if (isSelfChassis) {
+        return false;
+      }
+      const isRegisteredObstacle = this.obstacleColliderHandleSet.has(collider.handle);
+      if (isRegisteredObstacle) {
+        return false;
+      }
+      // 車道(y=-0.25)・歩道(y=0.075)・広域地面(y=-0.5)より高い位置にある垂直構造物（y > 0.20）は車輪レイキャストから除外し、シャシー剛体衝突のみで受け止める
+      const hasTranslation = typeof collider.translation === "function";
+      if (hasTranslation) {
+        const colPos = collider.translation();
+        const isElevatedStructure = colPos.y > 0.2;
+        if (isElevatedStructure) {
+          return false;
+        }
+      }
+      return true;
+    });
 
     // 5. 高速走行時のエアロダウンフォースと転倒防止アンチロールスタビライザー
     const controllerForwardSpeed = this.vehicleController.currentVehicleSpeed();
@@ -200,10 +252,14 @@ export class VehiclePhysics {
     // 6. ギア・エンジンRPM更新
     this.updateGearAndRpm(measuredForwardSpeed);
 
-    // 7. コース外落下時の安全リセット
+    // 7. コース外落下時の安全リセット（車線境界線ではなく各エリアの走行車線中央へ復帰）
     const isFallenOutOfBounds = transform.y < -10.0;
     if (isFallenOutOfBounds) {
-      this.resetPosition(new THREE.Vector3(0, 1.0, 15));
+      const isInShibuyaZone = transform.x < -550;
+      const safeSpawn = isInShibuyaZone
+        ? new THREE.Vector3(-744.75, 1.0, -70.0)
+        : new THREE.Vector3(1.75, 1.0, 26.0);
+      this.resetPosition(safeSpawn, 0);
     }
   }
 
@@ -241,13 +297,17 @@ export class VehiclePhysics {
     this.engineRpm = 2400 + Math.min(3600, ((kmh - 95) / 50) * 2800);
   }
 
-  public resetPosition(pos: THREE.Vector3): void {
+  public resetPosition(pos: THREE.Vector3, yawRadians = 0): void {
+    const halfYaw = yawRadians * 0.5;
+    const quatY = Math.sin(halfYaw);
+    const quatW = Math.cos(halfYaw);
     this.rigidBody.setTranslation(new this.rapier.Vector3(pos.x, pos.y, pos.z), true);
-    this.rigidBody.setRotation(new this.rapier.Quaternion(0, 0, 0, 1), true);
+    this.rigidBody.setRotation(new this.rapier.Quaternion(0, quatY, 0, quatW), true);
     this.rigidBody.setLinvel(new this.rapier.Vector3(0, 0, 0), true);
     this.rigidBody.setAngvel(new this.rapier.Vector3(0, 0, 0), true);
     this.currentSteer = 0;
     this.currentSpeedKmh = 0;
+    this.hasInitializedVisualFilter = false;
 
     const numWheels = this.vehicleController.numWheels();
     for (let i = 0; i < numWheels; i++) {
@@ -261,10 +321,34 @@ export class VehiclePhysics {
     const pos = this.rigidBody.translation();
     const vel = this.rigidBody.linvel();
     const rot = this.rigidBody.rotation();
-    const q = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
+    const rawQuat = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
 
-    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+    // 物理ステップ（衝突応答解決）後の実測水平速度でスピードメーター表示値を同期する
+    // Why not update() 時点の currentVehicleSpeed() をそのまま返すか:
+    // update() は world.step() の前に呼ばれるため、壁や障害物に衝突して剛体が停止した直後でも
+    // 物理ステップ後の実際の速度減衰が即座に currentSpeedKmh に反映されるようにする。
+    const postStepHorizontalSpeedMs = Math.hypot(vel.x, vel.z);
+    const postStepSpeedKmh = postStepHorizontalSpeedMs * 3.6;
+    const isStoppedOrSlowedByCollision = postStepSpeedKmh < this.currentSpeedKmh;
+    if (isStoppedOrSlowedByCollision) {
+      this.currentSpeedKmh = postStepSpeedKmh;
+    }
+
+    // タイヤ接地面（y=0）と車体底面（wheelRadius=0.38）が視覚的に一致するよう垂直オフセットを算出
+    const rawVisualY = Math.max(0.0, pos.y - (this.wheelRadius + this.suspensionRestLength - 0.08));
+
+    // 可変フレームレート時のレイキャストサスペンション微小振動を平滑化（クラウンのフラットライド姿勢制御）
+    if (!this.hasInitializedVisualFilter) {
+      this.smoothedVisualY = rawVisualY;
+      this.smoothedQuat.copy(rawQuat);
+      this.hasInitializedVisualFilter = true;
+    } else {
+      this.smoothedVisualY = THREE.MathUtils.lerp(this.smoothedVisualY, rawVisualY, 0.25);
+      this.smoothedQuat.slerp(rawQuat, 0.32);
+    }
+
+    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.smoothedQuat);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.smoothedQuat);
     const heading = Math.atan2(forward.x, forward.z);
     const pitchAngle = Math.asin(THREE.MathUtils.clamp(forward.y, -1.0, 1.0));
     const rollAngle = Math.asin(THREE.MathUtils.clamp(-right.y, -1.0, 1.0));
@@ -281,18 +365,17 @@ export class VehiclePhysics {
       });
     }
 
-    // タイヤ接地面（y=0）と車体底面（wheelRadius=0.38）が視覚的に一致するよう垂直オフセットを算出
-    const visualYOffset = Math.max(
-      0.0,
-      pos.y - (this.wheelRadius + this.suspensionRestLength - 0.08),
-    );
-
     return {
       speedKmh: this.currentSpeedKmh,
       engineRpm: this.engineRpm,
       gear: this.gear,
-      position: { x: pos.x, y: visualYOffset, z: pos.z },
-      quaternion: { x: rot.x, y: rot.y, z: rot.z, w: rot.w },
+      position: { x: pos.x, y: this.smoothedVisualY, z: pos.z },
+      quaternion: {
+        x: this.smoothedQuat.x,
+        y: this.smoothedQuat.y,
+        z: this.smoothedQuat.z,
+        w: this.smoothedQuat.w,
+      },
       velocity: { x: vel.x, y: vel.y, z: vel.z },
       headingAngle: heading,
       // UI・ステアリングホイール表示用に右旋回=正の符号に戻す

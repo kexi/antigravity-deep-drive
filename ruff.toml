@@ -1,0 +1,15 @@
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "EXE", "RUF"]
+ignore = [
+  "E501", # Line length is handled by ruff format; long Japanese comments are allowed
+  "RUF001", # Allow full-width Japanese punctuation in strings
+  "RUF002", # Allow full-width Japanese punctuation in docstrings
+  "RUF003", # Allow full-width Japanese punctuation in comments
+]
+
+[format]
+quote-style = "double"
+indent-style = "space"

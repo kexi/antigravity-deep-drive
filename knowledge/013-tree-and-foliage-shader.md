@@ -16,6 +16,7 @@ trust_signals:
 従来の街路樹表現は単一の `CylinderGeometry`（幹）と `ConeGeometry`（円錐の葉）で構成されており、東京駅丸の内・行幸通りの象徴であるイチョウ並木（Ginkgo Biloba）としての有機的なシルエットや、逆光時の黄金葉の透け感（Subsurface Scattering）、風に揺れる枝葉のダイナミズムが不足していた。
 
 これを解決するため、以下の 3 要素を一貫したパイプラインで実装した:
+
 1. **Blender CLI プロシージャル街路樹モデリング (`blender/scripts/generate_street_tree.py` -> `apps/web/public/models/street_tree.glb`)**
 2. **物理ベース イチョウ葉っぱシェーダー (`GinkgoFoliageMaterial` in `apps/web/src/shaders/treeShader.ts`)**
 3. **物理ベース イチョウ樹皮・木シェーダー (`TreeBarkMaterial` in `apps/web/src/shaders/treeShader.ts`)**
@@ -23,6 +24,7 @@ trust_signals:
 ## 2. Blender CLI によるイチョウ街路樹モデリング (`generate_street_tree.py`)
 
 球体ブロブ（`IcosahedronGeometry` や球体コア）は近景や見上げアングルで「ツルツルした黄色い風船の塊」に見え、1枚1枚の葉っぱの形状が判別できない問題があった。そのため球体塊を完全に廃止し、`bmesh` を用いて100%実体3Dイチョウ扇形葉ロゼットと多段枝骨格からなる `street_tree.glb`（約 1.71 MB）を自動生成する:
+
 - **`Tree_Trunk`**:
   - 地際の根張り（5 方向の板根フレア）から高さ 7.1m まで有機的なうねりと縦溝凹凸を伴いながらテーパーする主幹。
   - 黄金角（$137.508^\circ$）螺旋配置で分岐する 10 本の主枝（Primary Branches）、20 本の副枝（Secondary Sub-branches）、および樹冠内部まで伸びる 90 本の小枝（Tertiary Twigs）。
@@ -36,6 +38,7 @@ trust_signals:
 ## 3. 葉っぱシェーダー (`GinkgoFoliageMaterial`) と木シェーダー (`TreeBarkMaterial`)
 
 ### 葉っぱシェーダー (`GinkgoFoliageMaterial`)
+
 - **3 段階の階層型風揺れ頂点変位**:
   1. 主幹・主枝の大域スウェイ（`TreeBarkMaterial` と同一の数式・位相で完全同期し、幹と葉の乖離を防止）
   2. 枝先の中周波ガスト揺れ
@@ -48,6 +51,7 @@ trust_signals:
   - `uRainWetness` に応じてラフネスを `0.14` まで下げて濡れツヤを表現し、夜間（`uNightFactor`）は樹冠下部に街灯の暖色照り返しを付与。
 
 ### 木シェーダー (`TreeBarkMaterial`)
+
 - **異方性縦溝樹皮ノイズ＆法線バンプ (`sampleBarkFurrows`)**:
   - 円筒座標 $(\theta, y)$ 上のドメインワーピング FBM でイチョウの縦溝樹皮を生成し、`mat3(viewMatrix)` でビュー空間法線 `normal` を摂動。
 - **根張り部の湿潤コケ (`mossMask`) と雨水吸収**:

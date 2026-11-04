@@ -2,9 +2,10 @@
 default:
     @just --list
 
-# 依存関係をインストールする
+# 依存関係をインストールしGitフックをセットアップする
 install-deps:
     pnpm install
+    lefthook install
 
 # 開発サーバーを起動する
 start-dev:
@@ -25,10 +26,13 @@ check-types:
 # 全パッケージのリントを実行する
 lint-code:
     pnpm -r lint
+    ruff check blender/scripts/
+    ruff format --check blender/scripts/
 
 # 全パッケージのコードを自動整形する
 format-code:
     pnpm -r format
+    ruff format blender/scripts/
 
 # 全パッケージのテストを実行する
 run-tests:
@@ -58,17 +62,19 @@ verify-all:
 
 # 3DモデルアセットをBlenderでプロシージャル生成してGLB形式でエクスポートする
 model-assets:
-    /Applications/Blender.app/Contents/MacOS/Blender --background --python blender/scripts/generate_vehicle_model.py
-    /Applications/Blender.app/Contents/MacOS/Blender --background --python blender/scripts/generate_tokyo_station.py
-    /Applications/Blender.app/Contents/MacOS/Blender --background --python blender/scripts/generate_street_tree.py
+    uv run --script blender/scripts/generate_vehicle_model.py
+    uv run --script blender/scripts/generate_tokyo_station.py
+    uv run --script blender/scripts/generate_shibuya_stream.py
+    uv run --script blender/scripts/generate_street_tree.py
+    uv run --script blender/scripts/generate_guardrail.py
 
 # 行幸通りイチョウ街路樹3DモデルをBlenderでプロシージャル生成してGLB形式でエクスポートする
 generate-tree:
-    /Applications/Blender.app/Contents/MacOS/Blender --background --python blender/scripts/generate_street_tree.py
+    uv run --script blender/scripts/generate_street_tree.py
 
 # 3DテクスチャPBRマテリアルをBlenderで生成する
 generate-textures:
-    /Applications/Blender.app/Contents/MacOS/Blender --background --python blender/scripts/generate_3d_pbr_textures.py
+    uv run --script blender/scripts/generate_3d_pbr_textures.py
 
 # Blender公式MCPサーバーをバックグラウンドソケット待受モードで起動する
 start-blender-mcp:

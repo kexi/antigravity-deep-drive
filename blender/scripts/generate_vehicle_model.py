@@ -1,18 +1,38 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = "==3.11.*"
+# dependencies = [
+#   "bpy>=5.0.1",
+# ]
+# [tool.uv]
+# exclude-newer = "1 day"
+# ///
 """
-Blender Procedural Modeling Script: 日本仕様・右ハンドル JDM スポーツセダン / クーペ (RHD JDM Aero GT)
-Tokyo Station Deep Drive 用 3D アセット生成
+Blender Procedural Modeling Script: トヨタ クラウン セダン (TOYOTA CROWN SEDAN AZSH32 / KZSM30)
+Antigravity Deep Drive 用 3D アセット生成（右ハンドル RHD 日本仕様 + 車内3Dプロシージャルテクスチャ）
 
-360度全方向＆ドライバー視点レビューに基づく高精度 JDM 右ハンドルモデリング仕様:
-- 日本車（NISSAN GT-R / SKYLINE 400R / GR SUPRA 系 JDM アスリートスタイル）の空力ロフトボディ
-- 前後・日本規格ナンバープレート（実寸 330mm × 165mm、白地に緑文字ディテール＆封印ボルト）
-- 象徴的な丸型4灯リングLEDテールランプ + ダックテールスポイラー + クアッドチタン風マフラー
-- 3D曲面フロントガラス下端カウルに密着した右ハンドル（RHD）車用エアロワイパー
-- 右ハンドル（RHD: X = -0.38m）専用コックピット内装:
-  - 中空クロームリング2連メーター（タコメーター＆スピードメーター、発光指針＆スケール目盛り、中央マルチディスプレイ）
-  - JIS規格の右ウインカーレバー（X = -0.48m）＆左ワイパーレバー（X = -0.28m）
-  - ドライバー側へ傾けたベゼル付きセンターナビディスプレイ（ルート表示ディテール）、エアコンルーバー、ハザードスイッチ
-  - センターコンソール（シフトブーツ＆ノブ、右ハンドル用エンジンスターターボタン、電動パーキングスイッチ、カップホルダー）
-  - 隙間なく連続する左右ドア内張りトリム・アームレスト・Aピラーガセット＆エアロドアミラー（車内から黒い箱や光点に見えない設計）
+360度全方向＆ドライバー視点レビューに基づく高精度 トヨタ クラウン セダン (16代目) モデリング仕様:
+- 実寸プロポーション＆FRセダンの伸びやかな6ライト・ファストバックシルエット
+  - ボディカラー: プレシャスメタル（チタニウムシルバーグレーメタリック）
+- フロントフェイス:
+  - ハンマーヘッド（Hammerhead）デザイン＋一文字LEDデイタイムランニングランプ＋片側4眼スクエアLEDヘッドランプ
+  - ノーズ中央の立体クローム「王冠（Crown）エンブレム」
+  - 大型台形「アンダープライオリティ」フロントグリル＋縦基調メッキバー列（Vertical Bars）＋左右C字コーナーガーニッシュ
+  - 日本規格ナンバープレート（実寸 330mm × 165mm、白地に緑文字ディテール＆封印ボルト）
+- サイドビュー:
+  - 6ライトキャビンウィンドウ＋クロームウィンドウモールディング
+  - 前輪アーチ直後の垂直ブラック＆クローム「フェンダーサイドガーニッシュ」
+  - クラウン セダン Z 純正 20インチ 20本マルチスポーク（タービン調ダークメタリック＆切削光輝）アルミホイール
+- リアフェイス:
+  - 横一文字LEDリヤコンビネーションランプ（Full-width LED Taillight Bar）＋中央トヨタエンブレム＋「C R O W N」レタリング
+  - リアバンパー下部の水平クロームガーニッシュ＆横長スリムリフレクター（スポーツカー用の丸4灯や4本出しマフラーは廃止）
+- 右ハンドル（RHD: X = -0.38m）専用 クラウン「アイランドアーキテクチャー（Island Architecture）」内装＆3Dテクスチャ:
+  - 大型杢目調「ウッディブラウン」パネル（`CrownWoodTrim`: 3D Wave + 3D Noise プロシージャル木目ノード付き）
+  - 64色マルチカラーアンビエントイルミネーション（インパネ水平ライン・センターコンソール脇の間接照明LEDストリップ）
+  - 12.3インチ大型連装ワイドディスプレイハウジング（メーター＋センターナビ一体型パノラミックベゼル）
+  - セミアニリン本革シボ＆パンチングレザー（`InteriorDark` / `InteriorSeat` / `SteeringLeather`: 3D Voronoi 本革シボノード付き）
+  - ステアリングホイール中央の立体「王冠（Crown）エンブレム」＋JIS規格の右ウインカーレバー＆左ワイパーレバー
+  - ストレート型エレクトロシフトマチックノブ、エンジンスターターボタン、縦型2連カップホルダー
 
 階層構造:
 CarRoot (Empty)
@@ -30,11 +50,16 @@ CarRoot (Empty)
 └── Wheel_RR (メッシュ: 後左タイヤ・中空リム・10本スポーク・ローター・キャリパー)
 """
 
-import bpy
-import bmesh
 import math
 import os
-from mathutils import Vector, Euler
+
+import bpy
+
+# isort: split
+# Why not: bpy 単体 wheel (PyPI) では import bpy 実行時に初めて bmesh / mathutils が
+# sys.modules に登録されるため、アルファベット順で bmesh を先に import すると ModuleNotFoundError になる。
+import bmesh
+from mathutils import Euler, Vector
 
 
 def clean_scene():
@@ -89,37 +114,189 @@ def create_pbr_material(
     return mat
 
 
+def attach_crown_wood_3d_nodes(mat: bpy.types.Material):
+    """CrownWoodTrim マテリアルに 3D Wave + 3D Noise オープンポア杢目ノードを接続する"""
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    bsdf = next(n for n in nodes if n.type == "BSDF_PRINCIPLED")
+
+    tex_coord = nodes.new(type="ShaderNodeTexCoord")
+    tex_coord.location = (-860, 0)
+
+    mapping = nodes.new(type="ShaderNodeMapping")
+    mapping.location = (-640, 0)
+    mapping.inputs["Scale"].default_value = (6.0, 18.0, 9.0)
+    links.new(tex_coord.outputs["Object"], mapping.inputs["Vector"])
+
+    wave_3d = nodes.new(type="ShaderNodeTexWave")
+    wave_3d.location = (-360, 180)
+    wave_3d.wave_type = "RINGS"
+    wave_3d.rings_direction = "SPHERICAL"
+    wave_3d.inputs["Scale"].default_value = 4.5
+    wave_3d.inputs["Distortion"].default_value = 6.5
+    wave_3d.inputs["Detail"].default_value = 5.0
+    links.new(mapping.outputs["Vector"], wave_3d.inputs["Vector"])
+
+    noise_3d = nodes.new(type="ShaderNodeTexNoise")
+    noise_3d.location = (-360, -140)
+    noise_3d.noise_dimensions = "3D"
+    noise_3d.inputs["Scale"].default_value = 28.0
+    noise_3d.inputs["Detail"].default_value = 6.0
+    links.new(mapping.outputs["Vector"], noise_3d.inputs["Vector"])
+
+    color_mix = nodes.new(type="ShaderNodeMix")
+    color_mix.data_type = "RGBA"
+    color_mix.location = (-60, 160)
+    color_mix.inputs[6].default_value = (0.18, 0.095, 0.050, 1.0)
+    color_mix.inputs[7].default_value = (0.38, 0.21, 0.110, 1.0)
+    links.new(wave_3d.outputs["Fac"], color_mix.inputs["Factor"])
+    links.new(color_mix.outputs[2], bsdf.inputs["Base Color"])
+
+    bump = nodes.new(type="ShaderNodeBump")
+    bump.location = (-60, -140)
+    bump.inputs["Strength"].default_value = 0.22
+    bump.inputs["Distance"].default_value = 0.012
+    links.new(noise_3d.outputs["Fac"], bump.inputs["Height"])
+    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+
+
+def attach_crown_leather_3d_nodes(
+    mat: bpy.types.Material, col_dark, col_light, scale=26.0, bump_strength=0.22
+):
+    """本革・ソフトパッド系マテリアルに 3D Voronoi ペブルシボ＆3D Noise 毛穴バンプノードを接続する"""
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    bsdf = next(n for n in nodes if n.type == "BSDF_PRINCIPLED")
+
+    tex_coord = nodes.new(type="ShaderNodeTexCoord")
+    tex_coord.location = (-860, 0)
+
+    mapping = nodes.new(type="ShaderNodeMapping")
+    mapping.location = (-640, 0)
+    mapping.inputs["Scale"].default_value = (scale, scale, scale)
+    links.new(tex_coord.outputs["Object"], mapping.inputs["Vector"])
+
+    voronoi_3d = nodes.new(type="ShaderNodeTexVoronoi")
+    voronoi_3d.location = (-360, 160)
+    voronoi_3d.voronoi_dimensions = "3D"
+    voronoi_3d.feature = "F1"
+    voronoi_3d.inputs["Scale"].default_value = 18.0
+    links.new(mapping.outputs["Vector"], voronoi_3d.inputs["Vector"])
+
+    noise_3d = nodes.new(type="ShaderNodeTexNoise")
+    noise_3d.location = (-360, -140)
+    noise_3d.noise_dimensions = "3D"
+    noise_3d.inputs["Scale"].default_value = 40.0
+    noise_3d.inputs["Detail"].default_value = 4.0
+    links.new(mapping.outputs["Vector"], noise_3d.inputs["Vector"])
+
+    color_mix = nodes.new(type="ShaderNodeMix")
+    color_mix.data_type = "RGBA"
+    color_mix.location = (-60, 150)
+    color_mix.inputs[6].default_value = col_dark
+    color_mix.inputs[7].default_value = col_light
+    links.new(noise_3d.outputs["Fac"], color_mix.inputs["Factor"])
+    links.new(color_mix.outputs[2], bsdf.inputs["Base Color"])
+
+    bump = nodes.new(type="ShaderNodeBump")
+    bump.location = (-60, -140)
+    bump.inputs["Strength"].default_value = bump_strength
+    bump.inputs["Distance"].default_value = 0.008
+    links.new(voronoi_3d.outputs["Distance"], bump.inputs["Height"])
+    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+
+
 def setup_materials():
-    """車両用PBRマテリアル一式を定義
+    """トヨタ クラウン セダン (AZSH32) 用PBRマテリアル一式を定義
     Why metallic を 0.45〜0.55 に抑えるか:
     Three.js 側で HDRI 環境マップ無し（DirectionalLight + HemisphereLight）で描画される際、
     metallic が 0.9 以上だと拡散反射成分 (1 - metallic) が消失して真っ黒なシルエットになるのを防ぐため。
     """
+    crown_wood = create_pbr_material(
+        "CrownWoodTrim",
+        base_color=(0.28, 0.15, 0.08, 1.0),
+        roughness=0.34,
+        metallic=0.06,
+        coat_weight=0.45,
+        coat_roughness=0.14,
+        emission_color=(0.24, 0.12, 0.06, 1.0),
+        emission_strength=0.06,
+    )
+    attach_crown_wood_3d_nodes(crown_wood)
+
+    interior_dark = create_pbr_material(
+        "InteriorDark",
+        base_color=(0.12, 0.125, 0.145, 1.0),
+        roughness=0.64,
+        metallic=0.05,
+        emission_color=(0.10, 0.105, 0.12, 1.0),
+        emission_strength=0.04,
+    )
+    attach_crown_leather_3d_nodes(
+        interior_dark,
+        col_dark=(0.10, 0.105, 0.125, 1.0),
+        col_light=(0.15, 0.16, 0.185, 1.0),
+        scale=26.0,
+        bump_strength=0.20,
+    )
+
+    interior_seat = create_pbr_material(
+        "InteriorSeat",
+        base_color=(0.17, 0.175, 0.20, 1.0),
+        roughness=0.50,
+        metallic=0.06,
+        emission_color=(0.14, 0.145, 0.17, 1.0),
+        emission_strength=0.05,
+    )
+    attach_crown_leather_3d_nodes(
+        interior_seat,
+        col_dark=(0.14, 0.145, 0.17, 1.0),
+        col_light=(0.21, 0.22, 0.25, 1.0),
+        scale=30.0,
+        bump_strength=0.25,
+    )
+
+    steering_leather = create_pbr_material(
+        "SteeringLeather",
+        base_color=(0.11, 0.115, 0.135, 1.0),
+        roughness=0.52,
+        metallic=0.06,
+        emission_color=(0.09, 0.095, 0.11, 1.0),
+        emission_strength=0.04,
+    )
+    attach_crown_leather_3d_nodes(
+        steering_leather,
+        col_dark=(0.09, 0.095, 0.115, 1.0),
+        col_light=(0.14, 0.15, 0.175, 1.0),
+        scale=34.0,
+        bump_strength=0.22,
+    )
+
     return {
-        # 外装 JDM ベイサイドブルーメタリック（環境マップ無しでも鮮やかなブルーの陰影が出る設定）
+        # 外装 クラウン セダン象徴色「プレシャスメタル（チタニウムシルバーグレーメタリック）」
         "BodyPaint": create_pbr_material(
             "BodyPaint",
-            base_color=(0.07, 0.30, 0.82, 1.0),
-            metallic=0.48,
-            roughness=0.22,
-            coat_weight=0.75,
-            coat_roughness=0.10,
+            base_color=(0.46, 0.49, 0.53, 1.0),
+            metallic=0.52,
+            roughness=0.20,
+            coat_weight=0.85,
+            coat_roughness=0.08,
         ),
-        # カーボン＆サテンブラックトリム（スプリッター、ディフューザー、ピラー、グリル、ホイールハウス内壁）
+        # グロス＆サテンブラックトリム（アンダープライオリティグリル枠、ピラー、ロアガーニッシュ、ホイールハウス内壁）
         "BlackTrim": create_pbr_material(
             "BlackTrim",
             base_color=(0.035, 0.038, 0.045, 1.0),
-            roughness=0.55,
-            metallic=0.15,
+            roughness=0.42,
+            metallic=0.18,
         ),
-        # クローム＆サテンシルバー（エンブレム、マフラー、メーターリング：車内でも黒潰れしないよう微発光を付与）
+        # クローム＆サテンシルバー（王冠エンブレム、縦グリルバー、6ライトウィンドウモール、メーターリング）
         "Chrome": create_pbr_material(
             "Chrome",
             base_color=(0.88, 0.91, 0.95, 1.0),
-            metallic=0.45,
-            roughness=0.20,
+            metallic=0.48,
+            roughness=0.18,
             emission_color=(0.85, 0.88, 0.92, 1.0),
-            emission_strength=0.12,
+            emission_strength=0.14,
         ),
         # フロントガラス（高透過PBRガラス）
         "WindshieldGlass": create_pbr_material(
@@ -131,7 +308,7 @@ def setup_materials():
             ior=1.52,
             alpha=0.28,
         ),
-        # リアガラス・クォーターガラス（スモークガラス）
+        # リアガラス・6ライトクォーターガラス（スモークガラス）
         "WindowGlass": create_pbr_material(
             "WindowGlass",
             base_color=(0.10, 0.14, 0.18, 0.45),
@@ -141,7 +318,7 @@ def setup_materials():
             ior=1.52,
             alpha=0.45,
         ),
-        # ヘッドライトLED（クールホワイト発光）
+        # ハンマーヘッド一文字DRL ＆ 4眼LEDヘッドライト（クールホワイト発光）
         "HeadlightLED": create_pbr_material(
             "HeadlightLED",
             base_color=(0.95, 0.98, 1.0, 1.0),
@@ -149,7 +326,7 @@ def setup_materials():
             emission_strength=4.5,
             roughness=0.08,
         ),
-        # テールライトLED（JDM 丸型4灯クリムゾンレッド発光）
+        # 横一文字テールライトLED（クリムゾンレッド発光）
         "TaillightLED": create_pbr_material(
             "TaillightLED",
             base_color=(0.92, 0.03, 0.05, 1.0),
@@ -157,7 +334,7 @@ def setup_materials():
             emission_strength=4.2,
             roughness=0.08,
         ),
-        # 日本規格ナンバープレート白地（夜間・追従視点でも白プレートが鮮明に見えるよう微発光を設定）
+        # 日本規格ナンバープレート白地
         "JdmPlateWhite": create_pbr_material(
             "JdmPlateWhite",
             base_color=(0.96, 0.97, 0.95, 1.0),
@@ -166,7 +343,7 @@ def setup_materials():
             emission_color=(0.94, 0.96, 0.93, 1.0),
             emission_strength=0.38,
         ),
-        # 日本規格ナンバープレート濃緑文字（自家用登録車の緑文字）
+        # 日本規格ナンバープレート濃緑文字
         "JdmPlateGreen": create_pbr_material(
             "JdmPlateGreen",
             base_color=(0.03, 0.24, 0.11, 1.0),
@@ -175,7 +352,7 @@ def setup_materials():
             emission_color=(0.03, 0.22, 0.10, 1.0),
             emission_strength=0.15,
         ),
-        # ドアミラー鏡面（防眩ブルーグレー鏡面）
+        # ドアミラー・ルームミラー鏡面
         "MirrorGlass": create_pbr_material(
             "MirrorGlass",
             base_color=(0.28, 0.36, 0.44, 1.0),
@@ -184,21 +361,21 @@ def setup_materials():
             emission_color=(0.18, 0.24, 0.30, 1.0),
             emission_strength=0.08,
         ),
-        # 内装アルカンターラ / ダッシュボードソフトパッド
-        "InteriorDark": create_pbr_material(
-            "InteriorDark",
-            base_color=(0.07, 0.075, 0.09, 1.0),
-            roughness=0.78,
-            metallic=0.04,
+        # 内装ダッシュボードソフトパッド（3D本革シボノード付きチャコールレザー）
+        "InteriorDark": interior_dark,
+        # 内装セミアニリン本革シート＆ドアトリム（3D本革シボノード付き）
+        "InteriorSeat": interior_seat,
+        # クラウン アイランドアーキテクチャー 大型杢目調「ウッディブラウン」パネル（3D杢目ノード付き）
+        "CrownWoodTrim": crown_wood,
+        # クラウン 64色マルチカラーアンビエントイルミネーション（胡粉・ウォームアンバーゴールド間接照明）
+        "AmbientStripLED": create_pbr_material(
+            "AmbientStripLED",
+            base_color=(1.0, 0.78, 0.45, 1.0),
+            emission_color=(1.0, 0.74, 0.38, 1.0),
+            emission_strength=2.20,
+            roughness=0.15,
         ),
-        # 内装スポーツレザーシート＆ドアトリムアクセント
-        "InteriorSeat": create_pbr_material(
-            "InteriorSeat",
-            base_color=(0.12, 0.13, 0.16, 1.0),
-            roughness=0.58,
-            metallic=0.05,
-        ),
-        # メーター盤・ナビ画面のダーク背景（単なる青い板に見えないよう引き締まった黒紺液晶ベース）
+        # メーター盤・12.3インチ連装ナビ画面のダーク背景
         "MeterBack": create_pbr_material(
             "MeterBack",
             base_color=(0.015, 0.025, 0.045, 1.0),
@@ -214,7 +391,7 @@ def setup_materials():
             emission_strength=1.35,
             roughness=0.15,
         ),
-        # メーター指針・スタートボタン・ハザードスイッチ発光（JDM スポーツレッド）
+        # メーター指針・スタートボタン・ハザードスイッチ発光
         "GaugeNeedleRed": create_pbr_material(
             "GaugeNeedleRed",
             base_color=(0.95, 0.12, 0.08, 1.0),
@@ -222,12 +399,36 @@ def setup_materials():
             emission_strength=1.80,
             roughness=0.18,
         ),
-        # ステアリングホイールレザー
-        "SteeringLeather": create_pbr_material(
-            "SteeringLeather",
-            base_color=(0.055, 0.06, 0.07, 1.0),
-            roughness=0.60,
-            metallic=0.06,
+        # ステアリングホイール本革（3D本革シボノード付き）
+        "SteeringLeather": steering_leather,
+        # アルカンターラ調（ウルトラスエード）起毛トリム（Aピラー内張り・メーターフード内張り）
+        "AlcantaraTrim": create_pbr_material(
+            "AlcantaraTrim",
+            base_color=(0.14, 0.145, 0.165, 1.0),
+            roughness=0.88,
+            metallic=0.02,
+            emission_color=(0.11, 0.115, 0.135, 1.0),
+            emission_strength=0.04,
+        ),
+        # サドルタン（カッパーブラウン）本革ステッチライン
+        "SaddleStitch": create_pbr_material(
+            "SaddleStitch",
+            base_color=(0.68, 0.42, 0.22, 1.0),
+            roughness=0.42,
+            metallic=0.14,
+            emission_color=(0.58, 0.34, 0.16, 1.0),
+            emission_strength=0.08,
+        ),
+        # 車内サテンシルバーヘアライン加飾
+        "SilverTrim": create_pbr_material(
+            "SilverTrim",
+            base_color=(0.82, 0.85, 0.89, 1.0),
+            metallic=0.58,
+            roughness=0.24,
+            coat_weight=0.55,
+            coat_roughness=0.14,
+            emission_color=(0.76, 0.79, 0.84, 1.0),
+            emission_strength=0.10,
         ),
         # ワイパーブラック
         "WiperBlack": create_pbr_material(
@@ -243,27 +444,27 @@ def setup_materials():
             roughness=0.84,
             metallic=0.02,
         ),
-        # ホイール鍛造アルミ合金リム
+        # クラウン セダン Z 20インチ 20本マルチスポークアルミホイール（ダークメタリック＆切削光輝）
         "WheelAlloy": create_pbr_material(
             "WheelAlloy",
-            base_color=(0.82, 0.85, 0.90, 1.0),
-            metallic=0.50,
-            roughness=0.20,
+            base_color=(0.76, 0.80, 0.85, 1.0),
+            metallic=0.52,
+            roughness=0.18,
         ),
-        # ブレーキローター（ドリルドスチールディスク）
+        # ブレーキローター（ベンチレーテッドスチールディスク）
         "BrakeRotor": create_pbr_material(
             "BrakeRotor",
             base_color=(0.55, 0.58, 0.62, 1.0),
             metallic=0.48,
             roughness=0.28,
         ),
-        # ブレーキキャリパー（ブレンボ風レーシングレッド）
+        # ブレーキキャリパー（クラウン純正の上品なサテンシルバーメタリックキャリパー）
         "BrakeCaliper": create_pbr_material(
             "BrakeCaliper",
-            base_color=(0.88, 0.04, 0.04, 1.0),
-            metallic=0.35,
-            roughness=0.20,
-            coat_weight=0.75,
+            base_color=(0.68, 0.71, 0.75, 1.0),
+            metallic=0.45,
+            roughness=0.22,
+            coat_weight=0.60,
         ),
     }
 
@@ -314,7 +515,16 @@ def add_hexahedron(bm, verts_8: list[Vector], mat_idx=0, smooth=True):
         f.smooth = smooth
 
 
-def add_slanted_strut(bm, p0: Vector, p1: Vector, width_x: float, depth_y: float, taper=0.85, mat_idx=0, smooth=True):
+def add_slanted_strut(
+    bm,
+    p0: Vector,
+    p1: Vector,
+    width_x: float,
+    depth_y: float,
+    taper=0.85,
+    mat_idx=0,
+    smooth=True,
+):
     """2点 p0 -> p1 を結ぶ傾斜ピラー・ストラット角柱を追加"""
     hx = width_x * 0.5
     hy = depth_y * 0.5
@@ -331,7 +541,17 @@ def add_slanted_strut(bm, p0: Vector, p1: Vector, width_x: float, depth_y: float
     add_hexahedron(bm, verts_8, mat_idx=mat_idx, smooth=smooth)
 
 
-def add_cylinder(bm, center: Vector, radius: float, height: float, segments=24, axis="Z", mat_idx=0, smooth=True, cap_ends=True):
+def add_cylinder(
+    bm,
+    center: Vector,
+    radius: float,
+    height: float,
+    segments=24,
+    axis="Z",
+    mat_idx=0,
+    smooth=True,
+    cap_ends=True,
+):
     """bmesh に円柱（または両端開放の円筒）を追加"""
     top_verts = []
     bot_verts = []
@@ -370,7 +590,16 @@ def add_cylinder(bm, center: Vector, radius: float, height: float, segments=24, 
         f_top.smooth = False
 
 
-def add_hollow_tube_x(bm, center: Vector, r_outer: float, r_inner: float, width_x: float, segments=32, mat_idx=1, smooth=True):
+def add_hollow_tube_x(
+    bm,
+    center: Vector,
+    r_outer: float,
+    r_inner: float,
+    width_x: float,
+    segments=32,
+    mat_idx=1,
+    smooth=True,
+):
     """X軸方向の中空リングバレル（ホイールのアウターリム用：外側を塞がない中空円筒）を追加"""
     hx = width_x * 0.5
     out_left = []
@@ -403,7 +632,16 @@ def add_hollow_tube_x(bm, center: Vector, r_outer: float, r_inner: float, width_
         f_r.smooth = False
 
 
-def add_hollow_ring_y(bm, center: Vector, r_outer: float, r_inner: float, depth_y: float, segments=24, mat_idx=2, smooth=True):
+def add_hollow_ring_y(
+    bm,
+    center: Vector,
+    r_outer: float,
+    r_inner: float,
+    depth_y: float,
+    segments=24,
+    mat_idx=2,
+    smooth=True,
+):
     """Y軸方向の中空リング（JDM 丸型4灯テールランプおよびコックピット2連メーターベゼル用：中央を塞がない中空円環）"""
     hy = depth_y * 0.5
     out_front = []
@@ -436,26 +674,71 @@ def add_hollow_ring_y(bm, center: Vector, r_outer: float, r_inner: float, depth_
         f_b.smooth = False
 
 
-def add_japanese_license_plate(bm, center: Vector, is_rear: bool, mat_trim: int, mat_white: int, mat_green: int, mat_chrome: int):
+def add_japanese_license_plate(
+    bm,
+    center: Vector,
+    is_rear: bool,
+    mat_trim: int,
+    mat_white: int,
+    mat_green: int,
+    mat_chrome: int,
+):
     """日本規格ナンバープレート（普通車 中板: 横 330mm × 縦 165mm）を白地＋緑文字レリーフ＋封印ボルト付きで造形"""
     dir_y = 1.0 if is_rear else -1.0
     # 1. ブラック樹脂ナンバーフレーム (342mm x 175mm)
-    add_box(bm, center=center, size=Vector((0.342, 0.014, 0.175)), mat_idx=mat_trim, smooth=False)
+    add_box(
+        bm,
+        center=center,
+        size=Vector((0.342, 0.014, 0.175)),
+        mat_idx=mat_trim,
+        smooth=False,
+    )
     # 2. 日本の白ナンバープレート本体 (実寸 330mm x 165mm)
     plate_y = center.y + dir_y * 0.004
-    add_box(bm, center=Vector((center.x, plate_y, center.z)), size=Vector((0.330, 0.012, 0.165)), mat_idx=mat_white, smooth=False)
+    add_box(
+        bm,
+        center=Vector((center.x, plate_y, center.z)),
+        size=Vector((0.330, 0.012, 0.165)),
+        mat_idx=mat_white,
+        smooth=False,
+    )
 
     # 3. 緑文字レリーフ（上部：地名「千代田 330」、下部左：ひらがな「す」、下部中央：ハイフン、下部4桁数字「40-00」）
     char_y = center.y + dir_y * 0.010
     # 上段：地名＆分類番号バー
-    add_box(bm, center=Vector((center.x - 0.045, char_y, center.z + 0.042)), size=Vector((0.075, 0.004, 0.028)), mat_idx=mat_green)
-    add_box(bm, center=Vector((center.x + 0.050, char_y, center.z + 0.042)), size=Vector((0.070, 0.004, 0.028)), mat_idx=mat_green)
+    add_box(
+        bm,
+        center=Vector((center.x - 0.045, char_y, center.z + 0.042)),
+        size=Vector((0.075, 0.004, 0.028)),
+        mat_idx=mat_green,
+    )
+    add_box(
+        bm,
+        center=Vector((center.x + 0.050, char_y, center.z + 0.042)),
+        size=Vector((0.070, 0.004, 0.028)),
+        mat_idx=mat_green,
+    )
     # 下段左：ひらがな
-    add_box(bm, center=Vector((center.x - 0.118, char_y, center.z - 0.022)), size=Vector((0.026, 0.004, 0.036)), mat_idx=mat_green)
+    add_box(
+        bm,
+        center=Vector((center.x - 0.118, char_y, center.z - 0.022)),
+        size=Vector((0.026, 0.004, 0.036)),
+        mat_idx=mat_green,
+    )
     # 下段4桁大型ナンバー + ハイフン
     for dx in [-0.068, -0.024, 0.046, 0.092]:
-        add_box(bm, center=Vector((center.x + dx, char_y, center.z - 0.022)), size=Vector((0.030, 0.004, 0.062)), mat_idx=mat_green)
-    add_box(bm, center=Vector((center.x + 0.011, char_y, center.z - 0.022)), size=Vector((0.018, 0.004, 0.010)), mat_idx=mat_green)
+        add_box(
+            bm,
+            center=Vector((center.x + dx, char_y, center.z - 0.022)),
+            size=Vector((0.030, 0.004, 0.062)),
+            mat_idx=mat_green,
+        )
+    add_box(
+        bm,
+        center=Vector((center.x + 0.011, char_y, center.z - 0.022)),
+        size=Vector((0.018, 0.004, 0.010)),
+        mat_idx=mat_green,
+    )
 
     # 4. 上部左右の取付ボルト＆リア左上のアルミ封印キャップ
     for bx in [-0.105, 0.105]:
@@ -473,31 +756,131 @@ def add_japanese_license_plate(bm, center: Vector, is_rear: bool, mat_trim: int,
 
 
 def build_lofted_lower_body(bm, mat_idx=0):
-    """車両のロアボディ（Y=-2.26m フロントノーズ 〜 Y=+2.21m リアテール）をロフト曲面として生成"""
+    """車両のロアボディ（Y=-2.26m フロントノーズ 〜 Y=+2.21m リアテール）をロフト曲面として生成
+    Why キャビン区間 (Y = -0.86m .. +1.36m) のみ w_in / zt_in / zc を掘り下げるか:
+    従来のように全断面で zc = 0.85..0.88m の天面を張ると、キャビン内部をベルトライン高さの水平板が横断し、
+    ステアリング下部・センターコンソール・シート座面・足元フロアが外装ボディ（Chassis）に埋没してしまうため。
+    キャビン区間では左右ドアシル内縁 (|X| = 0.745m) からフロアパン (Z = 0.33m, 内装フロア Z = 0.36m の直下) へ
+    バスタブ状に掘り下げることで、360度どの角度から車内を見ても下半分の埋没をゼロにする。
+    """
+    # (y, wb, wm, wt, zb, zm, zt, w_in, zt_in, zc)
     stations = [
-        (-2.26, 0.72, 0.78, 0.68, 0.23, 0.35, 0.46, 0.49),  # 0: フロントノーズ最先端
-        (-2.12, 0.82, 0.88, 0.78, 0.21, 0.40, 0.55, 0.59),  # 1: ヘッドライト・グリル上縁
-        (-1.82, 0.87, 0.94, 0.85, 0.21, 0.46, 0.69, 0.73),  # 2: 前輪アーチ前方
-        (-1.38, 0.82, 0.96, 0.89, 0.36, 0.58, 0.80, 0.83),  # 3: 前輪ホイールアーチ頂部
-        (-0.96, 0.88, 0.96, 0.88, 0.21, 0.50, 0.84, 0.87),  # 4: カウル・Aピラー根元
-        (-0.35, 0.89, 0.95, 0.87, 0.20, 0.50, 0.85, 0.85),  # 5: フロントドア中央
-        (0.35, 0.89, 0.95, 0.87, 0.20, 0.51, 0.86, 0.86),   # 6: Bピラー・リアドア
-        (0.95, 0.90, 0.98, 0.89, 0.21, 0.53, 0.88, 0.88),   # 7: リアフェンダー前縁
-        (1.38, 0.82, 0.98, 0.90, 0.36, 0.60, 0.90, 0.89),   # 8: 後輪ホイールアーチ頂部
-        (1.78, 0.88, 0.95, 0.85, 0.24, 0.54, 0.88, 0.89),   # 9: リアデッキ・トランク
-        (2.10, 0.83, 0.89, 0.79, 0.27, 0.54, 0.86, 0.88),   # 10: ダックテールスポイラー縁
-        (2.21, 0.76, 0.82, 0.73, 0.29, 0.52, 0.78, 0.80),   # 11: リアバンパー後端
+        (-2.26, 0.72, 0.78, 0.68, 0.23, 0.35, 0.46, 0.26, 0.49, 0.49),  # 0: フロントノーズ最先端
+        (
+            -2.12,
+            0.82,
+            0.88,
+            0.78,
+            0.21,
+            0.40,
+            0.55,
+            0.30,
+            0.59,
+            0.59,
+        ),  # 1: ヘッドライト・グリル上縁
+        (-1.82, 0.87, 0.94, 0.85, 0.21, 0.46, 0.69, 0.32, 0.73, 0.73),  # 2: 前輪アーチ前方
+        (-1.38, 0.82, 0.96, 0.89, 0.36, 0.58, 0.80, 0.34, 0.83, 0.83),  # 3: 前輪ホイールアーチ頂部
+        (-0.96, 0.88, 0.96, 0.88, 0.21, 0.50, 0.84, 0.745, 0.86, 0.87),  # 4: カウル・Aピラー根元
+        (
+            -0.88,
+            0.88,
+            0.96,
+            0.88,
+            0.20,
+            0.50,
+            0.845,
+            0.745,
+            0.85,
+            0.33,
+        ),  # 5: フロントバルクヘッド（キャビン開口前端・足元フロア下へ段落ち）
+        (
+            -0.35,
+            0.89,
+            0.95,
+            0.87,
+            0.20,
+            0.50,
+            0.85,
+            0.745,
+            0.85,
+            0.33,
+        ),  # 6: フロントドア中央（キャビンバスタブ）
+        (
+            0.35,
+            0.89,
+            0.95,
+            0.87,
+            0.20,
+            0.51,
+            0.86,
+            0.745,
+            0.86,
+            0.33,
+        ),  # 7: Bピラー・リアドア（キャビンバスタブ）
+        (
+            0.95,
+            0.90,
+            0.98,
+            0.89,
+            0.21,
+            0.53,
+            0.88,
+            0.745,
+            0.88,
+            0.33,
+        ),  # 8: リアフェンダー前縁（キャビンバスタブ）
+        (
+            1.35,
+            0.82,
+            0.98,
+            0.90,
+            0.36,
+            0.60,
+            0.90,
+            0.745,
+            0.88,
+            0.33,
+        ),  # 9: リアシート背面バルクヘッド下端
+        (
+            1.42,
+            0.82,
+            0.98,
+            0.90,
+            0.36,
+            0.60,
+            0.90,
+            0.70,
+            0.89,
+            0.89,
+        ),  # 10: リアパーセルシェルフ・後輪アーチ頂部
+        (1.78, 0.88, 0.95, 0.85, 0.24, 0.54, 0.88, 0.32, 0.89, 0.89),  # 11: リアデッキ・トランク
+        (
+            2.10,
+            0.83,
+            0.89,
+            0.79,
+            0.27,
+            0.54,
+            0.86,
+            0.30,
+            0.88,
+            0.88,
+        ),  # 12: ダックテールスポイラー縁
+        (2.21, 0.76, 0.82, 0.73, 0.29, 0.52, 0.78, 0.28, 0.80, 0.80),  # 13: リアバンパー後端
     ]
 
     profile_rings = []
-    for y, wb, wm, wt, zb, zm, zt, zc in stations:
+    for y, wb, wm, wt, zb, zm, zt, w_in, zt_in, zc in stations:
+        w_floor = max(0.20, w_in - 0.025)
         ring = [
             bm.verts.new(Vector((-wb * 0.5, y, zb))),
             bm.verts.new(Vector((-wb, y, zb + 0.03))),
             bm.verts.new(Vector((-wm, y, zm))),
             bm.verts.new(Vector((-wt, y, zt))),
-            bm.verts.new(Vector((-wt * 0.38, y, zc))),
-            bm.verts.new(Vector((wt * 0.38, y, zc))),
+            bm.verts.new(Vector((-w_in, y, zt_in))),
+            bm.verts.new(Vector((-w_floor, y, zc))),
+            bm.verts.new(Vector((w_floor, y, zc))),
+            bm.verts.new(Vector((w_in, y, zt_in))),
             bm.verts.new(Vector((wt, y, zt))),
             bm.verts.new(Vector((wm, y, zm))),
             bm.verts.new(Vector((wb, y, zb + 0.03))),
@@ -513,7 +896,8 @@ def build_lofted_lower_body(bm, mat_idx=0):
             ni = (i + 1) % n_pts
             f = bm.faces.new([r0[i], r0[ni], r1[ni], r1[i]])
             f.material_index = mat_idx
-            f.smooth = True
+            # キャビン内壁・フロアパン区間 (i == 4, 5, 6) はフラットシェーディングにしてエッジの陰影破綻を防ぐ
+            f.smooth = i not in (4, 5, 6)
 
     f_front = bm.faces.new(list(reversed(profile_rings[0])))
     f_front.material_index = mat_idx
@@ -563,11 +947,56 @@ def build_wheel_arches_and_liners(bm, paint_mat=0, black_mat=1):
                 f.smooth = True
 
 
+def add_crown_emblem(
+    bm,
+    center: Vector,
+    scale: float,
+    axis_y_dir: float,
+    mat_chrome: int,
+    mat_back: int = -1,
+):
+    """トヨタ クラウン伝統の『王冠（Crown）エンブレム』を立体レリーフとして造形"""
+    if mat_back >= 0:
+        add_box(
+            bm,
+            center=center + Vector((0.0, axis_y_dir * 0.001, 0.0)),
+            size=Vector((0.056 * scale, 0.008 * scale, 0.046 * scale)),
+            mat_idx=mat_back,
+            smooth=False,
+        )
+    ey = center.y + axis_y_dir * 0.005 * scale
+    # 王冠ベースバンド（水平台座）
+    add_box(
+        bm,
+        center=Vector((center.x, ey, center.z - 0.011 * scale)),
+        size=Vector((0.044 * scale, 0.006 * scale, 0.007 * scale)),
+        mat_idx=mat_chrome,
+        smooth=False,
+    )
+    # 王冠の5本ピラー（中央が高く、左右に広がるクラウン紋章）
+    peaks = [
+        (0.0, 0.014, 0.024),
+        (-0.010, 0.011, 0.020),
+        (0.010, 0.011, 0.020),
+        (-0.019, 0.008, 0.016),
+        (0.019, 0.008, 0.016),
+    ]
+    for px, pz, ph in peaks:
+        add_box(
+            bm,
+            center=Vector((center.x + px * scale, ey, center.z + (pz - 0.008) * scale)),
+            size=Vector((0.0055 * scale, 0.006 * scale, ph * scale)),
+            mat_idx=mat_chrome,
+            smooth=False,
+        )
+
+
 def build_curved_roof_and_pillars(bm):
-    """滑らかなアーチを描くルーフ天板〜ファストバックCピラー・A/Bピラー・リアウィンドウを構築
-    mat_idx: 0=BodyPaint, 1=BlackTrim, 3=WindowGlass"""
+    """滑らかなアーチを描くクラウン セダンの6ライトルーフ天板〜ファストバックCピラー・クロームウィンドウモールを構築
+    mat_idx: 0=BodyPaint, 1=BlackTrim, 2=Chrome, 3=WindowGlass"""
     roof_stations = [
-        (-0.50, 0.66, 1.40, 1.43),
+        (-0.532, 0.658, 1.402, 1.430),
+        (-0.50, 0.66, 1.404, 1.432),
         (-0.20, 0.68, 1.43, 1.465),
         (0.15, 0.68, 1.44, 1.475),
         (0.45, 0.66, 1.415, 1.45),
@@ -616,65 +1045,89 @@ def build_curved_roof_and_pillars(bm):
     ]
     add_hexahedron(bm, shark_verts, mat_idx=0, smooth=True)
 
-    # 左右の傾斜Aピラー・Bピラー・ファストバックCピラー
+    # 左右の傾斜Aピラー・Bピラー・6ライトクォーターピラー・ファストバックCピラー＆クロームウィンドウモール
     for side in [-1.0, 1.0]:
         add_slanted_strut(
             bm,
-            p0=Vector((side * 0.74, -1.26, 0.86)),
-            p1=Vector((side * 0.65, -0.48, 1.40)),
-            width_x=0.052,
+            p0=Vector((side * 0.742, -1.26, 0.86)),
+            p1=Vector((side * 0.658, -0.48, 1.40)),
+            width_x=0.048,
             depth_y=0.072,
             taper=0.82,
-            mat_idx=1,  # 車内側から見たときに反射しすぎないようサテンブラックピラー仕上げ
-            smooth=False,
-        )
-        add_slanted_strut(
-            bm,
-            p0=Vector((side * 0.80, 0.22, 0.85)),
-            p1=Vector((side * 0.66, 0.26, 1.42)),
-            width_x=0.042,
-            depth_y=0.088,
-            taper=0.88,
             mat_idx=1,
             smooth=False,
         )
         add_slanted_strut(
             bm,
-            p0=Vector((side * 0.76, 1.72, 0.89)),
-            p1=Vector((side * 0.63, 0.70, 1.365)),
-            width_x=0.075,
-            depth_y=0.18,
-            taper=0.75,
+            p0=Vector((side * 0.798, 0.16, 0.85)),
+            p1=Vector((side * 0.674, 0.20, 1.432)),
+            width_x=0.040,
+            depth_y=0.082,
+            taper=0.88,
+            mat_idx=1,
+            smooth=False,
+        )
+        # クラウン セダン特徴の6ライトウィンドウ用リアドアディバイダーバー
+        add_slanted_strut(
+            bm,
+            p0=Vector((side * 0.780, 0.92, 0.87)),
+            p1=Vector((side * 0.642, 0.72, 1.362)),
+            width_x=0.028,
+            depth_y=0.042,
+            taper=0.85,
+            mat_idx=1,
+            smooth=False,
+        )
+        add_slanted_strut(
+            bm,
+            p0=Vector((side * 0.758, 1.72, 0.89)),
+            p1=Vector((side * 0.640, 0.71, 1.365)),
+            width_x=0.072,
+            depth_y=0.16,
+            taper=0.78,
             mat_idx=0,
             smooth=True,
         )
-
-    # 3D曲面ファストバックリアガラス
-    rw_stations = [
-        (0.70, 0.61, 1.360, 1.385),
-        (1.04, 0.65, 1.215, 1.235),
-        (1.38, 0.69, 1.055, 1.070),
-        (1.74, 0.73, 0.890, 0.900),
-    ]
-    rw_rows = []
-    for y, hw, zs, zm in rw_stations:
-        rw_rows.append([
-            bm.verts.new(Vector((-hw, y, zs))),
-            bm.verts.new(Vector((-hw * 0.4, y, zm))),
-            bm.verts.new(Vector((hw * 0.4, y, zm))),
-            bm.verts.new(Vector((hw, y, zs))),
-        ])
-    for r_i in range(len(rw_rows) - 1):
-        row0 = rw_rows[r_i]
-        row1 = rw_rows[r_i + 1]
-        for c_i in range(3):
-            f_rw = bm.faces.new([row0[c_i], row0[c_i + 1], row1[c_i + 1], row1[c_i]])
-            f_rw.material_index = 3  # WindowGlass
-            f_rw.smooth = True
+        # クラウン セダンの6ライトウィンドウ下端を走る水平クロームベルトラインモールディング＆ウェザーストリップ
+        add_box(
+            bm,
+            center=Vector((side * 0.885, 0.18, 0.862)),
+            size=Vector((0.016, 2.58, 0.016)),
+            mat_idx=2,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((side * 0.775, 0.18, 0.860)),
+            size=Vector((0.032, 2.86, 0.018)),
+            mat_idx=1,
+            smooth=False,
+        )
+        # アッパーウィンドウフレームのクロームモールディング（Aピラー上端〜ルーフサイド〜Cピラー後端）
+        upper_molding_pts = [
+            Vector((side * 0.742, -1.24, 0.872)),
+            Vector((side * 0.658, -0.48, 1.404)),
+            Vector((side * 0.678, -0.18, 1.434)),
+            Vector((side * 0.678, 0.18, 1.438)),
+            Vector((side * 0.660, 0.46, 1.416)),
+            Vector((side * 0.642, 0.72, 1.366)),
+            Vector((side * 0.758, 1.68, 0.898)),
+        ]
+        for m_i in range(len(upper_molding_pts) - 1):
+            add_slanted_strut(
+                bm,
+                p0=upper_molding_pts[m_i],
+                p1=upper_molding_pts[m_i + 1],
+                width_x=0.014,
+                depth_y=0.018,
+                taper=1.0,
+                mat_idx=2,
+                smooth=True,
+            )
 
 
 def build_chassis(materials) -> bpy.types.Object:
-    """JDM 外装エアロボディ (Chassis) をモデリング"""
+    """トヨタ クラウン セダン (AZSH32) 外装ボディ (Chassis) をモデリング"""
     mesh = bpy.data.meshes.new("ChassisMesh")
     bm = bmesh.new()
 
@@ -698,47 +1151,192 @@ def build_chassis(materials) -> bpy.types.Object:
     # 2. ホイールハウス遮光ライナー＆立体フェンダーアーチ
     build_wheel_arches_and_liners(bm, paint_mat=0, black_mat=1)
 
-    # 3. 曲面ルーフ＆傾斜ピラー＆リアガラス
+    # 3. 曲面ルーフ＆6ライト傾斜ピラー＆リアガラス
     build_curved_roof_and_pillars(bm)
 
-    # 4. サイドスカート＆ドアハンドル
+    # 4. サイドロッカーモール＆クラウン特徴のフロントフェンダー縦ガーニッシュ＆カラードドアハンドル
     for side in [-1.0, 1.0]:
+        # サイドロッカーブラック＆クロームアクセントモール
         add_box(
             bm,
-            center=Vector((side * 0.91, 0.0, 0.21)),
-            size=Vector((0.05, 1.88, 0.045)),
+            center=Vector((side * 0.905, 0.0, 0.215)),
+            size=Vector((0.045, 1.88, 0.042)),
             mat_idx=1,
             smooth=False,
         )
-        for door_y in [-0.15, 0.55]:
+        add_box(
+            bm,
+            center=Vector((side * 0.928, 0.0, 0.228)),
+            size=Vector((0.012, 1.82, 0.014)),
+            mat_idx=2,
+            smooth=False,
+        )
+        # クラウン セダン象徴のフロントフェンダー縦型ブラック＆クロームサイドガーニッシュ（前輪アーチ直後 Y=-0.92m）
+        add_box(
+            bm,
+            center=Vector((side * 0.952, -0.92, 0.56)),
+            size=Vector((0.016, 0.036, 0.24)),
+            mat_idx=1,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((side * 0.958, -0.92, 0.56)),
+            size=Vector((0.008, 0.014, 0.21)),
+            mat_idx=2,
+            smooth=False,
+        )
+        # 前後ドアグリップハンドル（ボディ同色＋上部クロームライン）
+        for door_y in [-0.15, 0.58]:
             add_box(
                 bm,
                 center=Vector((side * 0.955, door_y, 0.77)),
-                size=Vector((0.018, 0.15, 0.026)),
+                size=Vector((0.020, 0.16, 0.028)),
+                mat_idx=0,
+                smooth=True,
+            )
+            add_box(
+                bm,
+                center=Vector((side * 0.962, door_y, 0.782)),
+                size=Vector((0.010, 0.15, 0.008)),
                 mat_idx=2,
                 smooth=False,
             )
 
-    # 5. フロントフェイス（JDM Vモーショングリル + 日本ナンバープレート + シャープLEDヘッドライト）
+    # 5. クラウン セダン フロントフェイス（ハンマーヘッド + 大型台形アンダープライオリティ縦バーグリル + 王冠エンブレム）
+    # フロントアンダースポイラー＆ロアクロームリップ（ロアボディ幅 wb=0.72..0.82 の内側にぴったり収める）
     splitter_verts = [
-        Vector((-0.74, -2.29, 0.19)),
-        Vector((0.74, -2.29, 0.19)),
-        Vector((0.86, -2.08, 0.19)),
-        Vector((-0.86, -2.08, 0.19)),
-        Vector((-0.73, -2.27, 0.23)),
-        Vector((0.73, -2.27, 0.23)),
-        Vector((0.86, -2.08, 0.23)),
-        Vector((-0.86, -2.08, 0.23)),
+        Vector((-0.71, -2.285, 0.205)),
+        Vector((0.71, -2.285, 0.205)),
+        Vector((0.81, -2.10, 0.205)),
+        Vector((-0.81, -2.10, 0.205)),
+        Vector((-0.71, -2.270, 0.236)),
+        Vector((0.71, -2.270, 0.236)),
+        Vector((0.81, -2.10, 0.236)),
+        Vector((-0.81, -2.10, 0.236)),
     ]
     add_hexahedron(bm, splitter_verts, mat_idx=1, smooth=False)
+    add_box(
+        bm,
+        center=Vector((0.0, -2.282, 0.212)),
+        size=Vector((1.36, 0.018, 0.014)),
+        mat_idx=2,
+        smooth=False,
+    )
 
-    # JDM メッシュグリル＆クローム V シグネチャー＆フロントエンブレム
-    add_box(bm, center=Vector((0.0, -2.25, 0.37)), size=Vector((0.96, 0.06, 0.20)), mat_idx=1)
-    add_box(bm, center=Vector((0.0, -2.275, 0.43)), size=Vector((0.12, 0.02, 0.045)), mat_idx=2)
+    # 大型台形「アンダープライオリティ」グリルハウジング（ブラック樹脂ベース）
+    grille_verts = [
+        Vector((-0.66, -2.282, 0.22)),
+        Vector((0.66, -2.282, 0.22)),
+        Vector((0.66, -2.210, 0.22)),
+        Vector((-0.66, -2.210, 0.22)),
+        Vector((-0.54, -2.272, 0.455)),
+        Vector((0.54, -2.272, 0.455)),
+        Vector((0.54, -2.200, 0.455)),
+        Vector((-0.54, -2.200, 0.455)),
+    ]
+    add_hexahedron(bm, grille_verts, mat_idx=1, smooth=False)
+
+    # クラウン セダン最大の特徴：アンダープライオリティグリルの「縦基調メッキバー列（Vertical Bars）」19本
+    for bar_i in range(-9, 10):
+        bx = bar_i * 0.058
+        top_x = bx * 0.88
+        add_slanted_strut(
+            bm,
+            p0=Vector((bx, -2.284, 0.225)),
+            p1=Vector((top_x, -2.274, 0.450)),
+            width_x=0.011,
+            depth_y=0.022,
+            taper=0.92,
+            mat_idx=2 if abs(bar_i) % 2 == 0 else 1,
+            smooth=False,
+        )
+
+    # ハンマーヘッド アッパーグリルガーニッシュ＆横一文字シームレスLEDデイタイムランニングランプ（DRL）
+    # ノーズの平面傾斜（中央 Y=-2.262 → 左右端 Y=-2.185）に沿う8頂点ヘキサヘドロンで左右一体構造にする
+    for side in [-1.0, 1.0]:
+        in_x = 0.0
+        out_x = side * 0.785
+        if side > 0:
+            drl_housing = [
+                Vector((in_x, -2.268, 0.486)),
+                Vector((out_x, -2.188, 0.498)),
+                Vector((out_x, -2.155, 0.498)),
+                Vector((in_x, -2.235, 0.486)),
+                Vector((in_x, -2.262, 0.518)),
+                Vector((out_x, -2.182, 0.530)),
+                Vector((out_x, -2.155, 0.530)),
+                Vector((in_x, -2.235, 0.518)),
+            ]
+            drl_led = [
+                Vector((in_x, -2.275, 0.504)),
+                Vector((out_x, -2.195, 0.516)),
+                Vector((out_x, -2.180, 0.516)),
+                Vector((in_x, -2.260, 0.504)),
+                Vector((in_x, -2.273, 0.517)),
+                Vector((out_x, -2.193, 0.529)),
+                Vector((out_x, -2.180, 0.529)),
+                Vector((in_x, -2.260, 0.517)),
+            ]
+            drl_chrome = [
+                Vector((in_x, -2.272, 0.494)),
+                Vector((out_x, -2.192, 0.506)),
+                Vector((out_x, -2.180, 0.506)),
+                Vector((in_x, -2.260, 0.494)),
+                Vector((in_x, -2.272, 0.502)),
+                Vector((out_x, -2.192, 0.514)),
+                Vector((out_x, -2.180, 0.514)),
+                Vector((in_x, -2.260, 0.502)),
+            ]
+        else:
+            drl_housing = [
+                Vector((out_x, -2.188, 0.498)),
+                Vector((in_x, -2.268, 0.486)),
+                Vector((in_x, -2.235, 0.486)),
+                Vector((out_x, -2.155, 0.498)),
+                Vector((out_x, -2.182, 0.530)),
+                Vector((in_x, -2.262, 0.518)),
+                Vector((in_x, -2.235, 0.518)),
+                Vector((out_x, -2.155, 0.530)),
+            ]
+            drl_led = [
+                Vector((out_x, -2.195, 0.516)),
+                Vector((in_x, -2.275, 0.504)),
+                Vector((in_x, -2.260, 0.504)),
+                Vector((out_x, -2.180, 0.516)),
+                Vector((out_x, -2.193, 0.529)),
+                Vector((in_x, -2.273, 0.517)),
+                Vector((in_x, -2.260, 0.517)),
+                Vector((out_x, -2.180, 0.529)),
+            ]
+            drl_chrome = [
+                Vector((out_x, -2.192, 0.506)),
+                Vector((in_x, -2.272, 0.494)),
+                Vector((in_x, -2.260, 0.494)),
+                Vector((out_x, -2.180, 0.506)),
+                Vector((out_x, -2.192, 0.514)),
+                Vector((in_x, -2.272, 0.502)),
+                Vector((in_x, -2.260, 0.502)),
+                Vector((out_x, -2.180, 0.514)),
+            ]
+        add_hexahedron(bm, drl_housing, mat_idx=1, smooth=False)
+        add_hexahedron(bm, drl_led, mat_idx=4, smooth=False)
+        add_hexahedron(bm, drl_chrome, mat_idx=2, smooth=False)
+
+    # ハンマーヘッドノーズ中央の伝統「王冠（Crown）エンブレム」
+    add_crown_emblem(
+        bm,
+        center=Vector((0.0, -2.264, 0.548)),
+        scale=1.15,
+        axis_y_dir=-1.0,
+        mat_chrome=2,
+        mat_back=1,
+    )
+
     # フロント日本規格ナンバープレート (330mm x 165mm)
     add_japanese_license_plate(
         bm,
-        center=Vector((0.0, -2.28, 0.30)),
+        center=Vector((0.0, -2.288, 0.315)),
         is_rear=False,
         mat_trim=1,
         mat_white=6,
@@ -746,76 +1344,155 @@ def build_chassis(materials) -> bpy.types.Object:
         mat_chrome=2,
     )
 
-    # 左右ラップアラウンドLEDヘッドライト＆コーナーインテーク
+    # 左右ハンマーヘッド4眼LEDヘッドランプユニット＆C字コーナーエアインテークベゼル
     for side in [-1.0, 1.0]:
-        x_in = side * 0.42
-        x_out = side * 0.83
-        if side < 0:
+        # ヘッドランプダークハウジング（フロントフェンダーノーズ傾斜に沿って外側から内側へスラントする8頂点ヘキサヘドロン）
+        hl_in_x = side * 0.44
+        hl_out_x = side * 0.78
+        if side > 0:
             hl_verts = [
-                Vector((x_out, -2.14, 0.52)),
-                Vector((x_in, -2.27, 0.48)),
-                Vector((x_in, -2.12, 0.52)),
-                Vector((x_out, -1.96, 0.56)),
-                Vector((x_out * 0.96, -2.10, 0.61)),
-                Vector((x_in, -2.24, 0.56)),
-                Vector((x_in, -2.08, 0.61)),
-                Vector((x_out * 0.96, -1.92, 0.65)),
+                Vector((hl_in_x, -2.266, 0.478)),
+                Vector((hl_out_x, -2.185, 0.492)),
+                Vector((hl_out_x, -2.095, 0.492)),
+                Vector((hl_in_x, -2.180, 0.478)),
+                Vector((hl_in_x, -2.256, 0.525)),
+                Vector((hl_out_x, -2.175, 0.542)),
+                Vector((hl_out_x, -2.095, 0.548)),
+                Vector((hl_in_x, -2.180, 0.530)),
             ]
         else:
             hl_verts = [
-                Vector((x_in, -2.27, 0.48)),
-                Vector((x_out, -2.14, 0.52)),
-                Vector((x_out, -1.96, 0.56)),
-                Vector((x_in, -2.12, 0.52)),
-                Vector((x_in, -2.24, 0.56)),
-                Vector((x_out * 0.96, -2.10, 0.61)),
-                Vector((x_out * 0.96, -1.92, 0.65)),
-                Vector((x_in, -2.08, 0.61)),
+                Vector((hl_out_x, -2.185, 0.492)),
+                Vector((hl_in_x, -2.266, 0.478)),
+                Vector((hl_in_x, -2.180, 0.478)),
+                Vector((hl_out_x, -2.095, 0.492)),
+                Vector((hl_out_x, -2.175, 0.542)),
+                Vector((hl_in_x, -2.256, 0.525)),
+                Vector((hl_in_x, -2.180, 0.530)),
+                Vector((hl_out_x, -2.095, 0.548)),
             ]
-        add_hexahedron(bm, hl_verts, mat_idx=4, smooth=False)
-        add_box(bm, center=Vector((side * 0.64, -2.19, 0.33)), size=Vector((0.24, 0.08, 0.13)), mat_idx=1)
+        add_hexahedron(bm, hl_verts, mat_idx=1, smooth=False)
+        # 片側4眼スクエアLEDプロジェクターレンズ（スラント面に密着）
+        for lamp_idx in range(4):
+            t_lamp = (lamp_idx + 0.5) / 4.0
+            lx = side * (0.47 + lamp_idx * 0.072)
+            ly = -2.258 + t_lamp * 0.068
+            lz = 0.502 + t_lamp * 0.014
+            add_box(
+                bm,
+                center=Vector((lx, ly, lz)),
+                size=Vector((0.046, 0.022, 0.026)),
+                mat_idx=4,
+                smooth=False,
+            )
+            add_box(
+                bm,
+                center=Vector((lx, ly - 0.003, lz - 0.015)),
+                size=Vector((0.050, 0.016, 0.005)),
+                mat_idx=2,
+                smooth=False,
+            )
+        # 左右バンパーコーナーのC字ブラック＆クロームガーニッシュ（ロアボディ幅 wb=0.72..0.80 の内側に収める）
+        add_box(
+            bm,
+            center=Vector((side * 0.68, -2.215, 0.34)),
+            size=Vector((0.11, 0.075, 0.19)),
+            mat_idx=1,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((side * 0.725, -2.235, 0.34)),
+            size=Vector((0.018, 0.035, 0.175)),
+            mat_idx=2,
+            smooth=False,
+        )
 
-    # 6. JDM リアフェイス（伝統の丸型4灯リングLEDテールランプ + 日本ナンバープレート + ダックテール）
-    # カーボンダックテールリアスポイラー
-    add_box(bm, center=Vector((0.0, 2.13, 0.905)), size=Vector((1.44, 0.11, 0.042)), mat_idx=1, smooth=False)
-    # リアガーニッシュパネル（丸型4灯を際立たせるブラックトリムハウジング）
-    add_box(bm, center=Vector((0.0, 2.215, 0.745)), size=Vector((1.48, 0.035, 0.135)), mat_idx=1, smooth=False)
-    # センター JDM クロームエンブレムバッジ
-    add_box(bm, center=Vector((0.0, 2.23, 0.825)), size=Vector((0.11, 0.018, 0.036)), mat_idx=2, smooth=False)
-    add_box(bm, center=Vector((0.62, 2.23, 0.64)), size=Vector((0.09, 0.015, 0.024)), mat_idx=2, smooth=False)
-
-    # 象徴的な丸型4灯リング LED テールランプ（GT-R / SKYLINE 400R スタイル：外側大径リング r=0.058m + 内側リング r=0.048m）
+    # 6. クラウン セダン リアフェイス（横一文字LEDリヤコンビネーションランプ + トヨタエンブレム + C R O W N レタリング）
+    # トランクデッキエンドの繊細な一体型リップ（クラウンらしいエレガントな造形）
+    add_box(
+        bm,
+        center=Vector((0.0, 2.14, 0.892)),
+        size=Vector((1.42, 0.07, 0.022)),
+        mat_idx=0,
+        smooth=True,
+    )
+    # 横一文字テールランプのピアノブラックハウジング（左右フェンダー端まで一直線に貫く）
+    add_box(
+        bm,
+        center=Vector((0.0, 2.215, 0.765)),
+        size=Vector((1.48, 0.034, 0.068)),
+        mat_idx=1,
+        smooth=False,
+    )
+    # 横一文字フルワイドLEDテールランプバー（クラウン セダンの象徴）
+    add_box(
+        bm,
+        center=Vector((0.0, 2.230, 0.772)),
+        size=Vector((1.44, 0.018, 0.022)),
+        mat_idx=5,
+        smooth=False,
+    )
+    # 左右端の立体L字シグネチャーLEDブロック
     for side in [-1.0, 1.0]:
-        # 外側リング（大径）
-        add_hollow_ring_y(
+        add_box(
             bm,
-            center=Vector((side * 0.63, 2.232, 0.750)),
-            r_outer=0.058,
-            r_inner=0.034,
-            depth_y=0.028,
-            segments=24,
+            center=Vector((side * 0.61, 2.228, 0.752)),
+            size=Vector((0.22, 0.020, 0.042)),
             mat_idx=5,
-            smooth=True,
+            smooth=False,
         )
-        # 内側リング（中径）
-        add_hollow_ring_y(
+        add_box(
             bm,
-            center=Vector((side * 0.47, 2.232, 0.742)),
-            r_outer=0.048,
-            r_inner=0.028,
-            depth_y=0.028,
-            segments=24,
+            center=Vector((side * 0.71, 2.180, 0.758)),
+            size=Vector((0.036, 0.105, 0.044)),
             mat_idx=5,
-            smooth=True,
+            smooth=False,
         )
-        # リアバンパー下部リフレクター
-        add_box(bm, center=Vector((side * 0.64, 2.225, 0.39)), size=Vector((0.20, 0.030, 0.024)), mat_idx=5)
+
+    # リア中央クロームエンブレムバッジ ＆ 横一文字の下に等間隔で並ぶ「C R O W N」5文字レタリング
+    add_cylinder(
+        bm,
+        center=Vector((0.0, 2.232, 0.818)),
+        radius=0.024,
+        height=0.010,
+        segments=16,
+        axis="Y",
+        mat_idx=2,
+        smooth=True,
+    )
+    for ch_idx in range(-2, 3):
+        add_box(
+            bm,
+            center=Vector((ch_idx * 0.075, 2.228, 0.712)),
+            size=Vector((0.022, 0.008, 0.016)),
+            mat_idx=2,
+            smooth=False,
+        )
+    # 右側「HEV / FCEV」エンブレムプレート
+    add_box(
+        bm,
+        center=Vector((0.54, 2.226, 0.675)),
+        size=Vector((0.085, 0.012, 0.020)),
+        mat_idx=2,
+        smooth=False,
+    )
 
     # ハイマウントストップランプ（リアガラス上端）
-    add_box(bm, center=Vector((0.0, 0.74, 1.365)), size=Vector((0.46, 0.04, 0.022)), mat_idx=5)
+    add_box(
+        bm,
+        center=Vector((0.0, 0.74, 1.365)),
+        size=Vector((0.46, 0.04, 0.022)),
+        mat_idx=5,
+    )
 
     # リアナンバープレートガーニッシュ＆日本規格ナンバープレート（330mm x 165mm、白地＋緑文字レリーフ＋左上の封印）
-    add_box(bm, center=Vector((0.0, 2.215, 0.545)), size=Vector((0.66, 0.035, 0.195)), mat_idx=1)
+    add_box(
+        bm,
+        center=Vector((0.0, 2.215, 0.545)),
+        size=Vector((0.66, 0.035, 0.195)),
+        mat_idx=1,
+    )
     add_japanese_license_plate(
         bm,
         center=Vector((0.0, 2.232, 0.545)),
@@ -826,99 +1503,206 @@ def build_chassis(materials) -> bpy.types.Object:
         mat_chrome=2,
     )
 
-    # リアアンダーディフューザー＆4連バーティカルフィン
-    add_box(bm, center=Vector((0.0, 2.19, 0.29)), size=Vector((1.50, 0.12, 0.12)), mat_idx=1)
-    for fin_x in [-0.34, -0.11, 0.11, 0.34]:
-        add_box(bm, center=Vector((fin_x, 2.22, 0.27)), size=Vector((0.022, 0.14, 0.12)), mat_idx=1)
-
-    # クアッド（左右4本出し）大径エキゾーストマフラーカッター
-    for ex_x in [-0.58, -0.46, 0.46, 0.58]:
-        add_cylinder(
-            bm,
-            center=Vector((ex_x, 2.23, 0.28)),
-            radius=0.044,
-            height=0.12,
-            segments=20,
-            axis="Y",
-            mat_idx=2,
-            smooth=True,
-        )
-        add_cylinder(
-            bm,
-            center=Vector((ex_x, 2.24, 0.28)),
-            radius=0.033,
-            height=0.11,
-            segments=16,
-            axis="Y",
-            mat_idx=1,
-            smooth=False,
-        )
-
-    # 7. Aピラー根元ガセット＆流線型エアロドアミラー
-    # Why Aピラー根元 Y=-1.04m に配置し smooth=False にするか:
-    # 直方体に smooth=True をかけると頂点法線が平均化されて太陽光で不自然な青い光点が生じるため、
-    # フラットシェーディングの楔形エアロハウジングとし、ドライバー視点で窓外の正しい位置にミラー鏡面が見えるようにする。
+    # クラウン セダン リアバンパー下部ロアブラックガーニッシュ＆水平クロームモール＆スリムリフレクター
+    # （※フラッグシップセダンのためマフラーは床下隠蔽式とし、上品な水平メッキバーで仕上げる）
+    add_box(
+        bm,
+        center=Vector((0.0, 2.185, 0.305)),
+        size=Vector((1.38, 0.085, 0.095)),
+        mat_idx=1,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((0.0, 2.228, 0.312)),
+        size=Vector((1.32, 0.016, 0.014)),
+        mat_idx=2,
+        smooth=False,
+    )
     for side in [-1.0, 1.0]:
-        # Aピラー根元の三角ミラーガセットプレート（窓の前端コーナーを隙間なく塞ぐ）
         add_box(
             bm,
-            center=Vector((side * 0.78, -1.12, 0.89)),
-            size=Vector((0.07, 0.22, 0.09)),
-            mat_idx=1,
+            center=Vector((side * 0.52, 2.226, 0.345)),
+            size=Vector((0.22, 0.014, 0.014)),
+            mat_idx=5,
             smooth=False,
         )
-        # ドアから斜め上外側へ伸びるミラーステー
+
+    # 7. Aピラー根元ガセット＆JDM流線型エアロドアミラー（運転席側へ22°ヨー角スイープ＋凹みインナーバイザー＋シーケンシャルLEDウインカー）
+    for side in [-1.0, 1.0]:
+        # Aピラー根元の流線型デルタガセット（角張った箱ではなくドアベルトラインに沿う低い楔形プレート）
+        gusset_rear_y = -0.91 if side > 0 else -0.97
+        gusset_top_rear_y = -0.93 if side > 0 else -1.00
+        gusset_verts = [
+            Vector((side * 0.755, -1.21, 0.850)),
+            Vector((side * 0.835, -1.21, 0.850)),
+            Vector((side * 0.855, gusset_rear_y, 0.850)),
+            Vector((side * 0.745, gusset_rear_y, 0.850)),
+            Vector((side * 0.745, -1.16, 0.892)),
+            Vector((side * 0.805, -1.16, 0.888)),
+            Vector((side * 0.825, gusset_top_rear_y, 0.882)),
+            Vector((side * 0.735, gusset_top_rear_y, 0.892)),
+        ]
+        if side < 0:
+            gusset_verts = [
+                gusset_verts[1],
+                gusset_verts[0],
+                gusset_verts[3],
+                gusset_verts[2],
+                gusset_verts[5],
+                gusset_verts[4],
+                gusset_verts[7],
+                gusset_verts[6],
+            ]
+        add_hexahedron(bm, gusset_verts, mat_idx=1, smooth=False)
+
+        # ドアミラーハウジングのヨー角スイープ (22°) を事前計算し、ステー先端がハウジング底面中心へ 0.0mm ギャップで貫入するように配置
+        # ドアミラーピボット: ドアマウントペデスタル（三角ガセット後方のドアショルダー上）
+        # Why side > 0 (助手席・左ドアミラー) を Y=-0.880m に配置し、ヨー角を 27° に設定するか:
+        # 日本仕様の右ハンドル車 (RHD: 運転席アイポイント X=-0.380m, Y=+0.060m, Z=1.130m) では、
+        # 左Aピラー (p0=(+0.742, -1.260, 0.860) -> p1=(+0.658, -0.480, 1.400)) および車内側アルカンターラ内張り
+        # (X=+0.715m, Y=-1.220m .. X=+0.628m, Y=-0.480m) の高さ Z=0.962m 断面が Y=-1.15m .. -1.03m を通過する。
+        # 左右対称の Y=-1.005m に左ドアミラーを置くと、右運転席から約 1.6m 離れた斜め視線 (yaw=+47°) の内側半分が
+        # 左Aピラーおよび内張りの後縁と干渉してケラレが生じる。
+        # 実車のRHDセダン設計および UN R46 視界基準に準拠し、左ドアミラーピボットを Aピラー後方のドアベルトライン上 (Y=-0.880m) に配置し、
+        # 鏡面ヨー角を 27.0° に内振りすることで、左Aピラーの死角から 100% クリアに左ドアミラー全面を視認できるようにする。
+        is_left_mirror = side > 0
+        mirror_y = -0.880 if is_left_mirror else -1.005
+        gusset_y = -0.952 if is_left_mirror else -1.078
+        yaw_deg = 27.0 if is_left_mirror else 22.0
+        yaw_angle = side * math.radians(yaw_deg)
+        cos_y = math.cos(yaw_angle)
+        sin_y = math.sin(yaw_angle)
+        pivot = Vector((side * 0.918, mirror_y, 0.962))
+
+        def transform_mirror_pt(
+            local_x: float,
+            local_y: float,
+            local_z: float,
+            _cos_y: float = cos_y,
+            _sin_y: float = sin_y,
+            _pivot: Vector = pivot,
+        ) -> Vector:
+            rx = local_x * _cos_y - local_y * _sin_y
+            ry = local_x * _sin_y + local_y * _cos_y
+            return _pivot + Vector((rx, ry, local_z))
+
+        # ドアショルダーガセット上面 (Z=0.876..0.888) からスイープ済みミラー底面中心 (Z=0.913..0.930) へ隙間なく接続するエアロミラーステー＆スイベル台座
         add_slanted_strut(
             bm,
-            p0=Vector((side * 0.82, -1.04, 0.87)),
-            p1=Vector((side * 0.91, -1.00, 0.92)),
-            width_x=0.07,
-            depth_y=0.045,
-            taper=0.85,
+            p0=Vector((side * 0.788, gusset_y, 0.876)),
+            p1=transform_mirror_pt(-side * 0.032, -0.026, -0.032),
+            width_x=0.048,
+            depth_y=0.056,
+            taper=0.82,
             mat_idx=1,
             smooth=False,
         )
-        # 流線型エアロミラーハウジング（車体色、角の光点が出ないよう smooth=False）
-        x_in = side * 0.88
-        x_out = side * 1.01
+        add_cylinder(
+            bm,
+            center=transform_mirror_pt(-side * 0.032, -0.026, -0.038),
+            radius=0.024,
+            height=0.022,
+            segments=16,
+            axis="Z",
+            mat_idx=1,
+            smooth=True,
+        )
+
+        # local_x: 内側 (-side*0.086) 〜 外側 (+side*0.086)
+        in_x = -side * 0.086
+        out_x = side * 0.086
+
+        def make_housing_ring(
+            y_off: float,
+            scale_x: float,
+            scale_z: float,
+            z_shift: float = 0.0,
+            _in_x: float = in_x,
+            _out_x: float = out_x,
+            _side: float = side,
+            _transform_fn=transform_mirror_pt,
+        ):
+            # 8頂点（下内 → 下外 → 外下 → 外上 → 上外 → 上内（エアロフィン） → 内上 → 内下）
+            pts_local = [
+                (_in_x * 0.78 * scale_x, y_off, -0.046 * scale_z + z_shift),
+                (_out_x * 0.72 * scale_x, y_off, -0.042 * scale_z + z_shift),
+                (_out_x * 0.98 * scale_x, y_off, -0.015 * scale_z + z_shift),
+                (_out_x * 0.92 * scale_x, y_off, 0.030 * scale_z + z_shift),
+                (_out_x * 0.62 * scale_x, y_off, 0.050 * scale_z + z_shift),
+                (_in_x * 0.68 * scale_x, y_off, 0.054 * scale_z + z_shift),
+                (_in_x * 0.98 * scale_x, y_off, 0.026 * scale_z + z_shift),
+                (_in_x * 0.95 * scale_x, y_off, -0.020 * scale_z + z_shift),
+            ]
+            if _side < 0:
+                pts_local.reverse()
+            return [bm.verts.new(_transform_fn(px, py, pz)) for px, py, pz in pts_local]
+
+        # 3段ロフト: 後端バイザー縁 (y=+0.018) → 中間最大断面 (y=-0.022) → 前端エアロキャップ (y=-0.066)
+        ring_rear_outer = make_housing_ring(0.018, 1.00, 1.00, 0.0)
+        ring_mid = make_housing_ring(-0.022, 1.03, 1.02, -0.002)
+        ring_front = make_housing_ring(-0.066, 0.72, 0.68, -0.005)
+        # バイザー内側の凹みリム (y=+0.004)
+        ring_rear_inner = make_housing_ring(0.004, 0.88, 0.86, 0.0)
+
+        n_m = len(ring_rear_outer)
+        # 外周カウル（上半分は BodyPaint=0、下半分は BlackTrim=1）
+        for s_pair in [(ring_rear_outer, ring_mid), (ring_mid, ring_front)]:
+            r0, r1 = s_pair
+            for i in range(n_m):
+                ni = (i + 1) % n_m
+                f = bm.faces.new([r0[i], r0[ni], r1[ni], r1[i]])
+                avg_z = (r0[i].co.z + r0[ni].co.z + r1[ni].co.z + r1[i].co.z) * 0.25
+                f.material_index = 0 if avg_z >= pivot.z - 0.006 else 1
+                f.smooth = False
+
+        # 前端キャップを閉じる
+        f_cap = bm.faces.new(list(reversed(ring_front)))
+        f_cap.material_index = 0
+        f_cap.smooth = False
+
+        # 後端の黒いインナーバイザー縁（外周から凹みリムへ繋がるベゼル）
+        for i in range(n_m):
+            ni = (i + 1) % n_m
+            f_rim = bm.faces.new(
+                [
+                    ring_rear_inner[i],
+                    ring_rear_inner[ni],
+                    ring_rear_outer[ni],
+                    ring_rear_outer[i],
+                ]
+            )
+            f_rim.material_index = 1
+            f_rim.smooth = False
+
+        # インナーバイザー奥の背面プレート
+        f_back = bm.faces.new(ring_rear_inner)
+        f_back.material_index = 1
+        f_back.smooth = False
+
+        # ドアミラー前面〜外側面にはめ込まれたフラッシュマウントLEDウインカーレンズ（突起にならないようハウジング面に沿った8頂点ヘキサヘドロンで造形）
+        led_verts = [
+            transform_mirror_pt(out_x * 0.15, -0.067, -0.006),
+            transform_mirror_pt(out_x * 0.69, -0.066, -0.005),
+            transform_mirror_pt(out_x * 0.99, -0.023, -0.003),
+            transform_mirror_pt(out_x * 0.15, -0.056, -0.006),
+            transform_mirror_pt(out_x * 0.15, -0.067, 0.004),
+            transform_mirror_pt(out_x * 0.69, -0.066, 0.005),
+            transform_mirror_pt(out_x * 0.99, -0.023, 0.007),
+            transform_mirror_pt(out_x * 0.15, -0.056, 0.004),
+        ]
         if side < 0:
-            mirror_verts = [
-                Vector((x_out, -0.97, 0.90)),
-                Vector((x_in, -1.03, 0.90)),
-                Vector((x_in, -0.95, 0.90)),
-                Vector((x_out, -0.93, 0.90)),
-                Vector((x_out * 0.98, -0.97, 0.965)),
-                Vector((x_in, -1.02, 0.968)),
-                Vector((x_in, -0.95, 0.968)),
-                Vector((x_out * 0.98, -0.93, 0.965)),
+            led_verts = [
+                led_verts[1],
+                led_verts[0],
+                led_verts[3],
+                led_verts[2],
+                led_verts[5],
+                led_verts[4],
+                led_verts[7],
+                led_verts[6],
             ]
-        else:
-            mirror_verts = [
-                Vector((x_in, -1.03, 0.90)),
-                Vector((x_out, -0.97, 0.90)),
-                Vector((x_out, -0.93, 0.90)),
-                Vector((x_in, -0.95, 0.90)),
-                Vector((x_in, -1.02, 0.968)),
-                Vector((x_out * 0.98, -0.97, 0.965)),
-                Vector((x_out * 0.98, -0.93, 0.965)),
-                Vector((x_in, -0.95, 0.968)),
-            ]
-        add_hexahedron(bm, mirror_verts, mat_idx=0, smooth=False)
-        # ドライバー側（後方 +Y）を向いたブラックインナーベゼル＆防眩ミラーガラス面
-        add_box(
-            bm,
-            center=Vector((side * 0.945, -0.938, 0.934)),
-            size=Vector((0.125, 0.012, 0.062)),
-            mat_idx=1,
-            smooth=False,
-        )
-        add_box(
-            bm,
-            center=Vector((side * 0.945, -0.931, 0.934)),
-            size=Vector((0.112, 0.006, 0.050)),
-            mat_idx=8,  # MirrorGlass
-            smooth=False,
-        )
+        add_hexahedron(bm, led_verts, mat_idx=4, smooth=False)
 
     bm.normal_update()
     bm.to_mesh(mesh)
@@ -933,17 +1717,20 @@ def build_chassis(materials) -> bpy.types.Object:
 
 
 def build_interior(materials) -> bpy.types.Object:
-    """日本の右ハンドル（RHD: X = -0.38m）専用コックピット内装 (Interior) をモデリング
-    ドライバー視点カメラ (X=-0.38m, Y_blender=-0.06m, Z_blender=1.13m) から見て、
-    - ステアリングの奥に中空クロームリングの2連メーター（タコ＆スピード、赤い指針、シアン目盛り）
+    """日本の右ハンドル（RHD: X = -0.38m）専用 トヨタ クラウン セダン (AZSH32)「アイランドアーキテクチャー」内装 (Interior) をモデリング
+    ドライバー視点カメラ (X=-0.38m, Y_blender=-0.06m, Z_blender=1.13m) から見て:
+    - 運転席から助手席、左右ドアトリム、センターコンソール天板まで連続する大型杢目調「ウッディブラウン」パネル (`CrownWoodTrim`: 3D木目ノード)
+    - インパネ水平ライン・センターコンソール両脇・足元を彩る64色マルチカラーアンビエントイルミネーション (`AmbientStripLED`)
+    - 12.3インチ大型ワイド連装ディスプレイハウジング（メータークラスター＋センターナビ一体型パノラマベゼル）
     - ステアリングコラムの右側に JIS 規格のウインカーレバー、左側にワイパーレバー
-    - 左側（中央 X=0.0m）にベゼル付きカーナビ画面（ルート表示）、エアコン吹き出し口、ハザードボタン、シフトノブ、赤いスタートボタン
-    - 右側（X=-0.78m）にドア内張りトリム・アームレストが隙間なく繋がる本格日本車コックピット。
+    - センターコンソール（ストレート型エレクトロシフトマチックノブ、右ハンドル用エンジンスターターボタン、縦型2連カップホルダー）
+    - セミアニリン本革シボ＆パンチングレザーのコンフォートラグジュアリーシート＆ドアアームレスト (`InteriorSeat` / `InteriorDark`: 3D本革シボノード)
     """
     mesh = bpy.data.meshes.new("InteriorMesh")
     bm = bmesh.new()
 
-    # 0: InteriorDark, 1: InteriorSeat, 2: MeterBack, 3: DashboardScreen, 4: GaugeNeedleRed, 5: Chrome
+    # 0: InteriorDark, 1: InteriorSeat, 2: MeterBack, 3: DashboardScreen, 4: GaugeNeedleRed, 5: Chrome,
+    # 6: CrownWoodTrim, 7: AmbientStripLED, 8: AlcantaraTrim, 9: SaddleStitch, 10: SilverTrim
     mat_keys = [
         "InteriorDark",
         "InteriorSeat",
@@ -951,159 +1738,656 @@ def build_interior(materials) -> bpy.types.Object:
         "DashboardScreen",
         "GaugeNeedleRed",
         "Chrome",
+        "CrownWoodTrim",
+        "AmbientStripLED",
+        "AlcantaraTrim",
+        "SaddleStitch",
+        "SilverTrim",
     ]
 
-    # 0. キャビンフロア＆左右インナードアトリム・ドアアームレスト・ウインドウスイッチパネル
+    # 0. キャビンフロア＆左右インナードアトリム・杢目調ドアパネル・アンビエント照明・ドアアームレスト・Aピラー内張り
     add_box(bm, center=Vector((0.0, 0.25, 0.36)), size=Vector((1.58, 2.30, 0.08)), mat_idx=0)
     for side in [-1.0, 1.0]:
-        # ドア内張りロア〜アッパーパネル（ダッシュボード端 Y=-0.95 からリアまで隙間なく連続）
-        add_box(bm, center=Vector((side * 0.79, 0.05, 0.62)), size=Vector((0.11, 2.30, 0.46)), mat_idx=0, smooth=False)
-        # ドアショルダーパッド（ベルトライン Z=0.855：外装と段差なく接続）
-        add_box(bm, center=Vector((side * 0.78, -0.25, 0.855)), size=Vector((0.09, 1.75, 0.045)), mat_idx=1, smooth=False)
-        # ドアアームレスト＆シルバースイッチベゼル
-        add_box(bm, center=Vector((side * 0.73, -0.22, 0.71)), size=Vector((0.075, 0.58, 0.045)), mat_idx=1, smooth=False)
-        add_box(bm, center=Vector((side * 0.73, -0.38, 0.735)), size=Vector((0.045, 0.14, 0.012)), mat_idx=5, smooth=False)
-
-    # 1. 立体ダッシュボード本体 & カウルディープシェルフ（フロントガラス下端 Y=-1.26 まで隙間なく埋める）
-    add_box(bm, center=Vector((0.0, -0.96, 0.845)), size=Vector((1.54, 0.62, 0.06)), mat_idx=0, smooth=False)
-    add_box(bm, center=Vector((0.0, -0.76, 0.74)), size=Vector((1.54, 0.44, 0.24)), mat_idx=0, smooth=False)
-    # 助手席側（左側 X > 0）ダッシュボードソフトパッドトリム＆エアコンルーバー
-    add_box(bm, center=Vector((0.44, -0.63, 0.84)), size=Vector((0.52, 0.08, 0.07)), mat_idx=1, smooth=False)
-    add_box(bm, center=Vector((0.44, -0.588, 0.84)), size=Vector((0.48, 0.01, 0.012)), mat_idx=5, smooth=False)
-    add_box(bm, center=Vector((0.64, -0.62, 0.84)), size=Vector((0.11, 0.04, 0.048)), mat_idx=0, smooth=False)
-    # 右ハンドル運転席右端（X = -0.64m）のエアコン吹き出し口＆クロームフィン
-    add_box(bm, center=Vector((-0.63, -0.62, 0.86)), size=Vector((0.11, 0.04, 0.052)), mat_idx=0, smooth=False)
-    add_box(bm, center=Vector((-0.63, -0.598, 0.86)), size=Vector((0.09, 0.01, 0.010)), mat_idx=5, smooth=False)
-
-    # 2. 右ハンドル運転席 (X = -0.38m) 立体メーターフード（バイザー）＆中空リング2連メータークラスター
-    # メーターフード天板＆左右サイドバイザー（ステアリング上部開口から綺麗に見える高さ Z=1.00m）
-    add_box(bm, center=Vector((-0.38, -0.64, 1.002)), size=Vector((0.36, 0.18, 0.024)), mat_idx=0, smooth=False)
-    add_box(bm, center=Vector((-0.55, -0.64, 0.935)), size=Vector((0.024, 0.16, 0.13)), mat_idx=0, smooth=False)
-    add_box(bm, center=Vector((-0.21, -0.64, 0.935)), size=Vector((0.024, 0.16, 0.13)), mat_idx=0, smooth=False)
-
-    # メータークラスター背面ダークパネル（単なる青い箱にならないよう黒紺ベース `MeterBack` を使う）
-    add_box(bm, center=Vector((-0.38, -0.655, 0.935)), size=Vector((0.33, 0.018, 0.115)), mat_idx=2, smooth=False)
-
-    # 中央マルチインフォメーションディスプレイ（車速・ギア表示部のシャープなシアン発光アクセント）
-    add_box(bm, center=Vector((-0.38, -0.642, 0.945)), size=Vector((0.052, 0.008, 0.058)), mat_idx=3, smooth=False)
-    add_box(bm, center=Vector((-0.38, -0.639, 0.962)), size=Vector((0.038, 0.006, 0.012)), mat_idx=4, smooth=False)
-
-    # 左右2連メーター（右 X=-0.455m: タコメーター / 左 X=-0.305m: スピードメーター）
-    # ※中空リング `add_hollow_ring_y` を使うため、以前のように黒い円柱で画面を塞がない！
-    for idx, gauge_x in enumerate([-0.455, -0.305]):
-        # 中空クロームベゼルリング
-        add_hollow_ring_y(
-            bm,
-            center=Vector((gauge_x, -0.635, 0.935)),
-            r_outer=0.044,
-            r_inner=0.037,
-            depth_y=0.016,
-            segments=24,
-            mat_idx=5,
-            smooth=True,
-        )
-        # 内部のシアン発光スケールリング（中空リングの内側に細く光る目盛りリング）
-        add_hollow_ring_y(
-            bm,
-            center=Vector((gauge_x, -0.641, 0.935)),
-            r_outer=0.035,
-            r_inner=0.030,
-            depth_y=0.008,
-            segments=24,
-            mat_idx=3,
-            smooth=True,
-        )
-        # センターキャップ
-        add_cylinder(
-            bm,
-            center=Vector((gauge_x, -0.638, 0.935)),
-            radius=0.007,
-            height=0.010,
-            segments=12,
-            axis="Y",
-            mat_idx=5,
-            smooth=False,
-        )
-        # JDM スポーツレッド発光指針（タコメーターは右上斜め、スピードメーターは左上斜めを指す）
-        needle_dx = -0.018 if idx == 0 else 0.016
-        needle_dz = 0.020 if idx == 0 else 0.018
+        # Aピラー車内側アルカンターラ調（ウルトラスエード）内張り＆JBLツィーターグリル（外装Aピラー内面に一致させサイド窓視界を確保）
         add_slanted_strut(
             bm,
-            p0=Vector((gauge_x, -0.637, 0.935)),
-            p1=Vector((gauge_x + needle_dx, -0.637, 0.935 + needle_dz)),
-            width_x=0.004,
-            depth_y=0.005,
-            taper=0.5,
-            mat_idx=4,
+            p0=Vector((side * 0.715, -1.22, 0.87)),
+            p1=Vector((side * 0.628, -0.48, 1.38)),
+            width_x=0.044,
+            depth_y=0.062,
+            taper=0.84,
+            mat_idx=8,
+            smooth=True,
+        )
+        add_cylinder(
+            bm,
+            center=Vector((side * 0.692, -1.08, 0.95)),
+            radius=0.022,
+            height=0.012,
+            segments=16,
+            axis="X",
+            mat_idx=10,
+            smooth=True,
+        )
+        # ドア内張りロア〜アッパーパネル（ダッシュボード端 Y=-0.95 からリアまで隙間なく連続）
+        add_box(
+            bm,
+            center=Vector((side * 0.79, 0.05, 0.62)),
+            size=Vector((0.11, 2.30, 0.46)),
+            mat_idx=0,
+            smooth=False,
+        )
+        # ドアショルダーパッド（ベルトライン Z=0.855：外装と段差なく接続）＋サドルタン本革ステッチ
+        add_box(
+            bm,
+            center=Vector((side * 0.78, -0.25, 0.855)),
+            size=Vector((0.09, 1.75, 0.045)),
+            mat_idx=1,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((side * 0.734, -0.25, 0.868)),
+            size=Vector((0.005, 1.68, 0.004)),
+            mat_idx=9,
+            smooth=False,
+        )
+        # クラウン アイランドアーキテクチャー：ドアトリム上部を走る大型杢目調（ウッディブラウン）加飾パネル＋サテンシルバーモール＋アンビエントLED
+        add_box(
+            bm,
+            center=Vector((side * 0.742, -0.24, 0.802)),
+            size=Vector((0.036, 1.42, 0.052)),
+            mat_idx=6,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((side * 0.732, -0.24, 0.774)),
+            size=Vector((0.022, 1.40, 0.006)),
+            mat_idx=10,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((side * 0.730, -0.24, 0.768)),
+            size=Vector((0.018, 1.36, 0.005)),
+            mat_idx=7,
+            smooth=False,
+        )
+        # ドアアームレスト＆サドルタンステッチ＆シルバースイッチベゼル＆インサイドドアハンドル
+        add_box(
+            bm,
+            center=Vector((side * 0.73, -0.22, 0.71)),
+            size=Vector((0.075, 0.58, 0.045)),
+            mat_idx=1,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((side * 0.692, -0.22, 0.732)),
+            size=Vector((0.004, 0.54, 0.004)),
+            mat_idx=9,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((side * 0.73, -0.38, 0.735)),
+            size=Vector((0.045, 0.14, 0.012)),
+            mat_idx=10,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((side * 0.728, -0.44, 0.795)),
+            size=Vector((0.018, 0.095, 0.020)),
+            mat_idx=10,
             smooth=False,
         )
 
-    # 3. ステアリングコラム＆日本車（JIS規格・右ハンドル）専用の右ウインカーレバー・左ワイパーレバー
-    add_box(bm, center=Vector((-0.38, -0.53, 0.885)), size=Vector((0.10, 0.18, 0.075)), mat_idx=0, smooth=False)
-    # 右ウインカーレバー（日本の右ハンドル車はステアリングコラム右側 X = -0.43..-0.54m にウインカーレバーがある！）
-    add_slanted_strut(
+    # 1. 立体ダッシュボード本体 & カウルディープシェルフ（フロントガラス下端 Y=-1.26 まで隙間なく埋める）
+    add_box(
         bm,
-        p0=Vector((-0.42, -0.50, 0.895)),
-        p1=Vector((-0.535, -0.48, 0.925)),
-        width_x=0.016,
-        depth_y=0.016,
-        taper=1.15,
+        center=Vector((0.0, -0.96, 0.845)),
+        size=Vector((1.54, 0.62, 0.06)),
         mat_idx=0,
         smooth=False,
     )
-    add_box(bm, center=Vector((-0.542, -0.48, 0.927)), size=Vector((0.022, 0.018, 0.018)), mat_idx=5, smooth=False)
-
-    # 左ワイパーレバー（日本の右ハンドル車はステアリングコラム左側 X = -0.33..-0.22m にワイパーレバーがある！）
-    add_slanted_strut(
+    add_box(
         bm,
-        p0=Vector((-0.34, -0.50, 0.895)),
-        p1=Vector((-0.225, -0.48, 0.925)),
-        width_x=0.016,
-        depth_y=0.016,
-        taper=1.15,
+        center=Vector((0.0, -0.76, 0.74)),
+        size=Vector((1.54, 0.44, 0.24)),
         mat_idx=0,
         smooth=False,
     )
-    add_box(bm, center=Vector((-0.218, -0.48, 0.927)), size=Vector((0.022, 0.018, 0.018)), mat_idx=5, smooth=False)
+    # ダッシュボード天面手前のサドルタン（カッパーブラウン）本革ダブルステッチライン
+    add_box(
+        bm,
+        center=Vector((0.0, -0.665, 0.876)),
+        size=Vector((1.48, 0.005, 0.004)),
+        mat_idx=9,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((0.0, -0.674, 0.876)),
+        size=Vector((1.48, 0.004, 0.003)),
+        mat_idx=9,
+        smooth=False,
+    )
+    # 右ハンドル運転席前方のカラーヘッドアップディスプレイ（HUD）投影開口リセス＆サテンベゼル
+    add_box(
+        bm,
+        center=Vector((-0.38, -0.85, 0.874)),
+        size=Vector((0.23, 0.13, 0.008)),
+        mat_idx=10,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.38, -0.85, 0.877)),
+        size=Vector((0.20, 0.10, 0.006)),
+        mat_idx=2,
+        smooth=False,
+    )
+    # ダッシュボード中央奥の JBL プレミアムサウンド センタースピーカーグリル
+    add_box(
+        bm,
+        center=Vector((0.0, -0.88, 0.876)),
+        size=Vector((0.26, 0.12, 0.006)),
+        mat_idx=10,
+        smooth=False,
+    )
 
-    # 4. センターコンソールエアコン吹き出し口＆ハザードスイッチ台座（上部のフローティング11インチナビ画面は Three.js CanvasTexture 側で高精細描画）
-    add_box(bm, center=Vector((-0.135, -0.60, 0.855)), size=Vector((0.20, 0.04, 0.036)), mat_idx=0, smooth=False)
-    add_box(bm, center=Vector((-0.135, -0.58, 0.855)), size=Vector((0.024, 0.008, 0.020)), mat_idx=4, smooth=False)
+    # クラウン セダン象徴の「アイランドアーキテクチャー」水平大型杢目調（ウッディブラウン）インパネオーナメントパネル
+    # 助手席端 (X=+0.72) からセンター〜運転席端 (X=-0.72) まで水平に貫く立体木目パネル
+    add_box(
+        bm,
+        center=Vector((0.18, -0.615, 0.838)),
+        size=Vector((1.08, 0.075, 0.068)),
+        mat_idx=6,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.60, -0.615, 0.842)),
+        size=Vector((0.24, 0.070, 0.062)),
+        mat_idx=6,
+        smooth=False,
+    )
+    # 杢目パネル上下のサテンシルバーヘアライン加飾モール
+    add_box(
+        bm,
+        center=Vector((0.0, -0.576, 0.873)),
+        size=Vector((1.44, 0.014, 0.007)),
+        mat_idx=10,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((0.0, -0.576, 0.804)),
+        size=Vector((1.44, 0.014, 0.007)),
+        mat_idx=10,
+        smooth=False,
+    )
+    # インパネ水平アンビエントイルミネーションLEDライン（杢目パネル直下を温かく照らす一文字間接照明）
+    add_box(
+        bm,
+        center=Vector((0.0, -0.578, 0.797)),
+        size=Vector((1.42, 0.010, 0.006)),
+        mat_idx=7,
+        smooth=False,
+    )
 
-    # センターコンソールトンネル＆シフトゲート＆右ハンドル車配置のシフトノブ・赤いエンジンスターターボタン
-    add_box(bm, center=Vector((0.0, -0.05, 0.52)), size=Vector((0.28, 1.18, 0.28)), mat_idx=0, smooth=False)
-    add_box(bm, center=Vector((0.0, -0.32, 0.665)), size=Vector((0.22, 0.36, 0.02)), mat_idx=5, smooth=False)
-    # シフトブーツ＆シフトノブ（右ハンドル運転席側 X = -0.045m に寄せて配置）
-    add_box(bm, center=Vector((-0.045, -0.28, 0.69)), size=Vector((0.075, 0.095, 0.045)), mat_idx=1, smooth=False)
-    add_box(bm, center=Vector((-0.045, -0.28, 0.735)), size=Vector((0.042, 0.055, 0.055)), mat_idx=5, smooth=False)
-    # 右ハンドル運転席側の赤い ENGINE START/STOP ボタン (X = -0.11m)
+    # 助手席側エアコンルーバー＆右ハンドル運転席右端（X = -0.63m）のエアコン吹き出し口＆クロームノブ
+    add_box(
+        bm,
+        center=Vector((0.46, -0.574, 0.838)),
+        size=Vector((0.36, 0.012, 0.022)),
+        mat_idx=0,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((0.46, -0.570, 0.838)),
+        size=Vector((0.34, 0.008, 0.005)),
+        mat_idx=10,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.63, -0.578, 0.855)),
+        size=Vector((0.11, 0.036, 0.044)),
+        mat_idx=0,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.63, -0.562, 0.855)),
+        size=Vector((0.09, 0.008, 0.008)),
+        mat_idx=10,
+        smooth=False,
+    )
+
+    # 2. クラウン 12.3インチ連装パノラミック・ディスプレイゾーン（右ハンドル運転席メーターフード＋一体型ナビマウント架台）
+    # Why Three.js の instrumentClusterGroup / centerNavGroup / steeringColumn / electroShifterGroup と重複させないか:
+    # Three.js 側でリアルタイム CanvasTexture と可動3Dメッシュ（指針・ウインカー/ワイパーレバー・電子シフトノブ・11インチチルトナビ）を
+    # this.group に直接追加しているため、GLB 側に同位置の静的メーターリング・静的レバー・固定シフトノブ・ナビ領域を横切る平板壁を
+    # 残すと、3D空間で二重メッシュが交差・貫通して「車内に何か埋まっている」状態になるため。
+    # また、GLB の SteeringLeather マテリアル等に発光する静的な針を一切含めず、メーター指針は Three.js の可動 3D 指針
+    # (SpeedometerNeedlePivot / TachometerNeedlePivot) のみとする。
+    # メーターフード天板＆左右サイドバイザー（ステアリング上部開口から綺麗に見える高さ Z=1.018m）
+    add_box(
+        bm,
+        center=Vector((-0.38, -0.64, 1.018)),
+        size=Vector((0.38, 0.18, 0.024)),
+        mat_idx=0,
+        smooth=False,
+    )
+    # メーターフード内側の反射防止アルカンターラ調（ウルトラスエード）内張り＆前縁サドルタンステッチ
+    add_box(
+        bm,
+        center=Vector((-0.38, -0.635, 1.005)),
+        size=Vector((0.36, 0.16, 0.005)),
+        mat_idx=8,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.38, -0.551, 1.029)),
+        size=Vector((0.37, 0.005, 0.004)),
+        mat_idx=9,
+        smooth=False,
+    )
+    # メーターフード右側サイドバイザー壁 (X=-0.56m)
+    add_box(
+        bm,
+        center=Vector((-0.56, -0.64, 0.946)),
+        size=Vector((0.024, 0.16, 0.135)),
+        mat_idx=0,
+        smooth=False,
+    )
+    # 運転席メータークラスター背面ハウジング壁（Three.js の instrumentClusterGroup z=0.625, y=0.952 の後方 Y_b=-0.658 に配置）
+    add_box(
+        bm,
+        center=Vector((-0.38, -0.658, 0.948)),
+        size=Vector((0.36, 0.020, 0.126)),
+        mat_idx=0,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.38, -0.646, 1.010)),
+        size=Vector((0.36, 0.012, 0.006)),
+        mat_idx=10,
+        smooth=False,
+    )
+    # センターナビ背面ダッシュボードマウント架台（Three.js の centerNavGroup (x=-0.132, y=0.955, z=0.585) の背面を隙間なく支える台座）
+    add_box(
+        bm,
+        center=Vector((-0.132, -0.625, 0.910)),
+        size=Vector((0.14, 0.052, 0.088)),
+        mat_idx=0,
+        smooth=False,
+    )
+
+    # 3. ステアリングコラム奥側マウントベース＆レザーコラムブーツ（20°傾斜シャフト軸 Z = 0.888 - (|Y| - 0.440) * tan(20°) に 1mm 単位で同軸配置）
+    add_box(
+        bm,
+        center=Vector((-0.38, -0.585, 0.835)),
+        size=Vector((0.092, 0.085, 0.068)),
+        mat_idx=0,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.38, -0.625, 0.823)),
+        size=Vector((0.112, 0.048, 0.078)),
+        mat_idx=0,
+        smooth=False,
+    )
+    # 運転席・助手席インパネロア・ニーボルスター（膝当てソフトパッド）＆ステアリング下部アンダーカバー
+    # ステアリングホイール下縁 (Y=-0.44, Z=0.718m) より奥 (Y=-0.64m)・下 (Z=0.56..0.78m) に引き込み、ハンドル360度全周と干渉しない設計
+    add_box(
+        bm,
+        center=Vector((-0.44, -0.66, 0.67)),
+        size=Vector((0.52, 0.14, 0.22)),
+        mat_idx=1,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((0.44, -0.66, 0.67)),
+        size=Vector((0.52, 0.14, 0.22)),
+        mat_idx=1,
+        smooth=False,
+    )
+    # 助手席グローブボックスのリッドライン＆サテンシルバーハンドル
+    add_box(
+        bm,
+        center=Vector((0.44, -0.588, 0.72)),
+        size=Vector((0.44, 0.008, 0.006)),
+        mat_idx=10,
+        smooth=False,
+    )
+    # 右ハンドル運転席フットウェル：クラウン専用フロアマット＆アルミスポーツペダル（オルガン式アクセル・ワイドブレーキ・フットレスト）
+    add_box(
+        bm,
+        center=Vector((-0.40, -0.36, 0.404)),
+        size=Vector((0.46, 0.56, 0.010)),
+        mat_idx=8,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.40, -0.50, 0.410)),
+        size=Vector((0.18, 0.12, 0.004)),
+        mat_idx=10,
+        smooth=False,
+    )
+    # オルガン式アクセルペダル (右側 X = -0.25m)
+    add_slanted_strut(
+        bm,
+        p0=Vector((-0.25, -0.73, 0.41)),
+        p1=Vector((-0.25, -0.81, 0.55)),
+        width_x=0.046,
+        depth_y=0.014,
+        taper=0.92,
+        mat_idx=10,
+        smooth=False,
+    )
+    # ワイドブレーキペダル＆ペダルアーム (中央 X = -0.38m)
+    add_slanted_strut(
+        bm,
+        p0=Vector((-0.38, -0.78, 0.62)),
+        p1=Vector((-0.38, -0.73, 0.49)),
+        width_x=0.018,
+        depth_y=0.018,
+        taper=1.0,
+        mat_idx=0,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.38, -0.72, 0.485)),
+        size=Vector((0.092, 0.018, 0.056)),
+        mat_idx=10,
+        smooth=False,
+    )
+    # 左足アルミフットレスト / デッドペダル (左側 X = -0.53m)
+    add_slanted_strut(
+        bm,
+        p0=Vector((-0.53, -0.72, 0.41)),
+        p1=Vector((-0.53, -0.82, 0.54)),
+        width_x=0.068,
+        depth_y=0.014,
+        taper=0.95,
+        mat_idx=10,
+        smooth=False,
+    )
+
+    # 4. センターダッシュロア・オートエアコン操作パネル（Three.js 側 centerNavGroup 下部ルーバー Z=0.923 のすぐ下に連なるピアノブラック操作部）
+    add_box(
+        bm,
+        center=Vector((-0.11, -0.578, 0.838)),
+        size=Vector((0.24, 0.028, 0.038)),
+        mat_idx=0,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.11, -0.563, 0.838)),
+        size=Vector((0.20, 0.006, 0.008)),
+        mat_idx=5,
+        smooth=False,
+    )
+
+    # 5. クラウン セダン ハイデッキ・センターコンソール（大型杢目調天板＋アンビエント照明＋エレクトロシフトマチック）
+    # センターコンソールロアボディ（セミアニリン本革サイドパッド）
+    add_box(
+        bm,
+        center=Vector((0.0, -0.05, 0.53)),
+        size=Vector((0.30, 1.18, 0.30)),
+        mat_idx=1,
+        smooth=False,
+    )
+    # センターコンソール天板の大型杢目調（ウッディブラウン）パネル (`CrownWoodTrim`)
+    add_box(
+        bm,
+        center=Vector((0.0, -0.24, 0.688)),
+        size=Vector((0.26, 0.62, 0.024)),
+        mat_idx=6,
+        smooth=False,
+    )
+    # コンソール左右エッジのサテンシルバーモール＆サドルタン本革ステッチ＆アンビエント照明ライン
+    for side in [-1.0, 1.0]:
+        add_box(
+            bm,
+            center=Vector((side * 0.132, -0.24, 0.692)),
+            size=Vector((0.008, 0.60, 0.012)),
+            mat_idx=10,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((side * 0.145, -0.05, 0.682)),
+            size=Vector((0.004, 1.12, 0.004)),
+            mat_idx=9,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((side * 0.138, -0.24, 0.678)),
+            size=Vector((0.006, 0.58, 0.006)),
+            mat_idx=7,
+            smooth=False,
+        )
+    # センターコンソール後方の大型本革アームレストボックス＆サドルタンステッチ
+    add_box(
+        bm,
+        center=Vector((0.0, 0.28, 0.725)),
+        size=Vector((0.27, 0.44, 0.085)),
+        mat_idx=1,
+        smooth=True,
+    )
+    for side in [-1.0, 1.0]:
+        add_box(
+            bm,
+            center=Vector((side * 0.122, 0.28, 0.768)),
+            size=Vector((0.004, 0.41, 0.004)),
+            mat_idx=9,
+            smooth=False,
+        )
+
+    # クラウン純正ストレート型エレクトロシフトマチック台座（可動シフトノブ本体は Three.js 側 createElectroShifterAssembly で精密描画）
+    add_box(
+        bm,
+        center=Vector((-0.055, -0.28, 0.704)),
+        size=Vector((0.072, 0.110, 0.012)),
+        mat_idx=0,
+        smooth=False,
+    )
+
+    # 助手席寄り縦型2連カップホルダーリング (X = +0.055m)
+    for cup_y in [-0.22, -0.34]:
+        add_hollow_ring_y(
+            bm,
+            center=Vector((0.055, cup_y, 0.702)),
+            r_outer=0.036,
+            r_inner=0.030,
+            depth_y=0.012,
+            segments=16,
+            mat_idx=5,
+            smooth=True,
+        )
+
+    # 右ハンドル運転席側の POWER / ENGINE START STOP ボタン (X = -0.18m, インパネロア)
     add_cylinder(
         bm,
-        center=Vector((-0.105, -0.38, 0.678)),
+        center=Vector((-0.205, -0.575, 0.838)),
         radius=0.014,
         height=0.010,
         segments=16,
-        axis="Z",
+        axis="Y",
+        mat_idx=5,
+        smooth=False,
+    )
+    add_cylinder(
+        bm,
+        center=Vector((-0.205, -0.570, 0.838)),
+        radius=0.010,
+        height=0.008,
+        segments=16,
+        axis="Y",
         mat_idx=4,
         smooth=False,
     )
 
-    # 5. スリムなフレームレス風ルームミラー（フロントガラス上端中央 Y=-0.46, Z=1.34）
-    add_box(bm, center=Vector((0.0, -0.46, 1.37)), size=Vector((0.016, 0.025, 0.055)), mat_idx=0)
-    add_box(bm, center=Vector((0.0, -0.44, 1.335)), size=Vector((0.20, 0.020, 0.046)), mat_idx=0, smooth=False)
-
-    # 6. スポーツバケットシート（右ハンドル運転席: X=-0.38, 助手席: X=+0.38）
+    # 6. クラウン セミアニリン本革エグゼクティブシート（右ハンドル運転席: X=-0.38, 助手席: X=+0.38）
     for seat_x in [-0.38, 0.38]:
-        add_box(bm, center=Vector((seat_x, 0.18, 0.44)), size=Vector((0.48, 0.52, 0.16)), mat_idx=1, smooth=True)
-        add_box(bm, center=Vector((seat_x, 0.42, 0.76)), size=Vector((0.46, 0.12, 0.52)), mat_idx=1, smooth=True)
-        add_box(bm, center=Vector((seat_x - 0.21, 0.38, 0.74)), size=Vector((0.06, 0.16, 0.46)), mat_idx=1, smooth=True)
-        add_box(bm, center=Vector((seat_x + 0.21, 0.38, 0.74)), size=Vector((0.06, 0.16, 0.46)), mat_idx=1, smooth=True)
-        add_box(bm, center=Vector((seat_x, 0.45, 1.08)), size=Vector((0.22, 0.09, 0.16)), mat_idx=1, smooth=True)
+        add_box(
+            bm,
+            center=Vector((seat_x, 0.18, 0.44)),
+            size=Vector((0.50, 0.52, 0.16)),
+            mat_idx=1,
+            smooth=True,
+        )
+        add_box(
+            bm,
+            center=Vector((seat_x, 0.42, 0.76)),
+            size=Vector((0.48, 0.13, 0.52)),
+            mat_idx=1,
+            smooth=True,
+        )
+        add_box(
+            bm,
+            center=Vector((seat_x - 0.22, 0.38, 0.74)),
+            size=Vector((0.065, 0.16, 0.46)),
+            mat_idx=1,
+            smooth=True,
+        )
+        add_box(
+            bm,
+            center=Vector((seat_x + 0.22, 0.38, 0.74)),
+            size=Vector((0.065, 0.16, 0.46)),
+            mat_idx=1,
+            smooth=True,
+        )
+        # シートショルダーの杢目調＆シルバー加飾（クラウン セダンの特徴）
+        add_box(
+            bm,
+            center=Vector((seat_x, 0.41, 0.98)),
+            size=Vector((0.32, 0.135, 0.028)),
+            mat_idx=6,
+            smooth=False,
+        )
+        add_box(
+            bm,
+            center=Vector((seat_x, 0.45, 1.09)),
+            size=Vector((0.24, 0.10, 0.17)),
+            mat_idx=1,
+            smooth=True,
+        )
 
-    # 7. リアシート＆リアパーセルシェルフ
-    add_box(bm, center=Vector((0.0, 1.05, 0.46)), size=Vector((1.38, 0.50, 0.20)), mat_idx=1, smooth=True)
-    add_box(bm, center=Vector((0.0, 1.28, 0.74)), size=Vector((1.36, 0.14, 0.46)), mat_idx=1, smooth=True)
+    # 7. リアVIPエグゼクティブシート＆センターアームレスト＆リアパーセルシェルフ
+    add_box(
+        bm,
+        center=Vector((0.0, 1.05, 0.46)),
+        size=Vector((1.38, 0.50, 0.20)),
+        mat_idx=1,
+        smooth=True,
+    )
+    add_box(
+        bm,
+        center=Vector((0.0, 1.28, 0.74)),
+        size=Vector((1.36, 0.14, 0.46)),
+        mat_idx=1,
+        smooth=True,
+    )
+    add_box(
+        bm,
+        center=Vector((0.0, 1.08, 0.62)),
+        size=Vector((0.26, 0.42, 0.12)),
+        mat_idx=6,
+        smooth=False,
+    )
     add_box(bm, center=Vector((0.0, 1.52, 0.86)), size=Vector((1.34, 0.42, 0.06)), mat_idx=0)
+
+    # 8. フロントルーフヘッダー・アルカンターラ調（ウルトラスエード）天井ヘッドライナー・オーバーヘッドコンソール＆左右サンバイザー
+    # フロントガラス上端 (v=1.0: Y=-0.480..-0.532m, Z=1.420m) と外装ルーフ前端 (Y=-0.532..-0.500m, Z=1.394..1.430m) および
+    # 左右Aピラー内張り上端 (X=±0.628m, Y=-0.480m, Z=1.380m) を 0.0mm ギャップで完全に結合し、ルームミラー上方の空隙を根絶する
+    header_front_arch = [
+        Vector((-0.650, -0.495, 1.376)),
+        Vector((-0.280, -0.545, 1.382)),
+        Vector((0.280, -0.545, 1.382)),
+        Vector((0.650, -0.495, 1.376)),
+        Vector((-0.660, -0.480, 1.404)),
+        Vector((-0.280, -0.532, 1.422)),
+        Vector((0.280, -0.532, 1.422)),
+        Vector((0.660, -0.480, 1.404)),
+    ]
+    add_hexahedron(bm, header_front_arch, mat_idx=8, smooth=True)
+
+    header_rear_arch = [
+        Vector((-0.650, -0.320, 1.382)),
+        Vector((-0.280, -0.320, 1.392)),
+        Vector((0.280, -0.320, 1.392)),
+        Vector((0.650, -0.320, 1.382)),
+        Vector((-0.650, -0.495, 1.376)),
+        Vector((-0.280, -0.545, 1.382)),
+        Vector((0.280, -0.545, 1.382)),
+        Vector((0.650, -0.495, 1.376)),
+    ]
+    add_hexahedron(bm, header_rear_arch, mat_idx=8, smooth=True)
+
+    # センターオーバーヘッドコンソール（SOSヘルプネット・ルームランプベゼル・サテンシルバーベゼル）
+    # ルーフヘッダー内面 (Z=1.378..1.416m) にフラットに埋め込み、ドライバーの前方視界上端に垂れ下がらない実車準拠のロープロファイル形状にする
+    overhead_console_verts = [
+        Vector((-0.145, -0.585, 1.378)),
+        Vector((0.145, -0.585, 1.378)),
+        Vector((0.155, -0.415, 1.380)),
+        Vector((-0.155, -0.415, 1.380)),
+        Vector((-0.150, -0.545, 1.416)),
+        Vector((0.150, -0.545, 1.416)),
+        Vector((0.160, -0.415, 1.414)),
+        Vector((-0.160, -0.415, 1.414)),
+    ]
+    add_hexahedron(bm, overhead_console_verts, mat_idx=0, smooth=False)
+    add_box(
+        bm,
+        center=Vector((0.0, -0.495, 1.378)),
+        size=Vector((0.180, 0.110, 0.004)),
+        mat_idx=0,
+        smooth=False,
+    )
+    # 左右の超小型ピンスポットLED読書灯レンズ（走行中に視界を邪魔しないダークベゼル収まり）
+    for lamp_sx in (-0.045, 0.045):
+        add_box(
+            bm,
+            center=Vector((lamp_sx, -0.495, 1.3755)),
+            size=Vector((0.018, 0.012, 0.002)),
+            mat_idx=10,
+            smooth=False,
+        )
+
+    # 左右サンバイザー（アルカンターラ調ファブリック＆バニティミラーカバー：ルーフヘッダー下面に密着収納）
+    for visor_side, visor_cx in [(-1.0, -0.395), (1.0, 0.395)]:
+        add_box(
+            bm,
+            center=Vector((visor_cx, -0.465, 1.374)),
+            size=Vector((0.350, 0.135, 0.016)),
+            mat_idx=8,
+            smooth=True,
+        )
+        add_cylinder(
+            bm,
+            center=Vector((visor_cx + visor_side * 0.155, -0.515, 1.380)),
+            radius=0.009,
+            height=0.022,
+            segments=12,
+            axis="Z",
+            mat_idx=10,
+            smooth=True,
+        )
 
     bm.normal_update()
     bm.to_mesh(mesh)
@@ -1118,24 +2402,25 @@ def build_interior(materials) -> bpy.types.Object:
 
 
 def build_steering_wheel(materials) -> bpy.types.Object:
-    """実寸 360mm (外径 0.36m) ステアリングホイール (SteeringWheel) を右ハンドル運転席 (X=-0.38m) にモデリング"""
+    """実寸 360mm (外径 0.36m) トヨタ クラウン 3本スポーク本革ステアリングホイール (SteeringWheel) を右ハンドル運転席 (X=-0.38m) にモデリング
+    中央ホーンパッドには伝統の立体『王冠（Crown）エンブレム』を配置。
+    """
     mesh = bpy.data.meshes.new("SteeringWheelMesh")
     bm = bmesh.new()
 
-    mat_keys = ["SteeringLeather", "Chrome", "GaugeNeedleRed"]
+    # 0: SteeringLeather, 1: Chrome, 2: BlackTrim, 3: CrownWoodTrim
+    mat_keys = ["SteeringLeather", "Chrome", "BlackTrim", "CrownWoodTrim"]
 
     center_r = 0.164
-    tube_r = 0.016
-    segs = 32
-    tube_segs = 10
+    tube_r = 0.0165
+    segs = 36
+    tube_segs = 12
 
     ring_loops = []
     for i in range(segs):
         theta = (2.0 * math.pi * i) / segs
         cx = math.cos(theta) * center_r
         cz = math.sin(theta) * center_r
-        if cz < -center_r * 0.80:
-            cz = -center_r * 0.80
 
         radial = Vector((math.cos(theta), 0.0, math.sin(theta))).normalized()
         loop_verts = []
@@ -1149,19 +2434,124 @@ def build_steering_wheel(materials) -> bpy.types.Object:
         ni = (i + 1) % segs
         for j in range(tube_segs):
             nj = (j + 1) % tube_segs
-            f = bm.faces.new([ring_loops[i][j], ring_loops[i][nj], ring_loops[ni][nj], ring_loops[ni][j]])
-            f.material_index = 0
+            f = bm.faces.new(
+                [
+                    ring_loops[i][j],
+                    ring_loops[i][nj],
+                    ring_loops[ni][nj],
+                    ring_loops[ni][j],
+                ]
+            )
+            # 上部・下部はウッディブラウン本杢目コンビステアリング仕様 (mat_idx=3)、左右グリップは本革 (mat_idx=0)
+            theta_deg = (360.0 * i) / segs
+            is_wood_arc = (45.0 <= theta_deg <= 135.0) or (235.0 <= theta_deg <= 305.0)
+            f.material_index = 3 if is_wood_arc else 0
             f.smooth = True
 
-    add_cylinder(bm, center=Vector((0.0, 0.0, 0.0)), radius=0.058, height=0.034, segments=20, axis="Y", mat_idx=0, smooth=True)
-    add_cylinder(bm, center=Vector((0.0, 0.018, 0.0)), radius=0.024, height=0.008, segments=16, axis="Y", mat_idx=1, smooth=True)
+    # ステアリング中央ホーンパッド（本革）＆サテンシルバーリング
+    add_cylinder(
+        bm,
+        center=Vector((0.0, 0.0, 0.0)),
+        radius=0.060,
+        height=0.034,
+        segments=24,
+        axis="Y",
+        mat_idx=0,
+        smooth=True,
+    )
+    add_hollow_ring_y(
+        bm,
+        center=Vector((0.0, 0.017, 0.0)),
+        r_outer=0.032,
+        r_inner=0.028,
+        depth_y=0.004,
+        segments=20,
+        mat_idx=1,
+        smooth=True,
+    )
 
-    # 3本メタリックスポーク + パドルシフト
-    add_box(bm, center=Vector((-0.10, 0.0, -0.008)), size=Vector((0.10, 0.016, 0.026)), mat_idx=1, smooth=False)
-    add_box(bm, center=Vector((0.10, 0.0, -0.008)), size=Vector((0.10, 0.016, 0.026)), mat_idx=1, smooth=False)
-    add_box(bm, center=Vector((0.0, 0.0, -0.082)), size=Vector((0.030, 0.016, 0.09)), mat_idx=1, smooth=False)
-    add_box(bm, center=Vector((-0.115, -0.028, 0.025)), size=Vector((0.018, 0.008, 0.075)), mat_idx=1, smooth=False)
-    add_box(bm, center=Vector((0.115, -0.028, 0.025)), size=Vector((0.018, 0.008, 0.075)), mat_idx=1, smooth=False)
+    # ホーンパッド中央の立体「王冠（Crown）エンブレム」（ドライバー側 +Y 向き）
+    add_crown_emblem(
+        bm,
+        center=Vector((0.0, 0.016, 0.0)),
+        scale=0.68,
+        axis_y_dir=1.0,
+        mat_chrome=1,
+        mat_back=-1,
+    )
+
+    # 3本スポーク（左右マルチファンクションスイッチ＋サテンシルバー加飾＋下部スポーク）
+    add_box(
+        bm,
+        center=Vector((-0.098, 0.0, -0.008)),
+        size=Vector((0.095, 0.018, 0.034)),
+        mat_idx=0,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((0.098, 0.0, -0.008)),
+        size=Vector((0.095, 0.018, 0.034)),
+        mat_idx=0,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.095, 0.010, -0.008)),
+        size=Vector((0.068, 0.006, 0.024)),
+        mat_idx=2,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((0.095, 0.010, -0.008)),
+        size=Vector((0.068, 0.006, 0.024)),
+        mat_idx=2,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((-0.098, 0.009, -0.022)),
+        size=Vector((0.088, 0.005, 0.006)),
+        mat_idx=1,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((0.098, 0.009, -0.022)),
+        size=Vector((0.088, 0.005, 0.006)),
+        mat_idx=1,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((0.0, 0.0, -0.092)),
+        size=Vector((0.042, 0.018, 0.095)),
+        mat_idx=1,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((0.0, 0.008, -0.092)),
+        size=Vector((0.022, 0.006, 0.082)),
+        mat_idx=2,
+        smooth=False,
+    )
+    # パドルシフト
+    add_box(
+        bm,
+        center=Vector((-0.115, -0.028, 0.025)),
+        size=Vector((0.018, 0.008, 0.070)),
+        mat_idx=1,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=Vector((0.115, -0.028, 0.025)),
+        size=Vector((0.018, 0.008, 0.070)),
+        mat_idx=1,
+        smooth=False,
+    )
 
     bm.normal_update()
     bm.to_mesh(mesh)
@@ -1171,7 +2561,7 @@ def build_steering_wheel(materials) -> bpy.types.Object:
     for k in mat_keys:
         obj.data.materials.append(materials[k])
 
-    obj.location = Vector((-0.38, -0.44, 0.90))
+    obj.location = Vector((-0.38, -0.44, 0.888))
     obj.rotation_euler = Euler((math.radians(20), 0, 0), "XYZ")
 
     bpy.context.scene.collection.objects.link(obj)
@@ -1241,7 +2631,185 @@ def build_windshield(materials) -> bpy.types.Object:
     return obj
 
 
-def build_wiper(materials, name_suffix: str, pivot_loc: Vector, pivot_rot: Euler, parent_root: bpy.types.Object):
+def build_side_windows(materials) -> bpy.types.Object:
+    """クラウン セダン (AZSH32) の左右6ライトサイドガラス（フロントドア窓・リアドア窓・リアクォーター窓）を3D曲面モデリングしUV展開を行う"""
+    mesh = bpy.data.meshes.new("SideWindowsMesh")
+    bm = bmesh.new()
+
+    # 各ウィンドウパネル定義:
+    # (u0_bot, u1_bot, u0_top, u1_top, top_arch_z, top_arch_x, u_segs, v_segs)
+    panels = [
+        # 1. フロントドアガラス（Aピラー〜Bピラー）
+        (
+            (0.742, -1.24, 0.862),
+            (0.798, 0.155, 0.858),
+            (0.658, -0.48, 1.400),
+            (0.674, 0.195, 1.432),
+            0.012,
+            0.010,
+            14,
+            10,
+        ),
+        # 2. リアドアガラス（Bピラー〜6ライトディバイダーバー）
+        (
+            (0.798, 0.165, 0.858),
+            (0.780, 0.915, 0.870),
+            (0.674, 0.205, 1.432),
+            (0.642, 0.715, 1.362),
+            0.014,
+            0.006,
+            12,
+            10,
+        ),
+        # 3. 6ライトリアクォーターガラス（ディバイダーバー〜ファストバックCピラー）
+        (
+            (0.780, 0.925, 0.870),
+            (0.758, 1.665, 0.890),
+            (0.642, 0.725, 1.362),
+            (0.756, 1.655, 0.902),
+            0.000,
+            0.000,
+            10,
+            8,
+        ),
+    ]
+
+    for side in [-1.0, 1.0]:
+        for b0, b1, t0, t1, arch_z, arch_x, u_segs, v_segs in panels:
+            grid = []
+            for vi in range(v_segs + 1):
+                v_ratio = vi / v_segs
+                # 上下方向のタンブルホーム曲面（外側に緩やかに膨らむドアガラス断面）
+                tumble_x = math.sin(v_ratio * math.pi) * 0.016
+                row = []
+                for ui in range(u_segs + 1):
+                    u_ratio = ui / u_segs
+                    arc = math.sin(u_ratio * math.pi)
+
+                    bx = b0[0] * (1.0 - u_ratio) + b1[0] * u_ratio
+                    by = b0[1] * (1.0 - u_ratio) + b1[1] * u_ratio
+                    bz = b0[2] * (1.0 - u_ratio) + b1[2] * u_ratio
+
+                    tx = t0[0] * (1.0 - u_ratio) + t1[0] * u_ratio + arc * arch_x
+                    ty = t0[1] * (1.0 - u_ratio) + t1[1] * u_ratio
+                    tz = t0[2] * (1.0 - u_ratio) + t1[2] * u_ratio + arc * arch_z
+
+                    x = side * (bx * (1.0 - v_ratio) + tx * v_ratio + tumble_x)
+                    y = by * (1.0 - v_ratio) + ty * v_ratio
+                    z = bz * (1.0 - v_ratio) + tz * v_ratio
+                    row.append(bm.verts.new(Vector((x, y, z))))
+                grid.append(row)
+
+            for vi in range(v_segs):
+                for ui in range(u_segs):
+                    v0 = grid[vi][ui]
+                    v1 = grid[vi][ui + 1]
+                    v2 = grid[vi + 1][ui + 1]
+                    v3 = grid[vi + 1][ui]
+                    # 外向き法線になるように頂点順序を左右で揃える
+                    face_verts = [v0, v1, v2, v3] if side > 0 else [v0, v3, v2, v1]
+                    face = bm.faces.new(face_verts)
+                    face.material_index = 0
+                    face.smooth = True
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    uv_layer = mesh.uv_layers.new(name="UVMap")
+    ys = [v.co.y for v in mesh.vertices]
+    zs = [v.co.z for v in mesh.vertices]
+    min_y, max_y = min(ys), max(ys)
+    min_z, max_z = min(zs), max(zs)
+    range_y = (max_y - min_y) if max_y != min_y else 1.0
+    range_z = (max_z - min_z) if max_z != min_z else 1.0
+
+    for poly in mesh.polygons:
+        for loop_idx in poly.loop_indices:
+            loop = mesh.loops[loop_idx]
+            vert = mesh.vertices[loop.vertex_index]
+            # u: 車両前方(0.0) → 後方(1.0)、v: ベルトライン下端(0.0) → ルーフ上端(1.0) (glTF V反転補正込み)
+            u = (vert.co.y - min_y) / range_y
+            v = 1.0 - (vert.co.z - min_z) / range_z
+            uv_layer.data[loop_idx].uv = (u, v)
+
+    obj = bpy.data.objects.new("SideWindows", mesh)
+    obj.data.materials.append(materials["WindowGlass"])
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_rear_window(materials) -> bpy.types.Object:
+    """3次元曲面ファストバックリアガラス (RearWindow) を16x12高分割グリッドでモデリングしUV展開を行う"""
+    mesh = bpy.data.meshes.new("RearWindowMesh")
+    bm = bmesh.new()
+
+    u_segs = 16
+    v_segs = 12
+    grid_verts = []
+
+    for vi in range(v_segs + 1):
+        # v_ratio=0.0 が下端（トランクデッキ側 y=1.74, z=0.89）、v_ratio=1.0 が上端（ルーフ後端 y=0.70, z=1.365）
+        v_ratio = vi / v_segs
+        y = 1.74 * (1.0 - v_ratio) + 0.70 * v_ratio
+        z_side = 0.890 * (1.0 - v_ratio) + 1.362 * v_ratio
+        z_arch = 0.012 * (1.0 - v_ratio) + 0.026 * v_ratio
+        width = 1.46 * (1.0 - v_ratio) + 1.23 * v_ratio
+
+        row = []
+        for ui in range(u_segs + 1):
+            u_ratio = ui / u_segs
+            x = (width * 0.5) * (2.0 * u_ratio - 1.0)
+            crown_u = math.sin(u_ratio * math.pi)
+            crown_v = math.sin(v_ratio * math.pi)
+            curve_y = crown_u * 0.032 - crown_v * 0.014
+            curve_z = crown_u * z_arch + crown_v * 0.015
+            row.append(bm.verts.new(Vector((x, y + curve_y, z_side + curve_z))))
+        grid_verts.append(row)
+
+    for vi in range(v_segs):
+        for ui in range(u_segs):
+            v0 = grid_verts[vi][ui]
+            v1 = grid_verts[vi][ui + 1]
+            v2 = grid_verts[vi + 1][ui + 1]
+            v3 = grid_verts[vi + 1][ui]
+            face = bm.faces.new([v0, v1, v2, v3])
+            face.material_index = 0
+            face.smooth = True
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    uv_layer = mesh.uv_layers.new(name="UVMap")
+    xs = [v.co.x for v in mesh.vertices]
+    zs = [v.co.z for v in mesh.vertices]
+    min_x, max_x = min(xs), max(xs)
+    min_z, max_z = min(zs), max(zs)
+    range_x = (max_x - min_x) if max_x != min_x else 1.0
+    range_z = (max_z - min_z) if max_z != min_z else 1.0
+
+    for poly in mesh.polygons:
+        for loop_idx in poly.loop_indices:
+            loop = mesh.loops[loop_idx]
+            vert = mesh.vertices[loop.vertex_index]
+            u = (vert.co.x - min_x) / range_x
+            v = 1.0 - (vert.co.z - min_z) / range_z
+            uv_layer.data[loop_idx].uv = (u, v)
+
+    obj = bpy.data.objects.new("RearWindow", mesh)
+    obj.data.materials.append(materials["WindowGlass"])
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_wiper(
+    materials,
+    name_suffix: str,
+    pivot_loc: Vector,
+    pivot_rot: Euler,
+    parent_root: bpy.types.Object,
+):
     """日本の右ハンドル車用ワイパーピボットEmptyと、フロントガラス下端カウルに沿って延伸するエアロワイパーブレードを作成"""
     pivot_empty = bpy.data.objects.new(f"Wiper{name_suffix}", None)
     pivot_empty.empty_display_type = "SINGLE_ARROW"
@@ -1331,32 +2899,51 @@ def add_rounded_tire(bm, radius: float, rim_r: float, width: float, segments=32,
             f.smooth = True
 
 
-def build_wheel(materials, name: str, position: Vector, parent_root: bpy.types.Object) -> bpy.types.Object:
-    """中空アウターリム + 10本立体ツインスポーク鍛造ホイール + ブレーキローター＆レッドキャリパーを作成"""
+def build_wheel(
+    materials, name: str, position: Vector, parent_root: bpy.types.Object
+) -> bpy.types.Object:
+    """クラウン セダン Z 20インチ 20本マルチスポーク（ダークメタリック＆切削光輝タービン調）アルミホイール + ブレーキローターを作成"""
     mesh = bpy.data.meshes.new(f"{name}Mesh")
     bm = bmesh.new()
 
-    # 0: TireRubber, 1: WheelAlloy, 2: BrakeRotor, 3: BrakeCaliper, 4: BlackTrim
-    mat_keys = ["TireRubber", "WheelAlloy", "BrakeRotor", "BrakeCaliper", "BlackTrim"]
+    # 0: TireRubber, 1: WheelAlloy, 2: BrakeRotor, 3: BrakeCaliper, 4: BlackTrim, 5: Chrome
+    mat_keys = [
+        "TireRubber",
+        "WheelAlloy",
+        "BrakeRotor",
+        "BrakeCaliper",
+        "BlackTrim",
+        "Chrome",
+    ]
 
     radius = 0.34
     width = 0.245
-    rim_r = 0.24
-    rim_inner_r = 0.216
+    rim_r = 0.248
+    rim_inner_r = 0.228
     side_sign = 1.0 if position.x > 0 else -1.0
 
-    # 1. ラウンドショルダータイヤ
-    add_rounded_tire(bm, radius=radius, rim_r=rim_r, width=width, segments=32, mat_idx=0)
+    # 1. ラウンドショルダータイヤ（245/45ZR20 相当）
+    add_rounded_tire(bm, radius=radius, rim_r=rim_r, width=width, segments=36, mat_idx=0)
 
-    # 2. 中空ホイールアウターリムバレル
+    # 2. 中空ホイールアウターリムバレル & 切削光輝フランジリング
     add_hollow_tube_x(
         bm,
         center=Vector((0.0, 0.0, 0.0)),
         r_outer=rim_r,
         r_inner=rim_inner_r,
         width_x=width * 0.84,
-        segments=32,
+        segments=36,
         mat_idx=1,
+        smooth=True,
+    )
+    add_hollow_tube_x(
+        bm,
+        center=Vector((side_sign * (width * 0.39), 0.0, 0.0)),
+        r_outer=rim_r,
+        r_inner=rim_inner_r + 0.006,
+        width_x=0.012,
+        segments=36,
+        mat_idx=5,
         smooth=True,
     )
 
@@ -1366,49 +2953,75 @@ def build_wheel(materials, name: str, position: Vector, parent_root: bpy.types.O
         center=Vector((-side_sign * width * 0.32, 0.0, 0.0)),
         radius=rim_inner_r,
         height=0.02,
-        segments=24,
+        segments=28,
         axis="X",
         mat_idx=4,
         smooth=False,
     )
 
-    # 3. 10本ツインスポーク（V字ペア×5組）
-    outer_x = side_sign * (width * 0.38)
-    hub_x = side_sign * (width * 0.30)
-    for pair_idx in range(5):
-        base_angle = (2.0 * math.pi * pair_idx) / 5.0
-        for sub_offset in [-0.15, 0.15]:
+    # 3. クラウン セダン 20本マルチスポーク（10組×2本の細身タービン調スポーク、切削光輝表層＋ダークメタリック側面）
+    outer_x = side_sign * (width * 0.395)
+    hub_x = side_sign * (width * 0.315)
+    for pair_idx in range(10):
+        base_angle = (2.0 * math.pi * pair_idx) / 10.0
+        for sub_idx, sub_offset in enumerate([-0.095, 0.095]):
             s_angle = base_angle + sub_offset
-            p_hub = Vector((hub_x, math.cos(s_angle * 0.96) * 0.055, math.sin(s_angle * 0.96) * 0.055))
-            p_rim = Vector((outer_x, math.cos(s_angle) * (rim_inner_r * 1.02), math.sin(s_angle) * (rim_inner_r * 1.02)))
+            # タービン調のわずかなツイスト角
+            twist = 0.045 if sub_idx == 0 else -0.025
+            p_hub = Vector(
+                (
+                    hub_x,
+                    math.cos(s_angle - twist) * 0.056,
+                    math.sin(s_angle - twist) * 0.056,
+                )
+            )
+            p_rim = Vector(
+                (
+                    outer_x,
+                    math.cos(s_angle + twist) * (rim_inner_r * 1.015),
+                    math.sin(s_angle + twist) * (rim_inner_r * 1.015),
+                )
+            )
 
-            tangent = Vector((0.0, -math.sin(s_angle), math.cos(s_angle))) * 0.015
-            thick_x = Vector((0.018, 0.0, 0.0))
+            tangent = Vector((0.0, -math.sin(s_angle), math.cos(s_angle))) * 0.0085
+            thick_x = Vector((0.014, 0.0, 0.0))
             spoke_verts = [
                 p_hub - tangent - thick_x,
                 p_hub + tangent - thick_x,
                 p_hub + tangent + thick_x,
                 p_hub - tangent + thick_x,
-                p_rim - tangent * 0.82 - thick_x,
-                p_rim + tangent * 0.82 - thick_x,
-                p_rim + tangent * 0.82 + thick_x,
-                p_rim - tangent * 0.82 + thick_x,
+                p_rim - tangent * 0.78 - thick_x,
+                p_rim + tangent * 0.78 - thick_x,
+                p_rim + tangent * 0.78 + thick_x,
+                p_rim - tangent * 0.78 + thick_x,
             ]
-            add_hexahedron(bm, spoke_verts, mat_idx=1, smooth=False)
+            # 交互に WheelAlloy と Chrome を織り交ぜて切削光輝のコントラストを表現
+            spoke_mat = 5 if sub_idx == 0 else 1
+            add_hexahedron(bm, spoke_verts, mat_idx=spoke_mat, smooth=False)
 
-    # 4. センターロック風ハブキャップ
+    # 4. センターハブキャップ & 王冠オーナメントリング
     add_cylinder(
         bm,
-        center=Vector((hub_x + side_sign * 0.015, 0.0, 0.0)),
-        radius=0.064,
-        height=0.035,
+        center=Vector((hub_x + side_sign * 0.018, 0.0, 0.0)),
+        radius=0.058,
+        height=0.032,
+        segments=24,
+        axis="X",
+        mat_idx=4,
+        smooth=True,
+    )
+    add_cylinder(
+        bm,
+        center=Vector((hub_x + side_sign * 0.028, 0.0, 0.0)),
+        radius=0.034,
+        height=0.018,
         segments=20,
         axis="X",
-        mat_idx=1,
+        mat_idx=5,
         smooth=True,
     )
 
-    # 5. スポークのすぐ奥に見える大径ブレーキローター & 6ポットレッドキャリパー
+    # 5. スポークの奥に見えるベンチレーटेडブレーキローター & サテンシルバーキャリパー
     rotor_x = side_sign * (width * 0.14)
     add_cylinder(
         bm,
@@ -1442,6 +3055,350 @@ def build_wheel(materials, name: str, position: Vector, parent_root: bpy.types.O
     return wheel_obj
 
 
+def assign_planar_mirror_uvs(mesh: bpy.types.Mesh, yaw_rad: float = 0.0):
+    """ミラー鏡面メッシュに glTF 2.0 出力後 Three.js 側で u=[0..1] (右→左)、v=[0..1] (下→上) となる正規化UVを付与"""
+    uv_layer = mesh.uv_layers.new(name="UVMap")
+    cos_y = math.cos(-yaw_rad)
+    sin_y = math.sin(-yaw_rad)
+
+    local_xs = []
+    local_zs = []
+    for v in mesh.vertices:
+        lx = v.co.x * cos_y - v.co.y * sin_y
+        local_xs.append(lx)
+        local_zs.append(v.co.z)
+
+    min_x, max_x = min(local_xs), max(local_xs)
+    min_z, max_z = min(local_zs), max(local_zs)
+    range_x = (max_x - min_x) if max_x != min_x else 1.0
+    range_z = (max_z - min_z) if max_z != min_z else 1.0
+
+    for poly in mesh.polygons:
+        for loop_idx in poly.loop_indices:
+            loop = mesh.loops[loop_idx]
+            vert = mesh.vertices[loop.vertex_index]
+            lx = vert.co.x * cos_y - vert.co.y * sin_y
+            u = (lx - min_x) / range_x
+            v_coord = 1.0 - (vert.co.z - min_z) / range_z
+            uv_layer.data[loop_idx].uv = (u, v_coord)
+
+
+def build_rearview_mirror(materials, parent_root: bpy.types.Object):
+    """トヨタ クラウン セダン (AZSH32) 実車通り車体中央 (X=0.00m)・フロントガラス上端ヘッダーにマウントされた JDM ワイド台形デジタルインナーミラーと鏡面メッシュを構築
+    - RearviewMirror: 車体中央 (X=0.00m) のフロントガラス内面〜オーバーヘッドコンソールに密着する Toyota Safety Sense 3.0 ADAS カメラセンサーポッド + センターボールジョイントステー + 8角台形フレームレス筐体 + 防眩トグル
+    - RearviewMirrorGlass: 右ハンドル運転席 (X=-0.38m) 側へヨー角22°チルトされた UV 正規化済み鏡面メッシュ
+    """
+    housing_mesh = bpy.data.meshes.new("RearviewMirrorMesh")
+    bm = bmesh.new()
+    # 0: InteriorDark, 1: BlackTrim, 2: Chrome, 3: DashboardScreen
+    mat_keys = ["InteriorDark", "BlackTrim", "Chrome", "DashboardScreen"]
+
+    # ルームミラー中心ピボット: 実車のクラウン セダン通り車体幅方向の中央 (X=0.00m)、フロントガラス上部傾斜面に沿った位置 (Y=-0.74m, Z=1.258m)
+    # Why X=0.00m, Y=-0.74m, Z=1.258m に配置し yaw=22° チルトするか:
+    # 従来の X=-0.14m, Z=1.232m は運転席寄りかつ低い位置にあり、センターディスプレイ真上のフロントガラス中央付近に不自然にぶら下がっていた。
+    # 車体中央 (X=0.00m) かつフロントガラス傾斜面に沿った奥行き (Y=-0.74m, Z=1.258m) に配置することで、車外・車内の全方位から見て実車通りの正統なルームミラー位置になり、
+    # 右ハンドル運転席アイポイント (-0.38, -0.06, 1.13) からも水平角 +29.2° (FOV内中央左寄り上部)・仰角 +10.7° に収まり前方視界を妨げない。
+    pivot = Vector((0.0, -0.74, 1.258))
+    yaw_angle = math.radians(22.0)  # 右ハンドル運転席 (X=-0.38m) へ向けて22°チルト
+    pitch_angle = math.radians(-5.0)  # やや下向きにチルトしてドライバーの目線と正対させる
+    cos_y = math.cos(yaw_angle)
+    sin_y = math.sin(yaw_angle)
+    cos_p = math.cos(pitch_angle)
+    sin_p = math.sin(pitch_angle)
+
+    def xform_rv(lx: float, ly: float, lz: float) -> Vector:
+        # まずX軸まわりピッチ回転、次にZ軸まわりヨー回転
+        py = ly * cos_p - lz * sin_p
+        pz = ly * sin_p + lz * cos_p
+        rx = lx * cos_y - py * sin_y
+        ry = lx * sin_y + py * cos_y
+        return pivot + Vector((rx, ry, pz))
+
+    # 1. 車体中央 (X=0.00m) のフロントガラス内面 (v=0.72..1.00: Y=-0.760..-0.545m, Z=1.280..1.412m) に沿って薄く密着する
+    # Toyota Safety Sense 3.0 ADAS カメラセンサーポッド＆セラミックフリット遮光シュラウド
+    # Why ガラス面から室内側への厚みを 18mm に抑え幅をテーパーさせるか:
+    # 運転席 (X=-0.38m) から斜め左上のルームミラー (X=0.00m) を見たとき、ポッドの右側面が巨大な黒い箱の壁に見えないよう、
+    # フロントガラス内面に張り付いたスリムな流線形ウェッジ断面にするため。
+    adas_pod_upper_verts = [
+        Vector((-0.072, -0.695, 1.328)),
+        Vector((0.072, -0.695, 1.328)),
+        Vector((0.088, -0.548, 1.412)),
+        Vector((-0.088, -0.548, 1.412)),
+        Vector((-0.064, -0.682, 1.314)),
+        Vector((0.064, -0.682, 1.314)),
+        Vector((0.080, -0.538, 1.392)),
+        Vector((-0.080, -0.538, 1.392)),
+    ]
+    add_hexahedron(bm, adas_pod_upper_verts, mat_idx=0, smooth=False)
+
+    # フロントガラス内面下部シュラウド (X=±0.048m..±0.072m, Y=-0.755..-0.695m, Z=1.292..1.328m)
+    adas_pod_lower_verts = [
+        Vector((-0.048, -0.755, 1.292)),
+        Vector((0.048, -0.755, 1.292)),
+        Vector((0.072, -0.695, 1.328)),
+        Vector((-0.072, -0.695, 1.328)),
+        Vector((-0.042, -0.742, 1.282)),
+        Vector((0.042, -0.742, 1.282)),
+        Vector((0.064, -0.682, 1.314)),
+        Vector((-0.064, -0.682, 1.314)),
+    ]
+    add_hexahedron(bm, adas_pod_lower_verts, mat_idx=1, smooth=False)
+
+    # ADAS ポッド下面中央 (X=0.00m) からルームミラー上端 (Z=1.292m) の上方に明確に立ち上がる上部マウントボス＆デュアルジョイント・シリンダーステー
+    mount_boss_verts = [
+        Vector((-0.024, -0.742, 1.306)),
+        Vector((0.024, -0.742, 1.306)),
+        Vector((0.028, -0.695, 1.334)),
+        Vector((-0.028, -0.695, 1.334)),
+        Vector((-0.018, -0.736, 1.294)),
+        Vector((0.018, -0.736, 1.294)),
+        Vector((0.022, -0.700, 1.318)),
+        Vector((-0.022, -0.700, 1.318)),
+    ]
+    add_hexahedron(bm, mount_boss_verts, mat_idx=1, smooth=False)
+
+    # アッパーステー（車体中央 X=0.00m の ADAS マウントボス Z=1.316m から ミラー上方ネック Z=1.292m へ降りる太径アルミダイキャストステー）
+    p_boss = Vector((0.0, -0.722, 1.316))
+    p_neck = Vector((0.0, -0.752, 1.292))
+    p_socket = xform_rv(0.0, -0.017, 0.012)
+    p_top_spine = xform_rv(0.0, -0.016, 0.025)
+
+    add_slanted_strut(
+        bm,
+        p0=p_boss,
+        p1=p_neck,
+        width_x=0.024,
+        depth_y=0.024,
+        taper=0.90,
+        mat_idx=1,
+        smooth=False,
+    )
+    # ネックからミラー背面スパイン (Z=1.257m) および背面ボールジョイントソケット (Z=1.244m) へ隙間なく貫入するロアアーム
+    add_slanted_strut(
+        bm,
+        p0=p_neck,
+        p1=p_top_spine,
+        width_x=0.022,
+        depth_y=0.016,
+        taper=0.92,
+        mat_idx=1,
+        smooth=False,
+    )
+    add_slanted_strut(
+        bm,
+        p0=p_neck,
+        p1=p_socket,
+        width_x=0.020,
+        depth_y=0.016,
+        taper=0.88,
+        mat_idx=1,
+        smooth=False,
+    )
+    add_cylinder(
+        bm,
+        center=p_neck,
+        radius=0.011,
+        height=0.022,
+        segments=16,
+        axis="X",
+        mat_idx=1,
+        smooth=True,
+    )
+    add_cylinder(
+        bm,
+        center=xform_rv(0.0, -0.018, 0.010),
+        radius=0.013,
+        height=0.016,
+        segments=16,
+        axis="Y",
+        mat_idx=2,
+        smooth=True,
+    )
+
+    # 2. JDM ワイド台形フレームレス風ルームミラーハウジング（上辺 246mm / 下辺 218mm × 高さ 68mm）
+    # 8角形ベベル輪郭（上辺が広く、下辺が絞られた日本車純正ワイドミラー形状）
+    def rv_profile(scale_x: float, scale_z: float):
+        pts = [
+            (-0.104 * scale_x, -0.033 * scale_z),  # 下右
+            (0.104 * scale_x, -0.033 * scale_z),  # 下左
+            (0.118 * scale_x, -0.018 * scale_z),  # 左下コーナー
+            (0.123 * scale_x, 0.020 * scale_z),  # 左上コーナー
+            (0.112 * scale_x, 0.034 * scale_z),  # 上左
+            (-0.112 * scale_x, 0.034 * scale_z),  # 上右
+            (-0.123 * scale_x, 0.020 * scale_z),  # 右上コーナー
+            (-0.118 * scale_x, -0.018 * scale_z),  # 右下コーナー
+        ]
+        return pts
+
+    outer_prof = rv_profile(1.0, 1.0)
+    inner_prof = rv_profile(0.94, 0.90)
+    back_prof = rv_profile(0.82, 0.78)
+
+    ring_front_edge = [bm.verts.new(xform_rv(px, 0.006, pz)) for px, pz in outer_prof]
+    ring_inner_bezel = [bm.verts.new(xform_rv(px, 0.002, pz)) for px, pz in inner_prof]
+    ring_mid_body = [bm.verts.new(xform_rv(px, -0.008, pz)) for px, pz in outer_prof]
+    ring_back_cap = [bm.verts.new(xform_rv(px, -0.018, pz)) for px, pz in back_prof]
+
+    n_rv = len(ring_front_edge)
+    for i in range(n_rv):
+        ni = (i + 1) % n_rv
+        # 外周サイドシェル
+        f_side = bm.faces.new(
+            [
+                ring_front_edge[i],
+                ring_front_edge[ni],
+                ring_mid_body[ni],
+                ring_mid_body[i],
+            ]
+        )
+        f_side.material_index = 1
+        f_side.smooth = False
+        # 背面テーパーシェル
+        f_taper = bm.faces.new(
+            [ring_mid_body[i], ring_mid_body[ni], ring_back_cap[ni], ring_back_cap[i]]
+        )
+        f_taper.material_index = 0
+        f_taper.smooth = False
+        # 鏡面周囲のスリムマイクロベゼル縁
+        f_bezel = bm.faces.new(
+            [
+                ring_inner_bezel[i],
+                ring_inner_bezel[ni],
+                ring_front_edge[ni],
+                ring_front_edge[i],
+            ]
+        )
+        f_bezel.material_index = 1
+        f_bezel.smooth = False
+
+    f_rv_back = bm.faces.new(list(reversed(ring_back_cap)))
+    f_rv_back.material_index = 0
+    f_rv_back.smooth = False
+
+    f_rv_inner = bm.faces.new(ring_inner_bezel)
+    f_rv_inner.material_index = 1
+    f_rv_inner.smooth = False
+
+    # 下部中央の防眩フリップレバー＆自動防眩インジケーターLED
+    add_box(
+        bm,
+        center=xform_rv(0.0, -0.004, -0.038),
+        size=Vector((0.028, 0.012, 0.008)),
+        mat_idx=1,
+        smooth=False,
+    )
+    add_box(
+        bm,
+        center=xform_rv(-0.075, 0.006, -0.028),
+        size=Vector((0.008, 0.003, 0.004)),
+        mat_idx=3,
+        smooth=False,
+    )
+
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.normal_update()
+    bm.to_mesh(housing_mesh)
+    bm.free()
+
+    housing_obj = bpy.data.objects.new("RearviewMirror", housing_mesh)
+    for k in mat_keys:
+        housing_obj.data.materials.append(materials[k])
+    housing_obj.parent = parent_root
+    bpy.context.scene.collection.objects.link(housing_obj)
+
+    # 3. 独立したルームミラー鏡面メッシュ (RearviewMirrorGlass) — Three.js 側でリアルタイム後方レンダーターゲットを貼る
+    glass_mesh = bpy.data.meshes.new("RearviewMirrorGlassMesh")
+    bm_g = bmesh.new()
+    glass_prof = rv_profile(0.935, 0.895)
+    # ドライバー側 (+Y) から見て反時計回りになるよう頂点を配置し、法線を確実にドライバー側 (+Y) へ向ける
+    g_verts = [bm_g.verts.new(xform_rv(px, 0.0045, pz)) for px, pz in reversed(glass_prof)]
+    f_glass = bm_g.faces.new(g_verts)
+    f_glass.material_index = 0
+    f_glass.smooth = False
+    if f_glass.normal.y < 0:
+        f_glass.normal_flip()
+
+    bm_g.normal_update()
+    bm_g.to_mesh(glass_mesh)
+    bm_g.free()
+
+    assign_planar_mirror_uvs(glass_mesh, yaw_rad=yaw_angle)
+
+    glass_obj = bpy.data.objects.new("RearviewMirrorGlass", glass_mesh)
+    glass_obj.data.materials.append(materials["MirrorGlass"])
+    glass_obj.parent = parent_root
+    bpy.context.scene.collection.objects.link(glass_obj)
+
+    return housing_obj, glass_obj
+
+
+def build_side_mirror_glasses(materials, parent_root: bpy.types.Object):
+    """左右ドアミラーの凹みバイザー内に収まる8角ティアドロップ鏡面メッシュ (SideMirrorGlass_R / SideMirrorGlass_L) を構築"""
+    created = []
+    for side, suffix in [(-1.0, "R"), (1.0, "L")]:
+        mesh = bpy.data.meshes.new(f"SideMirrorGlass_{suffix}Mesh")
+        bm = bmesh.new()
+
+        is_left_mirror = side > 0
+        mirror_y = -0.880 if is_left_mirror else -1.005
+        yaw_deg = 27.0 if is_left_mirror else 22.0
+        yaw_angle = side * math.radians(yaw_deg)
+        cos_y = math.cos(yaw_angle)
+        sin_y = math.sin(yaw_angle)
+        pivot = Vector((side * 0.918, mirror_y, 0.962))
+
+        def transform_pt(
+            local_x: float,
+            local_y: float,
+            local_z: float,
+            _cos_y: float = cos_y,
+            _sin_y: float = sin_y,
+            _pivot: Vector = pivot,
+        ) -> Vector:
+            rx = local_x * _cos_y - local_y * _sin_y
+            ry = local_x * _sin_y + local_y * _cos_y
+            return _pivot + Vector((rx, ry, local_z))
+
+        in_x = -side * 0.086
+        out_x = side * 0.086
+        scale_x = 0.87
+        scale_z = 0.85
+        y_glass = 0.008  # 凹みインナーバイザー (y=0.004..0.018) の中間に配置
+
+        pts_local = [
+            (in_x * 0.78 * scale_x, y_glass, -0.046 * scale_z),
+            (out_x * 0.72 * scale_x, y_glass, -0.042 * scale_z),
+            (out_x * 0.98 * scale_x, y_glass, -0.015 * scale_z),
+            (out_x * 0.92 * scale_x, y_glass, 0.030 * scale_z),
+            (out_x * 0.62 * scale_x, y_glass, 0.050 * scale_z),
+            (in_x * 0.68 * scale_x, y_glass, 0.054 * scale_z),
+            (in_x * 0.98 * scale_x, y_glass, 0.026 * scale_z),
+            (in_x * 0.95 * scale_x, y_glass, -0.020 * scale_z),
+        ]
+
+        g_verts = [bm.verts.new(transform_pt(px, py, pz)) for px, py, pz in pts_local]
+        f_glass = bm.faces.new(g_verts)
+        f_glass.material_index = 0
+        f_glass.smooth = False
+        # 法線が必ず車両後方 (+Y) かつ車体内側を向くように揃える
+        if f_glass.normal.y < 0:
+            f_glass.normal_flip()
+
+        bm.normal_update()
+        bm.to_mesh(mesh)
+        bm.free()
+
+        assign_planar_mirror_uvs(mesh, yaw_rad=yaw_angle)
+
+        obj = bpy.data.objects.new(f"SideMirrorGlass_{suffix}", mesh)
+        obj.data.materials.append(materials["MirrorGlass"])
+        obj.parent = parent_root
+        bpy.context.scene.collection.objects.link(obj)
+        created.append(obj)
+
+    return created
+
+
 def generate_vehicle():
     """車両モデル全体を生成しエクスポート"""
     clean_scene()
@@ -1464,6 +3421,15 @@ def generate_vehicle():
     windshield = build_windshield(materials)
     windshield.parent = root
 
+    side_windows = build_side_windows(materials)
+    side_windows.parent = root
+
+    rear_window = build_rear_window(materials)
+    rear_window.parent = root
+
+    build_rearview_mirror(materials, root)
+    build_side_mirror_glasses(materials, root)
+
     # 日本の右ハンドル車仕様: 運転席ワイパーピボットは (x=-0.58)、助手席ワイパーピボットは中央 (x=+0.06) に置き、
     # Three.js の carModel.ts / windshield.ts と完全一致させる
     driver_loc = Vector((-0.58, -1.275, 0.891))
@@ -1476,9 +3442,9 @@ def generate_vehicle():
 
     wheel_coords = [
         ("Wheel_FL", Vector((-0.86, -1.39, 0.34))),  # 前右 (右ハンドル運転席側)
-        ("Wheel_FR", Vector((0.86, -1.39, 0.34))),   # 前左 (助手席側)
-        ("Wheel_RL", Vector((-0.86, 1.39, 0.34))),   # 後右
-        ("Wheel_RR", Vector((0.86, 1.39, 0.34))),    # 後左
+        ("Wheel_FR", Vector((0.86, -1.39, 0.34))),  # 前左 (助手席側)
+        ("Wheel_RL", Vector((-0.86, 1.39, 0.34))),  # 後右
+        ("Wheel_RR", Vector((0.86, 1.39, 0.34))),  # 後左
     ]
     for name, pos in wheel_coords:
         build_wheel(materials, name, pos, root)

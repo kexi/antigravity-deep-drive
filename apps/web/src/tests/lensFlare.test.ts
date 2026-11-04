@@ -88,10 +88,14 @@ describe("LensFlarePass - Optical Cinematic Lens Flare Post-Process", () => {
     const lensFlarePass = new LensFlarePass(800, 600);
     const fragmentGlsl = lensFlarePass.material.fragmentShader;
 
-    // 1. 深度サンプリングオクルージョン
+    // 1. 線形深度復元サンプリングオクルージョン（100m先のビル d≈0.9991 で貫通しないことを保証）
     const hasOcclusionFunc = fragmentGlsl.includes("float calculateOcclusion(vec2 sunUv)");
+    const hasLinearizeDepthFunc = fragmentGlsl.includes("float linearizeDepth(float d)");
+    const hasSkySampleCheck = fragmentGlsl.includes("linearDepth >= uCameraFar * 0.95");
     const hasDepthTextureLookup = fragmentGlsl.includes("texture2D(tDepth, sampleUv).r");
     expect(hasOcclusionFunc).toBe(true);
+    expect(hasLinearizeDepthFunc).toBe(true);
+    expect(hasSkySampleCheck).toBe(true);
     expect(hasDepthTextureLookup).toBe(true);
 
     // 2. スターバースト回折光芒

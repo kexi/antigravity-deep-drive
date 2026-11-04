@@ -1,3 +1,12 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = "==3.11.*"
+# dependencies = [
+#   "bpy>=5.0.1",
+# ]
+# [tool.uv]
+# exclude-newer = "1 day"
+# ///
 """
 Blender Procedural Modeling Script: 東京駅丸の内赤レンガ駅舎 (Tokyo Station Marunouchi Building - High Precision)
 Tokyo Station Deep Drive 用 3D アセット生成
@@ -20,10 +29,15 @@ StationRoot (Empty)
 └── FacadeDetails (メッシュ: 全棟＋八角ドームを連続周回する白帯ストライプ装飾帯、御影石基壇、コーニス)
 """
 
-import bpy
-import bmesh
 import math
 import os
+
+import bpy
+
+# isort: split
+# Why not: bpy 単体 wheel (PyPI) では import bpy 実行時に初めて bmesh / mathutils が
+# sys.modules に登録されるため、アルファベット順で bmesh を先に import すると ModuleNotFoundError になる。
+import bmesh
 from mathutils import Vector
 
 
@@ -242,10 +256,23 @@ def add_mansard_roof(
 
     # 屋根頂部の装飾クレスト（棟飾り）
     if top_w > 4.0:
-        add_box(bm, center=Vector((cx, cy, z2 + 0.25)), size=Vector((top_w * 0.96, 0.45, 0.50)), mat_idx=stone_mat)
+        add_box(
+            bm,
+            center=Vector((cx, cy, z2 + 0.25)),
+            size=Vector((top_w * 0.96, 0.45, 0.50)),
+            mat_idx=stone_mat,
+        )
 
 
-def add_cylinder_y(bm, center: Vector, radius: float, depth_y: float, segments=24, mat_idx=0, smooth=True):
+def add_cylinder_y(
+    bm,
+    center: Vector,
+    radius: float,
+    depth_y: float,
+    segments=24,
+    mat_idx=0,
+    smooth=True,
+):
     """Y軸方向（ファサード法線方向）を向いた円柱・円盤（丸時計やバラ窓用）を追加"""
     front_verts = []
     back_verts = []
@@ -374,7 +401,15 @@ def add_oriented_arched_window(
     )
 
 
-def add_arched_window(bm, center: Vector, width: float, rect_h: float, depth_y: float, glass_mat=3, stone_mat=1):
+def add_arched_window(
+    bm,
+    center: Vector,
+    width: float,
+    rect_h: float,
+    depth_y: float,
+    glass_mat=3,
+    stone_mat=1,
+):
     """Y軸向きのファサード（正面 -Y または背面 +Y）に半円アーチ窓を追加"""
     normal_sign = -1.0 if center.y < 0.0 else 1.0
     tangent_dir = Vector((1.0, 0.0, 0.0)) if normal_sign < 0.0 else Vector((-1.0, 0.0, 0.0))
@@ -421,8 +456,6 @@ def add_dormer_window(
     # ドーマーの三角屋根（切妻小屋根）
     hw = width * 0.58
     hd = depth * 0.56
-    z_base = center.z + height * 0.5
-    z_peak = z_base + 0.85
 
     vf_l = bm.verts.new(center - t_dir * hw + n_dir * hd + Vector((0.0, 0.0, height * 0.5)))
     vf_r = bm.verts.new(center + t_dir * hw + n_dir * hd + Vector((0.0, 0.0, height * 0.5)))
@@ -455,7 +488,16 @@ def add_dormer_window(
     )
 
 
-def add_polygon_prism(bm, center: Vector, radius_bot: float, radius_top: float, height: float, sides=8, mat_idx=0, smooth=False):
+def add_polygon_prism(
+    bm,
+    center: Vector,
+    radius_bot: float,
+    radius_top: float,
+    height: float,
+    sides=8,
+    mat_idx=0,
+    smooth=False,
+):
     """bmesh に多角柱を追加（頂点位相 pi/sides オフセットにより、各辺の法線が 0, 45, 90... 度に整列）"""
     bot_verts = []
     top_verts = []
@@ -508,7 +550,9 @@ def add_high_precision_bell_dome(
         ratio = ri / rings
         z = center.z + height * ratio
         # 東京駅丸の内ドーム特有の優雅なベル型曲率
-        bell_curve = math.pow(math.cos(ratio * math.pi * 0.5), 0.62) + 0.08 * math.sin(ratio * math.pi)
+        bell_curve = math.pow(math.cos(ratio * math.pi * 0.5), 0.62) + 0.08 * math.sin(
+            ratio * math.pi
+        )
         r = radius * bell_curve if ratio < 1.0 else radius * 0.17
         radii_per_ring.append(r)
         z_per_ring.append(z)
@@ -563,7 +607,9 @@ def add_high_precision_bell_dome(
     # ドーム中段の8面それぞれに白御影石枠付きオクルス（丸窓ドーマー）を法線整列で配置
     oculus_ratio = 0.36
     oculus_z = center.z + height * oculus_ratio
-    oculus_curve = math.pow(math.cos(oculus_ratio * math.pi * 0.5), 0.62) + 0.08 * math.sin(oculus_ratio * math.pi)
+    oculus_curve = math.pow(math.cos(oculus_ratio * math.pi * 0.5), 0.62) + 0.08 * math.sin(
+        oculus_ratio * math.pi
+    )
     oculus_r = radius * oculus_curve * math.cos(math.pi / sides)
     for si in range(sides):
         face_angle = (2.0 * math.pi * si) / sides
@@ -632,7 +678,14 @@ def build_central_building(materials) -> bpy.types.Object:
     bm = bmesh.new()
 
     # 0: RedBrick, 1: WhiteStone, 2: SlateRoof, 3: WindowGlass, 4: DarkBronze, 5: ClockDial
-    mat_keys = ["RedBrick", "WhiteStone", "SlateRoof", "WindowGlass", "DarkBronze", "ClockDial"]
+    mat_keys = [
+        "RedBrick",
+        "WhiteStone",
+        "SlateRoof",
+        "WindowGlass",
+        "DarkBronze",
+        "ClockDial",
+    ]
 
     w, d, h = 50.0, 24.0, 22.0
 
@@ -644,10 +697,25 @@ def build_central_building(materials) -> bpy.types.Object:
     for side_sign in [-1.0, 1.0]:
         py = side_sign * (d * 0.5 + 0.25)
         for px in pilaster_xs:
-            add_box(bm, center=Vector((px, py, h * 0.5)), size=Vector((1.25, 0.55, h - 1.0)), mat_idx=0)
+            add_box(
+                bm,
+                center=Vector((px, py, h * 0.5)),
+                size=Vector((1.25, 0.55, h - 1.0)),
+                mat_idx=0,
+            )
             # コリント風白御影石キャピタル（柱頭）とベース
-            add_box(bm, center=Vector((px, py * 1.01, h - 0.8)), size=Vector((1.55, 0.72, 0.9)), mat_idx=1)
-            add_box(bm, center=Vector((px, py * 1.01, 2.2)), size=Vector((1.45, 0.68, 0.7)), mat_idx=1)
+            add_box(
+                bm,
+                center=Vector((px, py * 1.01, h - 0.8)),
+                size=Vector((1.55, 0.72, 0.9)),
+                mat_idx=1,
+            )
+            add_box(
+                bm,
+                center=Vector((px, py * 1.01, 2.2)),
+                size=Vector((1.45, 0.68, 0.7)),
+                mat_idx=1,
+            )
 
     # 3. 中央棟の2段勾配マンサード屋根（直方体ではなく台形スロープ屋根でペディメント・角塔と綺麗に融合）
     add_mansard_roof(
@@ -699,7 +767,15 @@ def build_central_building(materials) -> bpy.types.Object:
 
         # 円形大時計文字盤＋ブロンズベゼル＋針
         clock_center = Vector((0.0, side_sign * (d * 0.5 + 0.55), 24.4))
-        add_cylinder_y(bm, center=clock_center, radius=1.95, depth_y=0.32, segments=24, mat_idx=4, smooth=True)
+        add_cylinder_y(
+            bm,
+            center=clock_center,
+            radius=1.95,
+            depth_y=0.32,
+            segments=24,
+            mat_idx=4,
+            smooth=True,
+        )
         add_cylinder_y(
             bm,
             center=clock_center + Vector((0.0, side_sign * 0.08, 0.0)),
@@ -726,8 +802,18 @@ def build_central_building(materials) -> bpy.types.Object:
     for turret_x in [-21.2, 21.2]:
         for side_sign in [-1.0, 1.0]:
             ty = side_sign * (d * 0.34)
-            add_box(bm, center=Vector((turret_x, ty, h + 4.4)), size=Vector((6.4, 6.4, 8.8)), mat_idx=0)
-            add_box(bm, center=Vector((turret_x, ty, h + 9.0)), size=Vector((7.0, 7.0, 0.75)), mat_idx=1)
+            add_box(
+                bm,
+                center=Vector((turret_x, ty, h + 4.4)),
+                size=Vector((6.4, 6.4, 8.8)),
+                mat_idx=0,
+            )
+            add_box(
+                bm,
+                center=Vector((turret_x, ty, h + 9.0)),
+                size=Vector((7.0, 7.0, 0.75)),
+                mat_idx=1,
+            )
             add_polygon_prism(
                 bm,
                 center=Vector((turret_x, ty, h + 11.4)),
@@ -740,12 +826,37 @@ def build_central_building(materials) -> bpy.types.Object:
             )
 
     # 6. 正面貴賓エントランス大庇（皇室車寄せポーティコ: 幅18m, 奥行き7m, 高さ5.6m, アーチ列柱）
-    add_box(bm, center=Vector((0.0, -d * 0.5 - 3.5, 5.5)), size=Vector((18.0, 7.0, 0.85)), mat_idx=1)
-    add_box(bm, center=Vector((0.0, -d * 0.5 - 3.5, 6.15)), size=Vector((17.2, 6.4, 0.45)), mat_idx=4)
+    add_box(
+        bm,
+        center=Vector((0.0, -d * 0.5 - 3.5, 5.5)),
+        size=Vector((18.0, 7.0, 0.85)),
+        mat_idx=1,
+    )
+    add_box(
+        bm,
+        center=Vector((0.0, -d * 0.5 - 3.5, 6.15)),
+        size=Vector((17.2, 6.4, 0.45)),
+        mat_idx=4,
+    )
     for col_x in [-7.5, -2.6, 2.6, 7.5]:
-        add_box(bm, center=Vector((col_x, -d * 0.5 - 6.4, 2.75)), size=Vector((1.15, 1.15, 5.5)), mat_idx=0)
-        add_box(bm, center=Vector((col_x, -d * 0.5 - 6.4, 1.2)), size=Vector((1.35, 1.35, 0.6)), mat_idx=1)
-        add_box(bm, center=Vector((col_x, -d * 0.5 - 6.4, 5.0)), size=Vector((1.40, 1.40, 0.65)), mat_idx=1)
+        add_box(
+            bm,
+            center=Vector((col_x, -d * 0.5 - 6.4, 2.75)),
+            size=Vector((1.15, 1.15, 5.5)),
+            mat_idx=0,
+        )
+        add_box(
+            bm,
+            center=Vector((col_x, -d * 0.5 - 6.4, 1.2)),
+            size=Vector((1.35, 1.35, 0.6)),
+            mat_idx=1,
+        )
+        add_box(
+            bm,
+            center=Vector((col_x, -d * 0.5 - 6.4, 5.0)),
+            size=Vector((1.40, 1.40, 0.65)),
+            mat_idx=1,
+        )
 
     # 7. 中央ファサードの半円アーチ窓列（正面 -Y と背面 +Y）
     for side_sign in [-1.0, 1.0]:
@@ -753,9 +864,20 @@ def build_central_building(materials) -> bpy.types.Object:
         for floor_z in [5.6, 11.2, 16.8]:
             for wx in [-18.5, -11.8, -5.8, 0.0, 5.8, 11.8, 18.5]:
                 if floor_z == 5.6 and abs(wx) < 3.0 and side_sign < 0:
-                    add_box(bm, center=Vector((wx, y_face, 3.0)), size=Vector((3.6, 0.3, 5.2)), mat_idx=4)
+                    add_box(
+                        bm,
+                        center=Vector((wx, y_face, 3.0)),
+                        size=Vector((3.6, 0.3, 5.2)),
+                        mat_idx=4,
+                    )
                 else:
-                    add_arched_window(bm, center=Vector((wx, y_face, floor_z)), width=2.4, rect_h=3.3, depth_y=0.25)
+                    add_arched_window(
+                        bm,
+                        center=Vector((wx, y_face, floor_z)),
+                        width=2.4,
+                        rect_h=3.3,
+                        depth_y=0.25,
+                    )
 
     bm.normal_update()
     bm.to_mesh(mesh)
@@ -817,15 +939,31 @@ def build_wing(materials, name: str, center_x: float) -> bpy.types.Object:
         # スパン間の垂直ピラスター（正面 -Y と背面 +Y の両方）
         for wi in range(window_count + 1):
             px = sign_x * (vis_start_abs + (wi - 0.5) * step_abs)
-            add_box(bm, center=Vector((px, y_pilaster, h * 0.5)), size=Vector((0.85, 0.42, h - 0.8)), mat_idx=0)
-            add_box(bm, center=Vector((px, y_pilaster * 1.01, h - 0.6)), size=Vector((1.05, 0.52, 0.6)), mat_idx=1)
+            add_box(
+                bm,
+                center=Vector((px, y_pilaster, h * 0.5)),
+                size=Vector((0.85, 0.42, h - 0.8)),
+                mat_idx=0,
+            )
+            add_box(
+                bm,
+                center=Vector((px, y_pilaster * 1.01, h - 0.6)),
+                size=Vector((1.05, 0.52, 0.6)),
+                mat_idx=1,
+            )
 
         # 3階層のアーチ窓（正面 -Y と背面 +Y の両方）
         for fi, floor_z in enumerate([4.5, 9.5, 14.5]):
             win_h = 2.7 if fi < 2 else 2.3
             for wi in range(window_count):
                 wx = sign_x * (vis_start_abs + wi * step_abs)
-                add_arched_window(bm, center=Vector((wx, y_face, floor_z)), width=2.1, rect_h=win_h, depth_y=0.22)
+                add_arched_window(
+                    bm,
+                    center=Vector((wx, y_face, floor_z)),
+                    width=2.1,
+                    rect_h=win_h,
+                    depth_y=0.22,
+                )
 
         # 4. 屋根上の三角形ペディメント付きドーマー窓（正面 -Y と背面 +Y の両面に10基ずつ配置）
         dormer_count = 10
@@ -951,7 +1089,12 @@ def build_octagonal_dome(materials, name: str, center_x: float) -> bpy.types.Obj
 
         # 各壁面の左右を引き締める双柱レリーフ（付け柱）
         for p_offset in [-2.6, 2.6]:
-            pil_pos = wall_center_xy + tangent_dir * p_offset + face_dir * 0.22 + Vector((0.0, 0.0, tower_h * 0.52))
+            pil_pos = (
+                wall_center_xy
+                + tangent_dir * p_offset
+                + face_dir * 0.22
+                + Vector((0.0, 0.0, tower_h * 0.52))
+            )
             add_oriented_box(
                 bm,
                 center=pil_pos,
@@ -1037,11 +1180,26 @@ def build_facade_details(materials) -> bpy.types.Object:
 
     for sz in stripe_heights:
         # 中央棟部分 (幅50m)
-        add_box(bm, center=Vector((0.0, 0.0, sz)), size=Vector((50.7, 24.6, 0.40)), mat_idx=0)
+        add_box(
+            bm,
+            center=Vector((0.0, 0.0, sz)),
+            size=Vector((50.7, 24.6, 0.40)),
+            mat_idx=0,
+        )
         # 北ウィング部分 (X=-23m〜-145m を隙間なくカバー)
-        add_box(bm, center=Vector((-84.0, 0.0, sz)), size=Vector((122.4, 20.6, 0.36)), mat_idx=0)
+        add_box(
+            bm,
+            center=Vector((-84.0, 0.0, sz)),
+            size=Vector((122.4, 20.6, 0.36)),
+            mat_idx=0,
+        )
         # 南ウィング部分 (X=+23m〜+145m を隙間なくカバー)
-        add_box(bm, center=Vector((84.0, 0.0, sz)), size=Vector((122.4, 20.6, 0.36)), mat_idx=0)
+        add_box(
+            bm,
+            center=Vector((84.0, 0.0, sz)),
+            size=Vector((122.4, 20.6, 0.36)),
+            mat_idx=0,
+        )
         # 北・南八角形ドーム塔の周囲を巡る八角形白帯ストライプ
         for dome_cx in [-145.0, 145.0]:
             add_polygon_prism(
@@ -1056,7 +1214,12 @@ def build_facade_details(materials) -> bpy.types.Object:
 
     # 中央棟・ドーム塔の上層（Z=20.2m, 22.0m）の白帯コーニス
     for upper_sz in [20.2, 21.8]:
-        add_box(bm, center=Vector((0.0, 0.0, upper_sz)), size=Vector((50.8, 24.7, 0.44)), mat_idx=0)
+        add_box(
+            bm,
+            center=Vector((0.0, 0.0, upper_sz)),
+            size=Vector((50.8, 24.7, 0.44)),
+            mat_idx=0,
+        )
         for dome_cx in [-145.0, 145.0]:
             add_polygon_prism(
                 bm,
@@ -1138,7 +1301,9 @@ def generate_tokyo_station():
         export_normals=True,
         export_extras=True,
     )
-    print(f"Successfully exported Tokyo Station model to: {out_path} ({os.path.getsize(out_path):,} bytes)")
+    print(
+        f"Successfully exported Tokyo Station model to: {out_path} ({os.path.getsize(out_path):,} bytes)"
+    )
 
 
 if __name__ == "__main__":

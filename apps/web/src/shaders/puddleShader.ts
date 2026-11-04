@@ -62,7 +62,7 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
 
     this.uRainWetness = { value: 0.0 };
     this.uTime = { value: 0.0 };
-    this.uPuddleThreshold = { value: options.puddleThreshold ?? 0.44 };
+    this.uPuddleThreshold = { value: options.puddleThreshold ?? 0.42 };
     this.uRippleIntensity = { value: 1.0 };
     this.uRippleSpeed = { value: options.rippleSpeed ?? 1.25 };
     this.uSunDirection = {
@@ -77,6 +77,7 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
     this.uRoadVolumeTex = {
       value: Procedural3DTextureGenerator.getSharedAsphalt3DTexture(),
     };
+    this.customProgramCacheKey = () => "puddle-planar-mirror-shader-v4";
 
     this.onBeforeCompile = (shader) => {
       shader.uniforms.uRainWetness = this.uRainWetness;
@@ -161,30 +162,34 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
 
         // 道路・広場の水たまり盆地ハイトフィールド（低周波FBM + 3D ボリュームテクスチャ盆地マスク）
         // Why not: sin(worldXZ.x) * cos(worldXZ.y) のような周期三角関数を混ぜると、歩道や広場に規則的な水玉格子模様が並ぶため、
-        // 非共役回転をかけた2層のマルchioクターブFBMと3Dボリュームノイズだけで有機的な水たまり輪郭を作る
+        // 非共役回転をかけた2層のマルチオクターブFBMと3DボリュームノイズにS字コントラスト伸長をかけて有機的な水たまり輪郭を作る
         float samplePuddleBasin(vec2 worldXZ) {
-          float macroFbm = puddleFbm(worldXZ * 0.045);
-          float mesoFbm = puddlePerlinNoise(worldXZ * 0.12 + vec2(4.7, -3.1)) * 0.18;
-          vec2 rotatedXZ = vec2(worldXZ.x * 0.028 - worldXZ.y * 0.019, worldXZ.x * 0.019 + worldXZ.y * 0.028);
-          float secondaryBasin = puddleFbm(rotatedXZ + vec2(11.3, 5.9));
+          float rawMacro = puddleFbm(worldXZ * 0.048);
+          float rawMeso = puddlePerlinNoise(worldXZ * 0.13 + vec2(4.7, -3.1));
+          vec2 rotatedXZ = vec2(worldXZ.x * 0.032 - worldXZ.y * 0.021, worldXZ.x * 0.021 + worldXZ.y * 0.032);
+          float rawSecondary = puddleFbm(rotatedXZ + vec2(11.3, 5.9));
+          float macroFbm = smoothstep(0.32, 0.68, rawMacro);
+          float mesoFbm = smoothstep(0.30, 0.70, rawMeso);
+          float secondaryBasin = smoothstep(0.34, 0.66, rawSecondary);
           vec4 volSample = texture(uRoadVolumeTex, vec3(worldXZ.x * 0.035, 0.25, worldXZ.y * 0.035));
-          return macroFbm * 0.58 + mesoFbm + secondaryBasin * 0.16 + volSample.a * 0.14;
+          return clamp(macroFbm * 0.52 + mesoFbm * 0.22 + secondaryBasin * 0.20 + (volSample.a - 0.5) * 0.14, 0.0, 1.0);
         }
 
         // 微風による水面さざ波法線（雨が止んだ後の残水でも水面を微細に揺らす）
         vec2 calculateCapillaryWaves(vec2 uv, float time) {
-          float w1 = sin(uv.x * 3.6 + uv.y * 2.8 + time * 1.8);
-          float w2 = cos(uv.x * 2.9 - uv.y * 4.1 - time * 1.4);
-          return vec2(w1, w2) * 0.015;
+          float w1 = sin(uv.x * 3.8 + uv.y * 2.9 + time * 2.1) + 0.5 * sin(uv.x * 8.2 - uv.y * 5.9 + time * 3.1);
+          float w2 = cos(uv.x * 3.1 - uv.y * 4.2 - time * 1.7) + 0.5 * cos(uv.x * 6.5 + uv.y * 7.8 - time * 2.5);
+          return vec2(w1, w2) * 0.018;
         }
 
         // 雨滴リップル法線生成 (3層の時間オフセット同心円波紋 + 分散リング干渉)
         vec3 calculateRainRipples(vec2 uv, float time, float intensity) {
-          vec2 p = uv * 2.6;
+          vec2 p = uv * 2.75;
           vec3 rippleNormal = vec3(0.0, 0.0, 1.0);
 
-          // 微風によるさざ波は常にわずかに付与
-          rippleNormal.xy += calculateCapillaryWaves(uv, time);
+          // 雨上がり（intensity == 0）ではごく穏やかな微風ゆらぎのみに抑え、降雨時（intensity > 0）にさざ波と着水波紋を付与
+          float breezeScale = 0.25 + 0.75 * clamp(intensity, 0.0, 1.0);
+          rippleNormal.xy += calculateCapillaryWaves(uv, time) * breezeScale;
 
           if (intensity <= 0.01) {
             return normalize(rippleNormal);
@@ -192,25 +197,25 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
 
           // 3層の時間オフセットグリッドによる着水波紋
           for (int layer = 0; layer < 3; layer++) {
-            float layerScale = 1.0 + float(layer) * 0.32;
+            float layerScale = 1.0 + float(layer) * 0.34;
             float layerTime = time * uRippleSpeed + float(layer) * 1.47;
             vec2 gridPos = p * layerScale + float(layer) * vec2(13.4, 27.1);
             vec2 cellId = floor(gridPos);
             vec2 cellFrac = fract(gridPos);
 
             // 各セルの着水中心点
-            vec2 dropCenter = 0.22 + 0.56 * puddleHash2D(cellId);
+            vec2 dropCenter = 0.20 + 0.60 * puddleHash2D(cellId);
             vec2 diff = cellFrac - dropCenter;
             float dist = length(diff);
 
             // 時間周期で広がる同心円波紋リング（外周減衰 + 滑らかな正弦波）
-            float dropAge = fract(layerTime * 1.15 + dot(cellId, vec2(0.37, 0.73)));
-            float waveRadius = dropAge * 0.75;
+            float dropAge = fract(layerTime * 1.18 + dot(cellId, vec2(0.37, 0.73)));
+            float waveRadius = dropAge * 0.78;
             float waveDist = dist - waveRadius;
 
-            float ringEnvelope = exp(-abs(waveDist) * 16.0) * exp(-dist * 3.5) * (1.0 - dropAge);
-            float wave = sin(waveDist * 46.0) * ringEnvelope;
-            vec2 grad = normalize(diff + 0.0001) * wave * 0.36;
+            float ringEnvelope = exp(-abs(waveDist) * 14.5) * exp(-dist * 3.2) * (1.0 - dropAge);
+            float wave = sin(waveDist * 48.0) * ringEnvelope;
+            vec2 grad = normalize(diff + 0.0001) * wave * 0.46;
 
             rippleNormal.xy += grad * intensity;
           }
@@ -218,143 +223,155 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
           return normalize(rippleNormal);
         }
 
-        // 水たまり表面の解析的平面鏡面反射（空・太陽・丸の内高層ビル群・街灯ネオン）
+        // 水たまり表面の解析的平面鏡面反射（空・雲・太陽/月・丸の内/渋谷高層ビル群・街灯ネオン）
         vec3 calculatePuddleEnvReflection(vec3 worldPos, vec3 worldNormal, float puddleDepth) {
           vec3 V = normalize(cameraPosition - worldPos);
           vec3 N = normalize(worldNormal);
           vec3 R = reflect(-V, N);
-          R.y = max(R.y, 0.02);
+          R.y = max(R.y, 0.015);
 
-          // 1. 水のフレネル反射率 (Schlick近似: 水の屈折率 IOR = 1.333 -> F0 = 0.02)
+          // 1. 水のフレネル反射率 (Schlick近似: 水の屈折率 IOR = 1.333 + 浅い視線角度での鏡面強調)
           float NoV = max(dot(N, V), 0.0);
-          float fresnel = 0.04 + 0.96 * pow(1.0 - NoV, 4.0);
+          float fresnel = 0.14 + 0.86 * pow(1.0 - NoV, 3.2);
 
-          // 2. 大気スカイドーム反射（地平線〜天頂のグラデーション + 太陽方向の夕焼け/青空グロー）
-          float skyElev = pow(clamp(R.y, 0.0, 1.0), 0.55);
+          // 2. 大気スカイドーム反射（地平線〜天頂のグラデーション + 立体雲レイヤー + 太陽方向のグロー）
+          float skyElev = pow(clamp(R.y, 0.0, 1.0), 0.50);
           vec3 skyGrad = mix(uSkyHorizonColor, uSkyZenithColor, skyElev);
-          vec3 sunDir = normalize(uSunDirection);
-          float sunAzimuthGlow = pow(max(dot(normalize(vec3(R.x, R.y * 0.4, R.z)), normalize(vec3(sunDir.x, sunDir.y * 0.4, sunDir.z))), 0.0), 3.5);
-          skyGrad += uSunColor * sunAzimuthGlow * (0.42 * (1.0 - uNightFactor * 0.6));
+          vec3 sunDir = normalize(uSunDirection + vec3(0.0, 0.0001, 0.0));
+          vec3 flatR = vec3(R.x, R.y * 0.35 + 0.001, R.z);
+          vec3 flatSun = vec3(sunDir.x, sunDir.y * 0.35 + 0.001, sunDir.z);
+          float sunAzimuthGlow = pow(max(dot(flatR / max(length(flatR), 0.001), flatSun / max(length(flatSun), 0.001)), 0.0), 3.0);
+          skyGrad += uSunColor * sunAzimuthGlow * (0.56 * (1.0 - uNightFactor * 0.45));
+
+          vec2 skyCloudUv = R.xz / (R.y + 0.38) * 0.36 + vec2(uTime * 0.006, -uTime * 0.004);
+          float cloudReflNoise = puddleFbm(skyCloudUv);
+          float cloudReflMask = smoothstep(0.44, 0.72, cloudReflNoise) * smoothstep(0.03, 0.35, R.y);
+          vec3 cloudHighlightColor = mix(
+            mix(vec3(0.96, 0.98, 1.0), uSunColor * 1.15, 0.45),
+            vec3(0.24, 0.32, 0.48),
+            uNightFactor
+          );
+          skyGrad = mix(skyGrad, cloudHighlightColor, cloudReflMask * 0.55);
 
           // 3. 丸の内高層ビル群＆東京駅赤レンガ駅舎のシルエット＆アンチエイリアス窓明かり反射
           // Why not: worldPos.z の周期サイン波で窓柱を作ると路面上に等間隔の横縞模様が現れるため、
           // 視線反射ベクトル R の方位角と仰角のみに基づく環境反射として評価する
           float lateralAngle = abs(R.x) / (abs(R.z) + 0.45);
-          float buildingHeightMask = smoothstep(0.36, 0.10, R.y) * smoothstep(0.25, 0.65, lateralAngle);
-          vec3 buildingFacadeColor = mix(vec3(0.08, 0.11, 0.18), vec3(0.02, 0.04, 0.08), uNightFactor);
+          float buildingHeightMask = smoothstep(0.40, 0.10, R.y) * smoothstep(0.22, 0.62, lateralAngle);
+          vec3 buildingFacadeColor = mix(vec3(0.06, 0.09, 0.15), vec3(0.015, 0.03, 0.06), uNightFactor);
 
-          float floorBands = smoothstep(0.35, 0.78, sin(R.y * 28.0) * 0.5 + 0.5);
-          float bayPillars = smoothstep(0.30, 0.75, sin(atan(R.x, R.z) * 18.0) * 0.5 + 0.5);
-          float windowGlowMask = floorBands * bayPillars * smoothstep(0.02, 0.26, R.y);
-          float windowLightStrength = mix(0.18, 0.65, max(uNightFactor, uRainWetness * 0.55));
-          vec3 windowColor = mix(vec3(1.0, 0.78, 0.45), vec3(0.45, 0.80, 1.0), clamp(R.z * 0.5 + 0.5, 0.0, 1.0));
+          float floorBands = smoothstep(0.32, 0.78, sin(R.y * 30.0) * 0.5 + 0.5);
+          float bayPillars = smoothstep(0.28, 0.75, sin(atan(R.x, R.z) * 20.0) * 0.5 + 0.5);
+          float windowGlowMask = floorBands * bayPillars * smoothstep(0.02, 0.28, R.y);
+          float windowLightStrength = mix(0.24, 0.80, max(uNightFactor, uRainWetness * 0.60));
+          vec3 windowColor = mix(vec3(1.0, 0.80, 0.46), vec3(0.45, 0.82, 1.0), clamp(R.z * 0.5 + 0.5, 0.0, 1.0));
           vec3 cityReflection = buildingFacadeColor + windowColor * windowGlowMask * windowLightStrength;
 
-          vec3 envColor = mix(skyGrad, cityReflection, buildingHeightMask * 0.68);
+          vec3 envColor = mix(skyGrad, cityReflection, buildingHeightMask * 0.64);
 
           // 4. 街灯（アンバー）＆都市ネオンの滑らかな水面反射グロー
-          float lampLateral = exp(-abs(abs(worldPos.x) - 13.5) * 0.12);
-          float lampDirGlow = smoothstep(0.15, 0.75, abs(R.x));
-          float rippleDistort = (N.x + N.z) * 3.5;
-          float streetLampStreak = lampLateral * lampDirGlow * clamp(1.0 + rippleDistort, 0.5, 1.6);
-          vec3 lampGlowColor = vec3(1.0, 0.72, 0.32) * streetLampStreak * mix(0.22, 0.85, max(uNightFactor, uRainWetness * 0.60));
+          float lampLateral = exp(-abs(abs(worldPos.x) - 11.5) * 0.10);
+          float lampDirGlow = smoothstep(0.12, 0.72, abs(R.x));
+          float rippleDistort = (N.x + N.z) * 4.2;
+          float streetLampStreak = lampLateral * lampDirGlow * clamp(1.0 + rippleDistort, 0.45, 1.85);
+          vec3 lampGlowColor = vec3(1.0, 0.74, 0.34) * streetLampStreak * mix(0.32, 0.95, max(uNightFactor, uRainWetness * 0.65));
 
           envColor += lampGlowColor;
 
           // 5. 太陽・月光のデュアルローブ水面スペキュラ
-          float sunSpecCore = pow(max(dot(R, sunDir), 0.0), 80.0);
-          float sunSpecGlitter = pow(max(dot(R, sunDir), 0.0), 16.0);
-          vec3 sunSpecular = uSunColor * (sunSpecCore * 1.8 + sunSpecGlitter * 0.42) * (1.0 - uNightFactor * 0.5);
+          float sunSpecCore = pow(max(dot(R, sunDir), 0.0), 72.0);
+          float sunSpecGlitter = pow(max(dot(R, sunDir), 0.0), 12.0);
+          vec3 sunSpecular = uSunColor * (sunSpecCore * 2.1 + sunSpecGlitter * 0.55) * (1.0 - uNightFactor * 0.35);
 
-          // 6. 波紋リングの繊細なハイライト（雨天時のみ波紋エッジが輝く）
+          // 6. 波紋リングの繊細なハイライト
           float rippleTilt = length(N.xz);
-          vec3 rippleEdgeSparkle = mix(uSkyHorizonColor, vec3(0.88, 0.95, 1.0), 0.5) * smoothstep(0.05, 0.24, rippleTilt) * (0.35 * clamp(uRippleIntensity, 0.0, 1.0));
+          vec3 rippleEdgeSparkle = mix(uSkyHorizonColor, vec3(0.90, 0.96, 1.0), 0.55) * smoothstep(0.015, 0.18, rippleTilt) * (0.30 + 0.42 * clamp(uRippleIntensity, 0.0, 1.0));
 
           // 水深に応じた水色吸収とフレネル合成
-          vec3 waterTint = vec3(0.03, 0.05, 0.08);
-          vec3 reflectedRadiance = (envColor + sunSpecular + rippleEdgeSparkle) * mix(0.45, 0.95, fresnel);
-          return mix(waterTint, reflectedRadiance, clamp(fresnel + 0.32, 0.0, 1.0)) * (0.7 + 0.3 * puddleDepth);
+          vec3 waterTint = vec3(0.025, 0.048, 0.078);
+          vec3 reflectedRadiance = (envColor + sunSpecular + rippleEdgeSparkle) * mix(0.60, 1.06, fresnel);
+          return mix(waterTint, reflectedRadiance, clamp(fresnel + 0.40, 0.0, 1.0)) * (0.76 + 0.24 * puddleDepth);
         }
         `,
       );
 
-      // 3D ボリュームテクスチャによる石畳・アスファルト微細粒子変調（マルチスケール・非共役回転でリピート模様を防止）
+      // 3D ボリュームテクスチャによる石畳・アスファルト微細粒子変調（距離 LOD: 28m 以内のみ 1 回評価）
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <color_fragment>",
         /* glsl */ `
         #include <color_fragment>
-        vec3 stoneCoordFine = vWorldPosition * 0.36;
-        vec3 stoneCoordMacro = vec3(
-          vWorldPosition.x * 0.068 - vWorldPosition.z * 0.043,
-          vWorldPosition.y * 0.08 + 0.29,
-          vWorldPosition.x * 0.043 + vWorldPosition.z * 0.068
-        );
-        vec4 stoneVolFine = texture(uRoadVolumeTex, stoneCoordFine);
-        vec4 stoneVolMacro = texture(uRoadVolumeTex, stoneCoordMacro);
-        float stoneGrain = mix(stoneVolFine.r, stoneVolMacro.r, 0.4);
-        diffuseColor.rgb *= mix(0.93, 1.07, stoneGrain);
+        if (length(cameraPosition - vWorldPosition) < 28.0) {
+          vec3 stoneCoordFine = vWorldPosition * 0.36;
+          vec4 stoneVolFine = texture(uRoadVolumeTex, stoneCoordFine);
+          diffuseColor.rgb *= mix(0.93, 1.07, stoneVolFine.r);
+        }
         `,
       );
 
-      // 法線マップ適用部: リップルによる水面法線の変調
+      // 法線マップ適用部: リップルによる水面法線の変調（距離 LOD: 165m 以内まで水面法線を平坦化）
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <normal_fragment_maps>",
         /* glsl */ `
         #include <normal_fragment_maps>
 
-        if (uRainWetness > 0.01) {
+        float normalCamDist = length(cameraPosition - vWorldPosition);
+        if (uRainWetness > 0.01 && normalCamDist < 165.0) {
+          float normalDistFade = 1.0 - smoothstep(115.0, 165.0, normalCamDist);
           float pMap = samplePuddleBasin(vWorldPosition.xz);
-          float effectiveThreshold = uPuddleThreshold - uRainWetness * 0.08;
-          float isPuddleArea = smoothstep(effectiveThreshold, effectiveThreshold + 0.10, pMap) * smoothstep(0.0, 0.35, uRainWetness);
+          float effectiveThreshold = uPuddleThreshold - uRainWetness * 0.12;
+          float isPuddleArea = smoothstep(effectiveThreshold, effectiveThreshold + 0.07, pMap) * smoothstep(0.0, 0.25, uRainWetness) * normalDistFade;
 
-          if (isPuddleArea > 0.02) {
-            // 水たまり内での雨滴リップル＋微風さざ波法線を適用
-            vec3 rippleN = calculateRainRipples(vWorldPosition.xz, uTime, uRainWetness * uRippleIntensity);
+          if (isPuddleArea > 0.01) {
+            // 水たまり内での雨滴リップル＋微風さざ波法線を適用（降雨時のみ着水波紋を有効化）
+            float rippleLod = 1.0 - smoothstep(55.0, 115.0, normalCamDist);
+            vec3 rippleN = calculateRainRipples(vWorldPosition.xz, uTime, (uRainWetness * uRippleIntensity) * rippleLod);
 
             // 法線マトリックス変換してサーフェス法線とブレンド（水面は平坦化してリップルのみを強調）
             vec3 perturbedN = vec3(rippleN.x, rippleN.z, rippleN.y);
-            normal = normalize(mix(normal, normalize(mat3(viewMatrix) * perturbedN), isPuddleArea * 0.92));
+            normal = normalize(mix(normal, normalize(mat3(viewMatrix) * perturbedN), isPuddleArea * 0.95));
           }
         }
         `,
       );
 
-      // カラー・粗さ・メタルネス・解析的鏡面反射変調部: 水深・濡れ縁・鏡面化
+      // カラー・粗さ・メタルネス・解析的鏡面反射変調部: 水深・濡れ縁・鏡面化（距離 LOD: 175m 以内まで滑らかにフェード）
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <metalnessmap_fragment>",
         /* glsl */ `
         #include <metalnessmap_fragment>
-
-        if (uRainWetness > 0.01) {
+        float puddleCamDist = length(cameraPosition - vWorldPosition);
+        if (uRainWetness > 0.01 && puddleCamDist < 175.0) {
+          float puddleDistFade = 1.0 - smoothstep(125.0, 175.0, puddleCamDist);
           float pNoise = samplePuddleBasin(vWorldPosition.xz);
-          float effectiveThreshold = uPuddleThreshold - uRainWetness * 0.08;
+          float effectiveThreshold = uPuddleThreshold - uRainWetness * 0.12;
 
           // 濡れ縁（水たまり周囲のアスファルト・石畳浸透湿潤帯）
-          float wetEdge = smoothstep(effectiveThreshold - 0.16, effectiveThreshold, pNoise);
+          float wetEdge = smoothstep(effectiveThreshold - 0.18, effectiveThreshold, pNoise) * puddleDistFade;
           // 水たまり本体（浅瀬〜深部）
-          float puddleCore = smoothstep(effectiveThreshold, effectiveThreshold + 0.07, pNoise) * smoothstep(0.0, 0.35, uRainWetness);
+          float puddleCore = smoothstep(effectiveThreshold, effectiveThreshold + 0.055, pNoise) * smoothstep(0.0, 0.25, uRainWetness) * puddleDistFade;
           // 水際メニスカスリング（表面張力による境界の濃い縁取り）
           float meniscusRing = wetEdge * (1.0 - puddleCore);
 
           // 1. カラー変調: 濡れ縁で石材・アスファルトが濃く暗くなり、水たまり内部は下地を減衰させて鏡面反射を主役にする
-          float darkeningFactor = mix(1.0, 0.38, wetEdge * clamp(uRainWetness * 1.2, 0.0, 1.0));
+          float darkeningFactor = mix(1.0, 0.36, wetEdge * clamp(uRainWetness * 1.2, 0.0, 1.0));
           diffuseColor.rgb *= darkeningFactor;
-          diffuseColor.rgb *= mix(1.0, 0.22, puddleCore);
-          diffuseColor.rgb *= (1.0 - meniscusRing * 0.25);
+          diffuseColor.rgb *= mix(1.0, 0.18, puddleCore);
+          diffuseColor.rgb *= (1.0 - meniscusRing * 0.28);
 
           // 2. 粗さ (Roughness): 水たまり内部はほぼ完全な鏡面 (0.02)
           float dryRoughness = roughnessFactor;
-          float wetAsphaltRoughness = mix(dryRoughness, 0.24, uRainWetness);
+          float wetAsphaltRoughness = mix(dryRoughness, 0.24, uRainWetness * puddleDistFade);
           roughnessFactor = mix(wetAsphaltRoughness, 0.02, puddleCore);
 
           // 3. メタルネス (Metalness / Reflectivity): フレネル鏡面反射を強化
-          metalnessFactor = mix(metalnessFactor, 0.78, puddleCore * 0.9);
+          metalnessFactor = mix(metalnessFactor, 0.84, puddleCore * 0.94);
 
           // 4. 解析的平面鏡面反射: 空・太陽・都市ビル群・街灯ネオンの映り込みを加算
           if (puddleCore > 0.01) {
-            vec3 rippleLocalN = calculateRainRipples(vWorldPosition.xz, uTime, uRainWetness * uRippleIntensity);
-            vec3 puddleWorldN = normalize(vec3(rippleLocalN.x * 0.65, rippleLocalN.z, rippleLocalN.y * 0.65));
-            vec3 puddleEnvReflection = calculatePuddleEnvReflection(vWorldPosition, puddleWorldN, puddleCore);
+            float rippleLod = 1.0 - smoothstep(55.0, 115.0, puddleCamDist);
+            vec3 rippleLocalN = calculateRainRipples(vWorldPosition.xz, uTime, (uRainWetness * uRippleIntensity) * rippleLod);
+            vec3 puddleWorldN = normalize(vec3(rippleLocalN.x * 0.72, rippleLocalN.z, rippleLocalN.y * 0.72));
+            vec3 puddleEnvReflection = clamp(calculatePuddleEnvReflection(vWorldPosition, puddleWorldN, puddleCore), vec3(0.0), vec3(1.50));
             totalEmissiveRadiance += puddleEnvReflection * puddleCore;
           }
         }

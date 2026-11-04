@@ -283,7 +283,6 @@ async function main() {
   const ftJsonLen = dv.getUint32(12, true);
   const ftBinLen = dv.getUint32(16, true);
   const btJsonLen = dv.getUint32(20, true);
-  const btBinLen = dv.getUint32(24, true);
 
   const btJsonStart = 28 + ftJsonLen + ftBinLen;
   const btJsonBytes = new Uint8Array(arrayBuf, btJsonStart, btJsonLen);
@@ -336,10 +335,10 @@ async function main() {
     // シミュレーターの道路境界（行幸通り・中央通り・日比谷通り）に干渉しないよう実測面積・外接矩形から建物フットプリント幅・奥行を算出
     const footprintSide = Math.sqrt(Math.max(1600, roofArea));
     const widthX = Number(
-      Math.min(72, Math.max(42, (spanLatMeters * 0.55 + footprintSide * 0.45))).toFixed(1),
+      Math.min(72, Math.max(42, spanLatMeters * 0.55 + footprintSide * 0.45)).toFixed(1),
     );
     const depthZ = Number(
-      Math.min(68, Math.max(42, (spanLonMeters * 0.55 + footprintSide * 0.45))).toFixed(1),
+      Math.min(68, Math.max(42, spanLonMeters * 0.55 + footprintSide * 0.45)).toFixed(1),
     );
 
     plateauBuildings.push({
@@ -427,17 +426,17 @@ async function main() {
     waterBodies,
   };
 
-  const publicJsonPath = path.resolve(
-    __dirname,
-    "../public/data/tokyo_marunouchi_open_data.json",
-  );
+  const publicJsonPath = path.resolve(__dirname, "../public/data/tokyo_marunouchi_open_data.json");
   fs.mkdirSync(path.dirname(publicJsonPath), { recursive: true });
   fs.writeFileSync(publicJsonPath, `${JSON.stringify(dataset, null, 2)}\n`, "utf-8");
 
   const tsModulePath = path.resolve(__dirname, "../src/openData/tokyoMarunouchiOpenData.ts");
   fs.mkdirSync(path.dirname(tsModulePath), { recursive: true });
-  const tsContent = `/**
- * 自動生成ファイル (` + "`just fetch-open-data`" + ` で更新)
+  const tsContent =
+    `/**
+ * 自動生成ファイル (` +
+    "`just fetch-open-data`" +
+    ` で更新)
  * 東京都・Project PLATEAU 千代田区 (13101) 2025年度オープンデータ & 国土地理院 (GSI) DEM5A / 道路中心線データ
  */
 
