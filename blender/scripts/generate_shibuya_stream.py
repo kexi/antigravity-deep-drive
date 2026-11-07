@@ -141,6 +141,58 @@ def setup_materials() -> dict[str, bpy.types.Material]:
             emission_color=(1.0, 0.15, 0.08, 1.0),
             emission_strength=3.2,
         ),
+        # 8: 首都高速3号渋谷線・鉄道高架の重厚プレキャストコンクリート橋脚・遮音壁パネル
+        "ShutokoConcretePier": create_material(
+            "ShutokoConcretePier",
+            base_color=(0.52, 0.55, 0.58, 1.0),
+            roughness=0.76,
+            metallic=0.08,
+        ),
+        # 9: 首都高速道路 緑案内標識ボード（[3] 首都高速3号渋谷線 / 渋谷・用賀・東名 / 谷町JCT・都心環状）
+        "ShutokoHighwayGreenSign": create_material(
+            "ShutokoHighwayGreenSign",
+            base_color=(0.04, 0.42, 0.24, 1.0),
+            roughness=0.28,
+            metallic=0.15,
+            emission_color=(0.05, 0.48, 0.28, 1.0),
+            emission_strength=0.62,
+        ),
+        # 10: 渋谷スクランブルスクエア 屋上展望施設「SHIBUYA SKY」スカイエッジ発光ガラス＆ヘリポートライン
+        "ShibuyaSkyEdgeGlow": create_material(
+            "ShibuyaSkyEdgeGlow",
+            base_color=(0.45, 0.82, 1.0, 1.0),
+            roughness=0.12,
+            metallic=0.25,
+            emission_color=(0.38, 0.78, 1.0, 1.0),
+            emission_strength=1.45,
+        ),
+        # 11: 渋谷ヒカリエ 東急シアターオーブ球体劇場＆首都高高架下アンバーナトリウム照明
+        "HikarieGoldOrb": create_material(
+            "HikarieGoldOrb",
+            base_color=(0.95, 0.72, 0.32, 1.0),
+            roughness=0.22,
+            metallic=0.48,
+            emission_color=(1.0, 0.68, 0.24, 1.0),
+            emission_strength=1.15,
+        ),
+        # 12: 渋谷サクラステージ（Shibuya Sakura Stage）「KINETIC GATE（ときめきSTAGE）」チェリーピンク発光ガラス
+        "SakuraStagePinkGlow": create_material(
+            "SakuraStagePinkGlow",
+            base_color=(1.0, 0.56, 0.68, 1.0),
+            roughness=0.14,
+            metallic=0.22,
+            emission_color=(0.96, 0.32, 0.50, 1.0),
+            emission_strength=1.35,
+        ),
+        # 13: SHIBUYA109 シリンダークラウン＆QFRONT 大型ビジョン マゼンタレッド発光アクセント
+        "ShibuyaQfront109Accent": create_material(
+            "ShibuyaQfront109Accent",
+            base_color=(0.96, 0.14, 0.42, 1.0),
+            roughness=0.16,
+            metallic=0.28,
+            emission_color=(1.0, 0.16, 0.45, 1.0),
+            emission_strength=1.65,
+        ),
     }
     return mats
 
@@ -410,6 +462,12 @@ def assign_materials_to_object(obj: bpy.types.Object, materials: dict[str, bpy.t
         "StreamYellowAccent",  # 5
         "WarmPlazaGlow",  # 6
         "BeaconRed",  # 7
+        "ShutokoConcretePier",  # 8
+        "ShutokoHighwayGreenSign",  # 9
+        "ShibuyaSkyEdgeGlow",  # 10
+        "HikarieGoldOrb",  # 11
+        "SakuraStagePinkGlow",  # 12
+        "ShibuyaQfront109Accent",  # 13
     ]
     for k in ordered_keys:
         obj.data.materials.append(materials[k])
@@ -1134,8 +1192,1750 @@ def build_stream_architectural_signage(
     return obj
 
 
+def build_shutoko_route3_viaduct(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    首都高速3号渋谷線（Shutoko Route 3 Shibuya Line）高架橋を構築する。
+    国道246号（玉川通り・青山通り: worldZ = 95 -> bx = 110.0）の頭上（Z = 11.2m〜16.8m）を
+    道玄坂・桜丘側（worldX = -865 -> by = -170）から渋谷駅・明治通り交差部（by = -55）を経て
+    金王坂・表参道側（worldX = -575 -> by = +120）まで全長 290m にわたり横断する重厚な都市高速高架橋：
+    - 歩道外側（bx = 95.5, 124.5）に建つラーメン門型・T字コンクリート橋脚列（走行車線を一切阻害しない）
+    - 高架裏面の主桁スチールボックスガーダー（4連）＋横桁クロスビーム格子
+    - コンクリート床版＋曲線・半透明ルーバー遮音壁（Acoustic Sound Barrier Walls）
+    - 首都高グリーンの方面案内標識門型ゲート（[3] 首都高速3号渋谷線 / 渋谷・大橋JCT・東名 / 谷町JCT・都心環状）
+    - 高架下を照らすアンバーナトリウム道路照明列（ドライバー視点で国道246号高架下の重厚感を演出）
+    """
+    mesh = bpy.data.meshes.new("ShutokoRoute3_ViaductMesh")
+    bm = bmesh.new()
+
+    bx_center = 110.0  # worldZ = 95.0 (国道246号中心)
+    by_min = -170.0  # worldX = -865.0
+    by_max = 120.0  # worldX = -575.0
+    span_len = by_max - by_min
+    by_mid = (by_min + by_max) * 0.5
+    deck_w = 21.6  # 上下4車線＋路肩幅
+
+    # 1. スチール箱桁（4本並行の重厚な主桁ガーダー: Z = 11.4m..13.2m）
+    for gx_offset in [-7.8, -2.6, 2.6, 7.8]:
+        add_box(
+            bm,
+            center=Vector((bx_center + gx_offset, by_mid, 12.3)),
+            size=Vector((1.45, span_len, 1.8)),
+            mat_idx=2,
+        )
+
+    # 高架裏面の横桁（クロスビーム格子: 10m ピッチで頭上の立体感を強調）
+    num_cross_beams = 29
+    for cb in range(num_cross_beams + 1):
+        cy = by_min + cb * (span_len / num_cross_beams)
+        add_box(
+            bm,
+            center=Vector((bx_center, cy, 12.15)),
+            size=Vector((deck_w - 1.2, 0.65, 1.35)),
+            mat_idx=3,
+        )
+        # 高架下ナトリウム照明器具（明治通り・国道246号交差部を含む全スパンの桁下に配置）
+        if cb % 2 == 0:
+            for lx_off in [-4.8, 4.8]:
+                add_box(
+                    bm,
+                    center=Vector((bx_center + lx_off, cy, 11.38)),
+                    size=Vector((1.1, 0.55, 0.24)),
+                    mat_idx=11,
+                )
+
+    # 2. コンクリート高架床版スラブ (Z = 13.2m..14.1m) ＆ アスファルト舗装面
+    add_box(
+        bm,
+        center=Vector((bx_center, by_mid, 13.65)),
+        size=Vector((deck_w, span_len, 0.95)),
+        mat_idx=8,
+    )
+    add_box(
+        bm,
+        center=Vector((bx_center, by_mid, 14.18)),
+        size=Vector((deck_w - 1.4, span_len, 0.16)),
+        mat_idx=2,
+    )
+    # 中央分離帯ガードレール＆白破線レーンマーク
+    add_box(
+        bm,
+        center=Vector((bx_center, by_mid, 14.65)),
+        size=Vector((0.55, span_len, 0.85)),
+        mat_idx=8,
+    )
+
+    # 3. 首都高象徴の遮音壁（Acoustic Sound Barrier Walls: 下段コンクリート壁＋中段半透明ポリカ窓＋上段内향き吸音ルーバー）
+    for side_sign in [-1.0, 1.0]:
+        wall_x = bx_center + side_sign * (deck_w * 0.5 - 0.35)
+        # 下段プレキャストコンクリート高欄 (Z = 14.1m..15.3m)
+        add_box(
+            bm,
+            center=Vector((wall_x, by_mid, 14.7)),
+            size=Vector((0.55, span_len, 1.2)),
+            mat_idx=8,
+        )
+        # 中段採光アクリルスリット窓 (Z = 15.3m..16.2m)
+        add_box(
+            bm,
+            center=Vector((wall_x, by_mid, 15.75)),
+            size=Vector((0.28, span_len, 0.9)),
+            mat_idx=1,
+        )
+        # 上段シルバー遮音ルーバーフード (Z = 16.2m..17.1m)
+        add_box(
+            bm,
+            center=Vector((wall_x - side_sign * 0.22, by_mid, 16.65)),
+            size=Vector((0.75, span_len, 0.9)),
+            mat_idx=3,
+        )
+        # 遮音壁の垂直H鋼支柱（8m ピッチ）
+        for sp in range(37):
+            py = by_min + sp * (span_len / 36.0)
+            add_box(
+                bm,
+                center=Vector((wall_x + side_sign * 0.12, py, 15.55)),
+                size=Vector((0.42, 0.38, 3.1)),
+                mat_idx=2,
+            )
+
+    # 4. 門型ラーメン・T字コンクリート橋脚列（国道246号の車道 bx=98..122 および明治通り車道 by=-67..-43 を完全回避）
+    # bx = 95.5 (worldZ = 80.5: 南側歩道外縁) & bx = 124.5 (worldZ = 109.5: 北側歩道外縁)
+    pier_by_list = [-135.0, -87.0, -33.0, 23.0, 77.0]
+    for p_by in pier_by_list:
+        # 水平ハンチ付き大梁（クロスヘッド: Z = 9.8m..11.4m, 桁下クリアランス 9.8m 確保）
+        add_box(
+            bm,
+            center=Vector((bx_center, p_by, 10.65)),
+            size=Vector((31.2, 2.8, 1.7)),
+            mat_idx=8,
+        )
+        # 左右の丸みを帯びた角柱コンクリート橋脚（Z = 0m..10.6m）
+        for pier_x in [95.5, 124.5]:
+            add_box(
+                bm,
+                center=Vector((pier_x, p_by, 5.3)),
+                size=Vector((2.5, 2.6, 10.6)),
+                mat_idx=8,
+            )
+            # 橋脚根元の保護フーチング＆トラストライプ警戒帯
+            add_box(
+                bm,
+                center=Vector((pier_x, p_by, 0.45)),
+                size=Vector((2.9, 3.0, 0.9)),
+                mat_idx=2,
+            )
+            add_box(
+                bm,
+                center=Vector((pier_x, p_by, 1.6)),
+                size=Vector((2.58, 2.68, 0.45)),
+                mat_idx=5,
+            )
+
+    # 5. 首都高速3号渋谷線 オーバーヘッド緑案内標識門型ゲート＆側面ルートサイン
+    # 明治通り交差点のすぐ西側（by = -72.0 -> worldX = -767）と東側（by = -36.0 -> worldX = -731）に配置し、
+    # 明治通りおよび国道246号のどちらから見上げても「首都高3号渋谷線」と一目で分かる標識を掲出
+    for gate_by in [-72.0, -36.0, 15.0]:
+        # 門型鉄骨トラスフレーム (Z = 16.8m..21.2m)
+        for gx in [bx_center - 10.6, bx_center + 10.6]:
+            add_box(
+                bm,
+                center=Vector((gx, gate_by, 19.0)),
+                size=Vector((0.45, 0.45, 4.6)),
+                mat_idx=3,
+            )
+        add_box(
+            bm,
+            center=Vector((bx_center, gate_by, 20.8)),
+            size=Vector((21.8, 0.55, 0.65)),
+            mat_idx=3,
+        )
+        # 首都高グリーン案内標識板（高速上向け＆高架側面向け）
+        add_box(
+            bm,
+            center=Vector((bx_center, gate_by, 19.8)),
+            size=Vector((14.5, 0.42, 2.8)),
+            mat_idx=9,
+        )
+        # 白枠トリム＆ルート番号バッジ
+        add_box(
+            bm,
+            center=Vector((bx_center, gate_by, 19.8)),
+            size=Vector((14.8, 0.34, 3.05)),
+            mat_idx=0,
+        )
+
+    # 明治通り走行中のドライバーから正面に見える高架側面「首都高速3号渋谷線 [3] SHIBUYA EXPWY」大型緑看板
+    for side_x, n_sign in [
+        (bx_center - deck_w * 0.5 - 0.45, -1.0),
+        (bx_center + deck_w * 0.5 + 0.45, 1.0),
+    ]:
+        for sign_by in [-55.0, -18.0]:
+            # 白外枠プレート
+            add_box(
+                bm,
+                center=Vector((side_x, sign_by, 15.65)),
+                size=Vector((0.28, 13.6, 2.35)),
+                mat_idx=0,
+            )
+            # 首都高グリーン内面プレート
+            add_box(
+                bm,
+                center=Vector((side_x + n_sign * 0.08, sign_by, 15.65)),
+                size=Vector((0.24, 13.0, 1.95)),
+                mat_idx=9,
+            )
+            # 白ルートライン＆イエロー出口バッジアクセント
+            add_box(
+                bm,
+                center=Vector((side_x + n_sign * 0.16, sign_by - 4.2, 15.65)),
+                size=Vector((0.20, 2.2, 1.35)),
+                mat_idx=5,
+            )
+            add_box(
+                bm,
+                center=Vector((side_x + n_sign * 0.16, sign_by + 1.4, 15.65)),
+                size=Vector((0.20, 7.4, 0.48)),
+                mat_idx=0,
+            )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShutokoRoute3_Viaduct", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_shibuya_scramble_square_tower(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    渋谷スクランブルスクエア 東棟（Shibuya Scramble Square East Tower, 実寸 229.7m / 地上47階）を構築する。
+    配置: worldX = -808.0, worldZ = 145.0 -> Blender (bx = 160.0, by = -113.0)
+    隈研吾建築都市設計事務所・SANAA・日建設計による渋谷最高峰ランドマークの特徴を忠実に造形：
+    - 低層〜中層商業ポディウム（Z = 0m..38m）と中層セットバックテラス
+    - 高層カーテンウォール（Z = 38m..214m）の躍動感ある斜め・垂直ホワイトアルミルーバーフィン帯
+    - 屋上展望施設「SHIBUYA SKY（渋谷スカイ）」（Z = 214m..229.7m）：
+      360度オープンエア展望デッキ、シアンブルーに輝くガラススカイエッジ（SKY EDGE）、
+      屋上ヘリポート（グリーン着陸帯＋白「H」マーク）＆四隅の赤色航空障害灯
+    """
+    mesh = bpy.data.meshes.new("ShibuyaScrambleSquare_TowerMesh")
+    bm = bmesh.new()
+
+    cx = 160.0  # worldZ = 145.0
+    cy = -113.0  # worldX = -808.0
+    w_x = 54.0  # Z方向奥行
+    d_y = 52.0  # X方向幅
+
+    # 1. 低層商業ポディウム (1F〜11F, Z = 0m..38m)
+    add_box(
+        bm,
+        center=Vector((cx, cy, 19.0)),
+        size=Vector((w_x, d_y, 38.0)),
+        mat_idx=2,
+    )
+    # 低層部の明るいガラスカーテン＆ウォーム商業ショーウィンドウ階層
+    for pz in [6.0, 14.0, 22.0, 30.0]:
+        add_box(
+            bm,
+            center=Vector((cx, cy, pz)),
+            size=Vector((w_x + 0.35, d_y + 0.35, 4.2)),
+            mat_idx=6 if pz <= 14.0 else 1,
+        )
+        add_box(
+            bm,
+            center=Vector((cx, cy, pz + 2.4)),
+            size=Vector((w_x + 0.65, d_y + 0.65, 0.55)),
+            mat_idx=0,
+        )
+
+    # 12F イベントスペース「Scene12」中層ボイド＆セットバック帯 (Z = 38m..48m)
+    add_box(
+        bm,
+        center=Vector((cx, cy, 43.0)),
+        size=Vector((w_x - 3.0, d_y - 3.0, 10.0)),
+        mat_idx=10,
+    )
+    add_box(
+        bm,
+        center=Vector((cx, cy, 48.0)),
+        size=Vector((w_x + 0.8, d_y + 0.8, 0.9)),
+        mat_idx=0,
+    )
+
+    # 2. 高層オフィスタワーコア (14F〜45F, Z = 48m..214m)
+    tw_x = 47.0
+    td_y = 45.0
+    z_tower_bot = 48.0
+    z_tower_top = 214.0
+    tower_h = z_tower_top - z_tower_bot
+    add_box(
+        bm,
+        center=Vector((cx, cy, z_tower_bot + tower_h * 0.5)),
+        size=Vector((tw_x, td_y, tower_h)),
+        mat_idx=1,
+    )
+
+    # スクランブルスクエア固有の多層水平アルミフィン＆ウォームオフィス照明帯（28段）
+    num_bands = 28
+    band_step = tower_h / num_bands
+    for b_idx in range(num_bands + 1):
+        bz = z_tower_bot + b_idx * band_step
+        add_box(
+            bm,
+            center=Vector((cx, cy, bz)),
+            size=Vector((tw_x + 0.45, td_y + 0.45, 0.38)),
+            mat_idx=0,
+        )
+        if b_idx < num_bands and (b_idx % 3 == 0):
+            add_box(
+                bm,
+                center=Vector((cx, cy, bz + band_step * 0.5)),
+                size=Vector((tw_x + 0.12, td_y + 0.12, band_step * 0.44)),
+                mat_idx=6,
+            )
+
+    # ファサードを斜めに横切るダイナミックな白ルーバーフィン列（スクランブルスクエアの外観シグネチャ）
+    num_fins = 16
+    for f_idx in range(num_fins):
+        ratio = (f_idx + 0.5) / num_fins - 0.5
+        # 東面(+Y: 明治通り・ヒカリエ向き) と 西面(-Y: スクランブル交差点向き) の垂直マリオン
+        fx = cx + ratio * (tw_x - 2.0)
+        for sy in [-1.0, 1.0]:
+            add_box(
+                bm,
+                center=Vector((fx, cy + sy * (td_y * 0.5 + 0.24), z_tower_bot + tower_h * 0.5)),
+                size=Vector((0.42, 0.48, tower_h)),
+                mat_idx=0 if (f_idx % 2 == 0) else 3,
+            )
+        # 南面(-X: 国道246号・ストリーム向き) と 北面(+X: 宮下公園向き) の垂直マリオン
+        fy = cy + ratio * (td_y - 2.0)
+        for sx in [-1.0, 1.0]:
+            add_box(
+                bm,
+                center=Vector((cx + sx * (tw_x * 0.5 + 0.24), fy, z_tower_bot + tower_h * 0.5)),
+                size=Vector((0.48, 0.42, tower_h)),
+                mat_idx=0 if (f_idx % 2 == 1) else 3,
+            )
+
+    # スクランブルスクエア象徴の斜め上昇ホワイトフィン（4面のカーテンウォールを斜めに走る白いライン）
+    for diag_pass in range(4):
+        z_seg_bot = z_tower_bot + diag_pass * (tower_h / 4.0)
+        seg_h = tower_h / 4.0
+        for step_i in range(10):
+            t_ratio = (step_i + 0.5) / 10.0
+            dz = z_seg_bot + t_ratio * seg_h
+            dx_pos = cx + (t_ratio - 0.5) * (tw_x - 3.0) * (1.0 if diag_pass % 2 == 0 else -1.0)
+            dy_pos = cy + (t_ratio - 0.5) * (td_y - 3.0) * (1.0 if diag_pass % 2 == 0 else -1.0)
+            for sy in [-1.0, 1.0]:
+                add_box(
+                    bm,
+                    center=Vector((dx_pos, cy + sy * (td_y * 0.5 + 0.38), dz)),
+                    size=Vector((4.8, 0.52, 4.4)),
+                    mat_idx=0,
+                )
+            for sx in [-1.0, 1.0]:
+                add_box(
+                    bm,
+                    center=Vector((cx + sx * (tw_x * 0.5 + 0.38), dy_pos, dz)),
+                    size=Vector((0.52, 4.8, 4.4)),
+                    mat_idx=0,
+                )
+
+    # 3. 屋上展望施設「SHIBUYA SKY（渋谷スカイ）」(46F〜屋上: Z = 214m..229.7m)
+    # 展望回廊 SKY GALLERY & スカイエッジ発光ガラス壁 (Z = 214m..223.5m)
+    add_box(
+        bm,
+        center=Vector((cx, cy, 218.8)),
+        size=Vector((tw_x - 1.2, td_y - 1.2, 9.6)),
+        mat_idx=10,
+    )
+    # 展望デッキ外周の白い水平クラウンフレーム（上下2本のシャープな白トリム）
+    for crown_z in [214.2, 223.6, 228.2]:
+        add_box(
+            bm,
+            center=Vector((cx, cy, crown_z)),
+            size=Vector((tw_x + 1.1, td_y + 1.1, 0.75)),
+            mat_idx=0,
+        )
+    # SHIBUYA SKY コーナー展望台「SKY EDGE」（南東・北西角の張り出しガラスデッキ）
+    for sx, sy in [(-1.0, 1.0), (-1.0, -1.0), (1.0, 1.0)]:
+        add_box(
+            bm,
+            center=Vector((cx + sx * (tw_x * 0.5 - 2.5), cy + sy * (td_y * 0.5 - 2.5), 225.8)),
+            size=Vector((9.5, 9.5, 4.2)),
+            mat_idx=10,
+        )
+
+    # 屋上オープンエア芝生・ウッドデッキ＆ヘリポート (Z = 223.8m..229.7m)
+    add_box(
+        bm,
+        center=Vector((cx, cy, 226.4)),
+        size=Vector((tw_x - 8.0, td_y - 8.0, 5.2)),
+        mat_idx=2,
+    )
+    # 屋上ヘリポート着陸パッド（グリーン標識パッド＋白 H マーク）
+    add_box(
+        bm,
+        center=Vector((cx, cy, 229.25)),
+        size=Vector((18.0, 18.0, 0.45)),
+        mat_idx=9,
+    )
+    for hx_off in [-3.2, 3.2]:
+        add_box(
+            bm,
+            center=Vector((cx + hx_off, cy, 229.55)),
+            size=Vector((1.4, 9.0, 0.25)),
+            mat_idx=0,
+        )
+    add_box(
+        bm,
+        center=Vector((cx, cy, 229.55)),
+        size=Vector((6.4, 1.4, 0.25)),
+        mat_idx=0,
+    )
+
+    # 屋上四隅の赤色航空障害灯
+    for sx in [-1.0, 1.0]:
+        for sy in [-1.0, 1.0]:
+            add_cylinder_z(
+                bm,
+                center=Vector((cx + sx * (tw_x * 0.5 - 1.0), cy + sy * (td_y * 0.5 - 1.0), 230.6)),
+                radius=0.55,
+                height=2.0,
+                segments=12,
+                mat_idx=7,
+            )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaScrambleSquare_Tower", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_shibuya_hikarie_tower(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    渋谷ヒカリエ（Shibuya Hikarie, 実寸 182.5m / 地上34階）を構築する。
+    配置: worldX = -692.0, worldZ = 146.0 -> Blender (bx = 161.0, by = 3.0)
+    日建設計・隈研吾氏らによる渋谷駅東口の象徴的複合タワーの特徴を造形：
+    - 低層商業「ShinQs」ステップ状ガラスポディウム（1F〜8F, Z = 0m..36m）と2F貫通アーバンコア歩行者デッキ口
+    - 中層11F〜16F（Z = 42m..76m）に浮かぶ球体・楕円ドラム型ミュージカル劇場「東急シアターオーブ（Tokyu Theatre Orb）」
+      およびガラス張りの11Fスカイロビー（明治通り側へキャンチレバーで張り出す発光アトリウム）
+    - 高層オフィスタワー（17F〜34F, Z = 76m..182.5m）の南北ツインガラスコア＆白マリオンフレーム
+    """
+    mesh = bpy.data.meshes.new("ShibuyaHikarie_TowerMesh")
+    bm = bmesh.new()
+
+    cx = 161.0  # worldZ = 146.0
+    cy = 3.0  # worldX = -692.0
+    w_x = 50.0
+    d_y = 48.0
+
+    # 1. 低層商業ポディウム「ShinQs」(Z = 0m..38m)
+    add_box(
+        bm,
+        center=Vector((cx, cy, 19.0)),
+        size=Vector((w_x, d_y, 38.0)),
+        mat_idx=1,
+    )
+    for pz in [5.5, 13.5, 21.5, 29.5, 37.5]:
+        add_box(
+            bm,
+            center=Vector((cx, cy, pz)),
+            size=Vector((w_x + 0.5, d_y + 0.5, 0.65)),
+            mat_idx=0,
+        )
+        add_box(
+            bm,
+            center=Vector((cx, cy, pz - 2.6)),
+            size=Vector((w_x + 0.15, d_y + 0.15, 2.8)),
+            mat_idx=6,
+        )
+    # 明治通り側 (-Y) の円筒ガラスアーバンコア（エレベーター・エスカレーターシャフト）
+    add_cylinder_z(
+        bm,
+        center=Vector((cx - 14.0, cy - d_y * 0.5 - 1.2, 24.0)),
+        radius=5.2,
+        height=48.0,
+        segments=20,
+        mat_idx=10,
+    )
+
+    # 2. 中層 11F スカイロビー＆「東急シアターオーブ（Tokyu Theatre Orb）」(Z = 38m..76m)
+    # ガラスアトリウムの背面にダークコアを置き、明治通り(-Y)および国道246号(-X)側に
+    # ゴールドアンバーの球体・円筒劇場「東急シアターオーブ」が鮮明に浮き出る造形
+    add_box(
+        bm,
+        center=Vector((cx + 2.0, cy + 2.0, 57.0)),
+        size=Vector((w_x - 4.0, d_y - 4.0, 35.0)),
+        mat_idx=2,
+    )
+    # 劇場オーブ（ガラスカーテンウォールの外縁までダイナミックに張り出す大口径ゴールドドラム球体）
+    add_cylinder_z(
+        bm,
+        center=Vector((cx - 4.5, cy - 8.5, 57.5)),
+        radius=21.5,
+        height=27.0,
+        segments=32,
+        mat_idx=11,
+    )
+    # オーブ中央のリングバンド（球体感を強調する3段の膨らみ）
+    add_cylinder_z(
+        bm,
+        center=Vector((cx - 4.5, cy - 8.5, 57.5)),
+        radius=23.2,
+        height=14.0,
+        segments=32,
+        mat_idx=11,
+    )
+    # シアターオーブを囲む白構造トラスリング＆11Fスカイロビー発光帯
+    for orb_z in [40.0, 48.5, 57.5, 66.5, 74.5]:
+        add_box(
+            bm,
+            center=Vector((cx, cy - 2.5, orb_z)),
+            size=Vector((w_x + 4.2, d_y + 5.2, 0.85)),
+            mat_idx=0,
+        )
+    # 11F スカイロビーのキャンチレバー展望ガラスデッキ
+    add_box(
+        bm,
+        center=Vector((cx, cy - d_y * 0.5 - 2.8, 43.5)),
+        size=Vector((w_x - 2.0, 2.4, 6.2)),
+        mat_idx=6,
+    )
+
+    # 3. 高層オフィスタワー（17F〜34F, Z = 76m..182.5m）：分節されたツインガラスボリューム
+    z_hi_bot = 76.0
+    z_hi_top = 182.5
+    hi_h = z_hi_top - z_hi_bot
+    tw_x = 44.0
+    td_y = 40.0
+    add_box(
+        bm,
+        center=Vector((cx, cy, z_hi_bot + hi_h * 0.5)),
+        size=Vector((tw_x, td_y, hi_h)),
+        mat_idx=1,
+    )
+    # 南北分節スリット（ヒカリエ特有の垂直ガラススリット）
+    add_box(
+        bm,
+        center=Vector((cx, cy, z_hi_bot + hi_h * 0.5)),
+        size=Vector((4.2, td_y + 0.8, hi_h + 1.0)),
+        mat_idx=10,
+    )
+    for fl in range(20):
+        fz = z_hi_bot + fl * (hi_h / 20.0)
+        add_box(
+            bm,
+            center=Vector((cx, cy, fz)),
+            size=Vector((tw_x + 0.45, td_y + 0.45, 0.36)),
+            mat_idx=0,
+        )
+        if fl % 3 == 1:
+            add_box(
+                bm,
+                center=Vector((cx, cy, fz + 2.4)),
+                size=Vector((tw_x + 0.12, td_y + 0.12, 2.0)),
+                mat_idx=6,
+            )
+
+    # 屋上冠部フレーム＆航空障害灯
+    add_box(
+        bm,
+        center=Vector((cx, cy, z_hi_top - 2.5)),
+        size=Vector((tw_x + 0.9, td_y + 0.9, 1.2)),
+        mat_idx=0,
+    )
+    for sx in [-1.0, 1.0]:
+        for sy in [-1.0, 1.0]:
+            add_cylinder_z(
+                bm,
+                center=Vector(
+                    (cx + sx * (tw_x * 0.5 - 1.0), cy + sy * (td_y * 0.5 - 1.0), z_hi_top + 0.9)
+                ),
+                radius=0.5,
+                height=1.8,
+                segments=12,
+                mat_idx=7,
+            )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaHikarie_Tower", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_shibuya_pedestrian_deck_and_rail_overpass(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    渋谷駅東口歩道橋（ペデストリアンデッキ網）および JR山手線・埼京線・東京メトロ銀座線高架橋を構築する：
+    1. 渋谷駅東口歩道橋（Shibuya Station East Exit Pedestrian Deck, Z = 7.4m〜9.2m）：
+       - 渋谷ストリーム2Fデッキ（bx = 21, by = -27）から北へ延び、
+         明治通り（by = -55）および国道246号（bx = 110）の上空をロの字に跨いで
+         渋谷スクランブルスクエア（bx = 160, by = -113）・渋谷ヒカリエ（bx = 161, by = 3）・
+         渋谷サクラステージ（bx = -10, by = -117）を立体接続するガラス手すり＆白ルーフキャノピー付き歩道橋。
+       - 渋谷ストリーム前の明治通り（bx = -20..+65）ではドライバーの視界を上空へ大きく開け、
+         交差点手前（bx = 86.0）で渋谷駅東口歩道橋と首都高3号渋谷線高架橋がドラマチックに重なる構図を実現。
+    2. JR山手線・埼京線高架橋（worldX = -779 -> by = -84.0）：
+       - 渋谷ストリーム・明治通りの西側を南北に貫く鉄道高架橋と、国道246号を跨ぐグリーンスチールトラス鉄道橋。
+    3. 東京メトロ銀座線 渋谷駅新駅舎（M字アーチ屋根トレインシェッド: bx = 158, by = -55, Z = 15.2m〜19.8m）：
+       - スクランブルスクエアとヒカリエの間、明治通り上空を東西に跨ぐ象徴的な白いアーチ屋根ホーム。
+    """
+    mesh = bpy.data.meshes.new("ShibuyaEastDeckAndRailMesh")
+    bm = bmesh.new()
+
+    deck_z = 7.8  # 桁下クリアランス 7.2m（大型車も余裕で通過可能、ドライバー視界も開放的）
+
+    # 1. 渋谷駅東口歩道橋（明治通り＆国道246号横断ロの字スカイウォーク）
+    # (a) 渋谷ストリーム2Fデッキ北端から国道246号南側歩道へ延びる南北デッキ (bx = 22..90, by = -29.5)
+    # (b) 明治通りを東西に跨ぐ南側横断歩道橋 (bx = 86.0, by = -82..-26)
+    # (c) 国道246号を南北に跨ぐ東側横断歩道橋 (bx = 84..136, by = -29.5) ＆ 西側横断歩道橋 (bx = 84..136, by = -78.5)
+    # (d) 明治通りを東西に跨ぐ北側横断歩道橋（スクランブルスクエア〜ヒカリエ連絡デッキ: bx = 134.0, by = -95..0）
+    # (e) サクラステージ連絡西口デッキ (bx = 35.0..86.0, by = -78.5)
+    deck_segments = [
+        # (center_x, center_y, size_x, size_y)
+        (54.0, -29.5, 68.0, 5.2),  # ストリーム北連絡デッキ（明治通り東側歩道上空）
+        (86.0, -54.0, 5.6, 54.0),  # 明治通り南側横断デッキ（渋谷駅東口歩道橋）
+        (110.0, -29.5, 54.0, 5.2),  # 国道246号東側横断デッキ（ヒカリエ・ストリーム連絡）
+        (110.0, -78.5, 54.0, 5.2),  # 国道246号西側横断デッキ（スクランブルSQ・サクラステージ連絡）
+        (134.0, -48.0, 5.8, 96.0),  # 明治通り北側横断デッキ（スクランブルSQ〜ヒカリエ2F連絡）
+        (
+            46.0,
+            -78.5,
+            84.0,
+            5.2,
+        ),  # サクラステージ・フクラス北西連絡デッキ（明治通り西側歩道上空 bx=4..88）
+    ]
+
+    for dx, dy, sx, sy in deck_segments:
+        # 歩道橋白い鋼製床版スラブ
+        add_box(
+            bm,
+            center=Vector((dx, dy, deck_z)),
+            size=Vector((sx, sy, 0.72)),
+            mat_idx=0,
+        )
+        # 床版下のダークスチール桁
+        add_box(
+            bm,
+            center=Vector((dx, dy, deck_z - 0.50)),
+            size=Vector((sx - 0.6, sy - 0.6, 0.36)),
+            mat_idx=2,
+        )
+        # 両側のガラス欄干＋ウォームLEDフットライトライン
+        is_ns = sx >= sy
+        if is_ns:
+            for side in [-1.0, 1.0]:
+                ry = dy + side * (sy * 0.5 - 0.15)
+                add_box(
+                    bm,
+                    center=Vector((dx, ry, deck_z + 0.95)),
+                    size=Vector((sx, 0.18, 1.2)),
+                    mat_idx=10,
+                )
+                add_box(
+                    bm,
+                    center=Vector((dx, ry, deck_z + 1.62)),
+                    size=Vector((sx, 0.28, 0.16)),
+                    mat_idx=0,
+                )
+            # 歩道橋の白い軽快なルーフキャノピー
+            add_box(
+                bm,
+                center=Vector((dx, dy, deck_z + 3.1)),
+                size=Vector((sx - 2.0, sy + 0.6, 0.26)),
+                mat_idx=0,
+            )
+        else:
+            for side in [-1.0, 1.0]:
+                rx = dx + side * (sx * 0.5 - 0.15)
+                add_box(
+                    bm,
+                    center=Vector((rx, dy, deck_z + 0.95)),
+                    size=Vector((0.18, sy, 1.2)),
+                    mat_idx=10,
+                )
+                add_box(
+                    bm,
+                    center=Vector((rx, dy, deck_z + 1.62)),
+                    size=Vector((0.28, sy, 0.16)),
+                    mat_idx=0,
+                )
+            add_box(
+                bm,
+                center=Vector((dx, dy, deck_z + 3.1)),
+                size=Vector((sx + 0.6, sy - 2.0, 0.26)),
+                mat_idx=0,
+            )
+
+    # 歩道橋の円柱スチール橋脚（すべて歩道上のみ：車道 bx=98..122, by=-67..-43 を完全回避）
+    deck_pillars = [
+        (86.0, -29.5),
+        (86.0, -78.5),
+        (134.0, -29.5),
+        (134.0, -78.5),
+        (24.0, -29.5),
+        (24.0, -78.5),
+    ]
+    for px, py in deck_pillars:
+        add_cylinder_z(
+            bm,
+            center=Vector((px, py, deck_z * 0.5)),
+            radius=0.58,
+            height=deck_z,
+            segments=16,
+            mat_idx=3,
+        )
+
+    # 2. 東京メトロ銀座線 渋谷駅新駅舎（明治通り上空 Z = 15.2m..19.5m を跨ぐ白いM字アーチ屋根ホーム）
+    ginza_x = 158.0  # worldZ = 143.0（スクランブルスクエアとヒカリエの間）
+    ginza_y = -55.0  # worldX = -750.0（明治通り真上）
+    ginza_span_y = 92.0
+    # 銀座線高架床版＆ガラスサイドウォール
+    add_box(
+        bm,
+        center=Vector((ginza_x, ginza_y, 14.8)),
+        size=Vector((14.5, ginza_span_y, 1.2)),
+        mat_idx=8,
+    )
+    add_box(
+        bm,
+        center=Vector((ginza_x, ginza_y, 16.8)),
+        size=Vector((13.8, ginza_span_y, 2.8)),
+        mat_idx=1,
+    )
+    # 象徴的な白アルミM字ボールト屋根＆屋上緑化プラザ
+    add_box(
+        bm,
+        center=Vector((ginza_x, ginza_y, 18.6)),
+        size=Vector((15.2, ginza_span_y + 2.0, 0.85)),
+        mat_idx=0,
+    )
+    for arch_idx in range(15):
+        ay = ginza_y - ginza_span_y * 0.5 + (arch_idx + 0.5) * (ginza_span_y / 15.0)
+        add_box(
+            bm,
+            center=Vector((ginza_x, ay, 17.2)),
+            size=Vector((15.4, 0.55, 3.6)),
+            mat_idx=0,
+        )
+
+    # 3. JR山手線・埼京線 渋谷駅高架橋＆国道246号ガード橋（worldX = -779 -> by = -84.0, Z = 8.4m..12.8m）
+    jr_by = -84.0
+    jr_bx_min = -120.0
+    jr_bx_max = 185.0
+    jr_len = jr_bx_max - jr_bx_min
+    jr_bx_mid = (jr_bx_min + jr_bx_max) * 0.5
+    # 鉄道高架バラスト軌道床版 (Z = 8.4m..9.8m: 国道246号の大型車も余裕でくぐれる桁下高 7.8m)
+    add_box(
+        bm,
+        center=Vector((jr_bx_mid, jr_by, 9.1)),
+        size=Vector((jr_len, 13.5, 1.4)),
+        mat_idx=8,
+    )
+    # 国道246号（bx = 85..135）および稲荷橋通り（bx = -80）を跨ぐJRグリーンスチールプレートガーダー＆ワーレントラス橋
+    for bridge_bx, bridge_span in [(110.0, 52.0), (-80.0, 28.0)]:
+        for side_y in [-6.4, 6.4]:
+            add_box(
+                bm,
+                center=Vector((bridge_bx, jr_by + side_y, 11.2)),
+                size=Vector((bridge_span, 0.75, 3.8)),
+                mat_idx=9,
+            )
+            # トラス斜材ポスト
+            num_posts = 8
+            for p_i in range(num_posts + 1):
+                px = bridge_bx - bridge_span * 0.5 + p_i * (bridge_span / num_posts)
+                add_box(
+                    bm,
+                    center=Vector((px, jr_by + side_y, 11.2)),
+                    size=Vector((0.55, 0.9, 4.0)),
+                    mat_idx=0,
+                )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaEastPedestrianDeck", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_shibuya_sakura_stage_tower(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    渋谷サクラステージ（Shibuya Sakura Stage / SHIBUYAタワー, 実寸 179.9m / 地上39階）
+    Three.js ワールド座標 (x=-812.0, z=-25.0) -> Blender 座標 (bx=-10.0, by=-117.0):
+    1. 低層商業ポディウム（1F〜5F, Z=0.0m〜32.0m）:
+       - 東側（明治通り・JR渋谷駅新南改札側 `by = -92.0`）の象徴的なチェリーピンク発光アトリウム「KINETIC GATE（ときめきSTAGE）」
+       - 1F〜4F へと連鎖する段状ランドスケープテラス「にぎわいSTAGE」＆植栽グリーンプランター
+       - 2F/3F 北東側で `ShibuyaEastPedestrianDeck`（西口・国道246号横断歩道橋）と直結する歩行者デッキ広場
+    2. 中高層 SHIBUYAタワー（6F〜37F, Z=32.0m〜169.5m）:
+       - 52.0m × 44.0m の高透過 Low-E ブルーグレーガラスカーテンウォール
+       - サクラステージ特有の水平ホワイトアルミスパンドレルフィン＆コーナーのチェリーピンク垂直アクセントマリオン
+       - 17F スカイロビー＆コワーキング「38F/17F ボイド緑化テラス」の水平セットバック
+    3. 屋上メカニカルクラウン＆ヘリポート（38F〜R, Z=169.5m〜179.9m）:
+       - ホワイトアルミルーバー冠部、四隅の航空障害灯レッドビーコン
+    """
+    mesh = bpy.data.meshes.new("ShibuyaSakuraStageMesh")
+    bm = bmesh.new()
+
+    cx = -10.0  # worldZ = -25.0 (南端 bx=-38 -> worldZ=-53, 北端 bx=+18 -> worldZ=+3)
+    cy = -117.0  # worldX = -812.0 (西端 by=-142 -> worldX=-837, 東端 by=-92 -> worldX=-787: JR線路 by=-84 をクリア)
+    w_x = 56.0
+    d_y = 50.0
+
+    # 1. 低層商業ポディウム（1F〜5F, Z = 0.0m .. 32.0m）
+    add_box(
+        bm,
+        center=Vector((cx, cy, 16.0)),
+        size=Vector((w_x, d_y, 32.0)),
+        mat_idx=2,
+    )
+    # 1F〜2F 路面ショーウィンドウ＆ウォームロビー発光ガラス
+    add_box(
+        bm,
+        center=Vector((cx, cy, 4.8)),
+        size=Vector((w_x + 0.35, d_y + 0.35, 8.2)),
+        mat_idx=6,
+    )
+
+    # 段状ランドスケープテラス「にぎわいSTAGE」（東側・北東側に向かって階段状にせり出す4層の緑化デッキ）
+    for step_idx in range(4):
+        step_z = 8.2 + step_idx * 5.8
+        terrace_ext_y = 4.2 - step_idx * 0.75
+        terrace_y = cy + d_y * 0.5 + terrace_ext_y * 0.5
+        # 白アルミデッキスラブ
+        add_box(
+            bm,
+            center=Vector((cx + 2.0, terrace_y, step_z)),
+            size=Vector((w_x - step_idx * 3.2, terrace_ext_y + 1.4, 1.15)),
+            mat_idx=0,
+        )
+        # 植栽グリーンプランター帯
+        add_box(
+            bm,
+            center=Vector((cx + 2.0, terrace_y + terrace_ext_y * 0.28, step_z + 0.92)),
+            size=Vector((w_x - step_idx * 3.6 - 1.5, 1.35, 0.85)),
+            mat_idx=4,
+        )
+        # ガラス手すり＆ウォーム間接照明
+        add_box(
+            bm,
+            center=Vector((cx + 2.0, terrace_y + terrace_ext_y * 0.45, step_z + 1.15)),
+            size=Vector((w_x - step_idx * 3.6, 0.22, 1.1)),
+            mat_idx=6,
+        )
+
+    # 東面・北東角の象徴的な「KINETIC GATE（ときめきSTAGE）」チェリーピンク発光ガラスアトリウム
+    gate_cx = cx + 12.5
+    gate_cy = cy + d_y * 0.5 + 1.8
+    # アトリウム背面のブルーグレーガラスコア
+    add_box(
+        bm,
+        center=Vector((gate_cx, gate_cy - 0.35, 17.5)),
+        size=Vector((22.4, 4.6, 25.0)),
+        mat_idx=1,
+    )
+    # KINETIC GATE の3層ガラスステージボックス（チェリーピンク発光＋ウォームアトリウム交互配置）
+    for k_tier in range(4):
+        kz = 8.2 + k_tier * 6.0
+        add_box(
+            bm,
+            center=Vector((gate_cx, gate_cy + 0.15, kz)),
+            size=Vector((21.6, 4.8, 4.6)),
+            mat_idx=12 if (k_tier % 2 == 0) else 6,
+        )
+        # 各ステージ間の水平ホワイトアルミデッキバンド
+        add_box(
+            bm,
+            center=Vector((gate_cx, gate_cy + 0.45, kz - 2.55)),
+            size=Vector((22.8, 5.4, 0.72)),
+            mat_idx=0,
+        )
+    # KINETIC GATE を囲む白い立体フレームと桜色デジタルルーバー列
+    for g_rib in range(8):
+        gx = gate_cx - 10.5 + g_rib * 3.0
+        add_box(
+            bm,
+            center=Vector((gx, gate_cy + 2.55, 17.5)),
+            size=Vector((0.46, 0.72, 25.4)),
+            mat_idx=0 if (g_rib % 2 == 0) else 12,
+        )
+    # 2F 歩行者デッキ連絡ブリッジ（東側のJR渋谷駅新南改札・西口歩道橋 `by = -78.5` へ接続）
+    add_box(
+        bm,
+        center=Vector((cx + 22.0, -85.5, 7.8)),
+        size=Vector((8.5, 14.5, 0.85)),
+        mat_idx=0,
+    )
+    add_box(
+        bm,
+        center=Vector((cx + 22.0, -85.5, 9.0)),
+        size=Vector((8.5, 14.5, 1.2)),
+        mat_idx=12,
+    )
+
+    # 2. 中高層 SHIBUYAタワー（6F〜37F, Z = 32.0m .. 169.5m）
+    tw_x = 46.0
+    td_y = 40.0
+    tower_base_z = 32.0
+    tower_top_z = 169.5
+    tower_h = tower_top_z - tower_base_z
+    tower_cz = (tower_base_z + tower_top_z) * 0.5
+
+    # タワーコアガラスカーテンウォール
+    add_box(
+        bm,
+        center=Vector((cx, cy - 1.5, tower_cz)),
+        size=Vector((tw_x, td_y, tower_h)),
+        mat_idx=1,
+    )
+
+    # 17F スカイロビー＆緑化ボイドテラス（Z = 78.0m .. 85.5m）
+    sky_lobby_z = 81.8
+    add_box(
+        bm,
+        center=Vector((cx, cy - 1.5, sky_lobby_z)),
+        size=Vector((tw_x + 1.8, td_y + 1.8, 6.2)),
+        mat_idx=6,
+    )
+    add_box(
+        bm,
+        center=Vector((cx, cy - 1.5 + td_y * 0.5 + 0.8, sky_lobby_z - 2.2)),
+        size=Vector((tw_x + 2.2, 2.2, 1.4)),
+        mat_idx=4,
+    )
+
+    # 各階水平ホワイトアルミ・スパンドレルフィン＆ウォームオフィス窓バンド
+    for z_step in range(18):
+        fz = tower_base_z + 4.0 + z_step * 7.4
+        add_box(
+            bm,
+            center=Vector((cx, cy - 1.5, fz)),
+            size=Vector((tw_x + 0.65, td_y + 0.65, 0.62)),
+            mat_idx=0,
+        )
+        if z_step % 2 == 0:
+            add_box(
+                bm,
+                center=Vector((cx, cy - 1.5, fz + 2.6)),
+                size=Vector((tw_x + 0.28, td_y + 0.28, 1.25)),
+                mat_idx=6,
+            )
+
+    # 垂直ホワイトアルミマリオン列＋四隅のサクラピンク垂直ライトライン
+    for m_idx in range(9):
+        ratio = -0.44 + (m_idx / 8.0) * 0.88
+        is_corner_accent = m_idx in (0, 8)
+        m_mat = 12 if is_corner_accent else 0
+        # 東面・西面
+        for sy in [-1.0, 1.0]:
+            add_box(
+                bm,
+                center=Vector((cx + ratio * tw_x, cy - 1.5 + sy * (td_y * 0.5 + 0.25), tower_cz)),
+                size=Vector((0.52, 0.58, tower_h)),
+                mat_idx=m_mat,
+            )
+        # 北面・南面
+        for sx in [-1.0, 1.0]:
+            add_box(
+                bm,
+                center=Vector((cx + sx * (tw_x * 0.5 + 0.25), cy - 1.5 + ratio * td_y, tower_cz)),
+                size=Vector((0.58, 0.52, tower_h)),
+                mat_idx=m_mat,
+            )
+
+    # 3. 屋上メカニカルクラウン＆桜色コーニスライン（Z = 169.5m .. 179.9m）
+    add_box(
+        bm,
+        center=Vector((cx, cy - 1.5, 174.2)),
+        size=Vector((tw_x * 0.88, td_y * 0.88, 9.4)),
+        mat_idx=3,
+    )
+    add_box(
+        bm,
+        center=Vector((cx, cy - 1.5, 170.2)),
+        size=Vector((tw_x + 0.9, td_y + 0.9, 1.4)),
+        mat_idx=12,
+    )
+    add_box(
+        bm,
+        center=Vector((cx, cy - 1.5, 179.2)),
+        size=Vector((tw_x * 0.92, td_y * 0.92, 1.2)),
+        mat_idx=0,
+    )
+
+    # 四隅の航空障害灯レッドビーコン
+    for sx in [-1.0, 1.0]:
+        for sy in [-1.0, 1.0]:
+            add_cylinder_z(
+                bm,
+                center=Vector((cx + sx * (tw_x * 0.43), cy - 1.5 + sy * (td_y * 0.43), 180.3)),
+                radius=0.52,
+                height=1.1,
+                segments=12,
+                mat_idx=7,
+            )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaSakuraStage_Tower", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_shibuya_fukuras_tower(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    渋谷フクラス / 東急プラザ渋谷（Shibuya Fukuras / Tokyu Plaza Shibuya, 実寸 103.3m / 地上18階）
+    Three.js ワールド座標 (x=-815.0, z=46.0) -> Blender 座標 (bx=61.0, by=-120.0):
+    1. 1F バスターミナル・ピロティ＆エントランスロビー（Z=0.0m〜7.2m）
+    2. 東急プラザ渋谷（2F〜8F, Z=7.2m〜34.5m）:
+       - 手塚建築研究所・日建設計による「折り紙・結晶体」モチーフの多面体プリーツ・ホワイトアルミルーバー基壇
+       - 角度を交互に振ったV字プリーツスクリーンと内部の暖色商業アトリウム光・2F歩道橋連絡口
+    3. 17F 屋上庭園「SHIBUYA NIWA（シブヤニワ）」＆中層セットバックテラス（Z=34.5m〜38.5m, Z=88.0m〜92.5m）:
+       - 緑豊かなルーフトップガーデン植栽とオープンエアのカフェテラス発光
+    4. 高層オフィスタワー（9F〜18F, Z=36.0m〜103.3m）:
+       - 端正なブルーグレー反射ガラスカーテンウォール＋繊細なホワイトアルミ水平・垂直マリオン格子
+    """
+    mesh = bpy.data.meshes.new("ShibuyaFukurasMesh")
+    bm = bmesh.new()
+
+    cx = 61.0  # worldZ = 46.0 (南端 bx=38 -> worldZ=23, 北端 bx=84 -> worldZ=69: 国道246号 bx=96 をクリア)
+    cy = -120.0  # worldX = -815.0 (西端 by=-143 -> worldX=-838, 東端 by=-97 -> worldX=-792: JR線 by=-84 をクリア)
+    w_x = 46.0
+    d_y = 46.0
+
+    # 1. 1F バスターミナル・ピロティ＆商業エントランス（Z = 0.0m .. 7.5m）
+    add_box(
+        bm,
+        center=Vector((cx, cy, 3.75)),
+        size=Vector((w_x - 2.0, d_y - 2.0, 7.5)),
+        mat_idx=2,
+    )
+    add_box(
+        bm,
+        center=Vector((cx, cy + 2.0, 3.8)),
+        size=Vector((w_x - 3.2, d_y - 3.2, 6.2)),
+        mat_idx=6,
+    )
+    # 1F バスターミナル外周のピロティ列柱
+    for px_i in range(5):
+        px = cx - (w_x * 0.42) + px_i * (w_x * 0.21)
+        for py_side in [-1.0, 1.0]:
+            add_cylinder_z(
+                bm,
+                center=Vector((px, cy + py_side * (d_y * 0.45), 3.75)),
+                radius=0.62,
+                height=7.5,
+                segments=14,
+                mat_idx=3,
+            )
+
+    # 2F 東口・西口歩行者デッキと直結するエントランスブリッジ（東側 `by = -78.5` の西側連絡デッキへ接続）
+    add_box(
+        bm,
+        center=Vector((cx + 12.0, -88.0, 7.8)),
+        size=Vector((7.5, 19.0, 0.82)),
+        mat_idx=0,
+    )
+    add_box(
+        bm,
+        center=Vector((cx + 12.0, -88.0, 8.95)),
+        size=Vector((7.5, 19.0, 1.15)),
+        mat_idx=10,
+    )
+
+    # 2. 東急プラザ渋谷（2F〜8F, Z = 7.5m .. 34.5m）: 象徴的な折り紙プリーツ・ホワイトアルミルーバー基壇
+    # 内部の商業ガラスコア（ブルーグレー反射ガラス＋ウォームアトリウム）
+    add_box(
+        bm,
+        center=Vector((cx, cy, 21.0)),
+        size=Vector((w_x - 0.8, d_y - 0.8, 27.0)),
+        mat_idx=1,
+    )
+    for wf_i in range(5):
+        wz = 10.2 + wf_i * 5.2
+        add_box(
+            bm,
+            center=Vector((cx, cy, wz)),
+            size=Vector((w_x - 0.2, d_y - 0.2, 2.2)),
+            mat_idx=6,
+        )
+
+    # 多面体折り紙プリーツ水平シェルフ＆斜めファセットルーバー（手塚建築研究所の折り紙外装）
+    for p_band in range(6):
+        bz = 8.8 + p_band * 4.5
+        sign = 1.0 if (p_band % 2 == 0) else -1.0
+        # 水平プリーツキャノピーフィン
+        add_box(
+            bm,
+            center=Vector((cx, cy, bz)),
+            size=Vector((w_x + 1.8, d_y + 1.8, 0.68)),
+            mat_idx=0,
+        )
+        # 4面に走る斜め折り紙プリーツルーバー列
+        for l_idx in range(11):
+            ratio = -0.44 + (l_idx / 10.0) * 0.88
+            tilt = 0.26 * sign * (1.0 if (l_idx % 2 == 0) else -1.0)
+            # 東面・西面
+            for sy in [-1.0, 1.0]:
+                add_oriented_box(
+                    bm,
+                    center=Vector(
+                        (
+                            cx + ratio * w_x,
+                            cy + sy * (d_y * 0.5 + 0.55),
+                            bz + 2.25,
+                        )
+                    ),
+                    tangent_dir=Vector((tilt, 0.0, 1.0)).normalized(),
+                    normal_dir=Vector((0.0, sy, 0.0)),
+                    size_tangent=4.5,
+                    size_normal=1.15,
+                    size_z=0.52,
+                    mat_idx=0,
+                )
+            # 北面・南面
+            for sx in [-1.0, 1.0]:
+                add_oriented_box(
+                    bm,
+                    center=Vector(
+                        (
+                            cx + sx * (w_x * 0.5 + 0.55),
+                            cy + ratio * d_y,
+                            bz + 2.25,
+                        )
+                    ),
+                    tangent_dir=Vector((0.0, tilt, 1.0)).normalized(),
+                    normal_dir=Vector((sx, 0.0, 0.0)),
+                    size_tangent=4.5,
+                    size_normal=1.15,
+                    size_z=0.52,
+                    mat_idx=0,
+                )
+
+    # 8F テラス緑化帯（Z = 34.5m .. 36.2m）
+    add_box(
+        bm,
+        center=Vector((cx, cy, 35.1)),
+        size=Vector((w_x + 1.4, d_y + 1.4, 1.2)),
+        mat_idx=0,
+    )
+    add_box(
+        bm,
+        center=Vector((cx + 2.5, cy + 2.5, 36.0)),
+        size=Vector((w_x - 3.0, d_y - 3.0, 1.2)),
+        mat_idx=4,
+    )
+
+    # 3. 高層オフィスタワー（9F〜16F, Z = 36.0m .. 88.5m）
+    tw_x = 39.0
+    td_y = 39.0
+    tower_cz = (36.0 + 88.5) * 0.5
+    tower_h = 88.5 - 36.0
+    add_box(
+        bm,
+        center=Vector((cx - 1.5, cy - 1.5, tower_cz)),
+        size=Vector((tw_x, td_y, tower_h)),
+        mat_idx=1,
+    )
+    for f_i in range(10):
+        fz = 38.5 + f_i * 5.0
+        add_box(
+            bm,
+            center=Vector((cx - 1.5, cy - 1.5, fz)),
+            size=Vector((tw_x + 0.55, td_y + 0.55, 0.52)),
+            mat_idx=0,
+        )
+        if f_i % 2 == 1:
+            add_box(
+                bm,
+                center=Vector((cx - 1.5, cy - 1.5, fz + 2.2)),
+                size=Vector((tw_x + 0.25, td_y + 0.25, 1.15)),
+                mat_idx=6,
+            )
+    # 垂直ホワイトアルミマリオン
+    for m_i in range(7):
+        ratio = -0.42 + (m_i / 6.0) * 0.84
+        for sy in [-1.0, 1.0]:
+            add_box(
+                bm,
+                center=Vector(
+                    (cx - 1.5 + ratio * tw_x, cy - 1.5 + sy * (td_y * 0.5 + 0.2), tower_cz)
+                ),
+                size=Vector((0.42, 0.45, tower_h)),
+                mat_idx=0,
+            )
+
+    # 4. 17F〜18F 屋上庭園「SHIBUYA NIWA（シブヤニワ）」＆ルーフトップ展望ラウンジ（Z = 88.5m .. 103.3m）
+    add_box(
+        bm,
+        center=Vector((cx - 1.5, cy - 1.5, 89.2)),
+        size=Vector((tw_x + 1.4, td_y + 1.4, 1.4)),
+        mat_idx=0,
+    )
+    add_box(
+        bm,
+        center=Vector((cx + 2.5, cy + 2.5, 90.4)),
+        size=Vector((tw_x - 4.0, td_y - 4.0, 1.5)),
+        mat_idx=4,
+    )
+    # 屋上庭園を囲むクリアガラス欄干とウォームラウンジ「CÉ LA VI TOKYO」
+    add_box(
+        bm,
+        center=Vector((cx - 4.5, cy - 4.5, 95.2)),
+        size=Vector((tw_x * 0.76, td_y * 0.76, 10.2)),
+        mat_idx=1,
+    )
+    add_box(
+        bm,
+        center=Vector((cx - 4.5, cy - 4.5, 93.2)),
+        size=Vector((tw_x * 0.78, td_y * 0.78, 3.2)),
+        mat_idx=6,
+    )
+    add_box(
+        bm,
+        center=Vector((cx - 4.5, cy - 4.5, 101.5)),
+        size=Vector((tw_x * 0.80, td_y * 0.80, 3.6)),
+        mat_idx=0,
+    )
+
+    # 航空障害灯レッドビーコン
+    for sx in [-1.0, 1.0]:
+        for sy in [-1.0, 1.0]:
+            add_cylinder_z(
+                bm,
+                center=Vector((cx - 4.5 + sx * 13.5, cy - 4.5 + sy * 13.5, 103.8)),
+                radius=0.45,
+                height=1.0,
+                segments=12,
+                mat_idx=7,
+            )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaFukuras_Tower", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_shibuya_miyashita_park_complex(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    MIYASHITA PARK / sequence MIYASHITA PARK（宮下公園・レイヤードミヤシタパーク, 実寸 71.8m / 地上18階）
+    Three.js ワールド座標 (x=-695.0, z=248.0) -> Blender 座標 (bx=263.0, by=0.0):
+    1. 低層商業施設「RAYARD MIYASHITA PARK」（1F〜3F, Z=0.0m〜16.5m, 全長 70.0m × 幅 42.0m）:
+       - 1F「渋谷横丁（Shibuya Yokocho）」の暖色提灯・ネオン飲食街アーケード（西面＝明治通り沿い `by = -21.0`）
+       - 2F/3F オープンエア商業回廊（キャンチレバーデッキ・ガラス手すり・階段）
+    2. 4F 屋上立体都市公園「渋谷区立宮下公園」（Z=16.5m〜25.2m）:
+       - 全面に広がる屋上芝生広場・植栽ツリー・スケート場＆ボルダリングウォール
+       - 宮下公園の最も象徴的な「ボタニカル・パラボラアーチ鉄骨フレーム（10連の白/亜鉛めっきアーチキャノピー）」
+       - 屋上中央のガラスパビリオンカフェ（Starbucks Coffee MIYASHITA PARK 店モチーフ）
+    3. 北端のホテルタワー「sequence MIYASHITA PARK」（4F〜18F, Z=16.5m〜71.8m）:
+       - 北側（`bx = 284.7`）にそびえるダークグレー＆ブルーグレーガラスの18階建てライフスタイルホテル棟
+    """
+    mesh = bpy.data.meshes.new("ShibuyaMiyashitaParkMesh")
+    bm = bmesh.new()
+
+    cx = 263.0  # worldZ = 248.0 (南端 bx=228 -> worldZ=213: 宮下美竹通り worldZ=195 を完全クリア)
+    cy = 0.0  # worldX = -695.0 (西端 by=-21 -> worldX=-716: 明治通り東歩道外縁をクリア)
+    w_x = 70.0
+    d_y = 42.0
+    park_deck_z = 16.5
+
+    # 1. 1F〜3F 商業施設「RAYARD MIYASHITA PARK」基壇
+    add_box(
+        bm,
+        center=Vector((cx, cy, park_deck_z * 0.5)),
+        size=Vector((w_x, d_y, park_deck_z)),
+        mat_idx=2,
+    )
+    # 1F「渋谷横丁」暖色飲食街アーケード（明治通り側 `by = -21.0` に連なる賑わい発光帯）
+    add_box(
+        bm,
+        center=Vector((cx - 4.0, cy - d_y * 0.5 - 0.25, 3.6)),
+        size=Vector((w_x - 6.0, 1.2, 5.2)),
+        mat_idx=6,
+    )
+    # 渋谷横丁の赤・アンバー提灯ランタン列
+    for yoko_i in range(14):
+        yx = cx - w_x * 0.44 + yoko_i * (w_x * 0.88 / 13.0)
+        add_box(
+            bm,
+            center=Vector((yx, cy - d_y * 0.5 - 0.95, 5.4)),
+            size=Vector((1.8, 0.55, 0.95)),
+            mat_idx=11 if (yoko_i % 2 == 0) else 13,
+        )
+
+    # 2F・3F オープンエア商業デッキスラブ＆緑化プランター
+    for floor_z in [6.2, 11.4, 16.5]:
+        add_box(
+            bm,
+            center=Vector((cx, cy, floor_z)),
+            size=Vector((w_x + 1.8, d_y + 1.8, 0.95)),
+            mat_idx=0,
+        )
+        add_box(
+            bm,
+            center=Vector((cx, cy - d_y * 0.5 - 0.65, floor_z + 1.05)),
+            size=Vector((w_x + 1.4, 0.24, 1.15)),
+            mat_idx=6,
+        )
+
+    # 2. 4F 屋上芝生公園「宮下公園」(Z = 16.5m .. 25.2m)
+    add_box(
+        bm,
+        center=Vector((cx - 8.0, cy, park_deck_z + 0.75)),
+        size=Vector((w_x - 14.0, d_y - 2.0, 1.1)),
+        mat_idx=4,
+    )
+    # 屋上中央のガラスパビリオンカフェ
+    add_box(
+        bm,
+        center=Vector((cx - 12.0, cy - 2.0, park_deck_z + 2.8)),
+        size=Vector((14.0, 10.5, 4.2)),
+        mat_idx=6,
+    )
+    add_box(
+        bm,
+        center=Vector((cx - 12.0, cy - 2.0, park_deck_z + 5.1)),
+        size=Vector((15.6, 12.0, 0.55)),
+        mat_idx=0,
+    )
+
+    # 象徴的な「ボタニカル・パラボラアーチ鉄骨フレーム列」（屋上公園を跨ぐ10連の白/シルバーアーチキャノピー）
+    for arch_i in range(10):
+        ax = (cx - w_x * 0.45) + arch_i * (w_x * 0.70 / 9.0)
+        # 左右のアーチ垂直脚柱: y = ±19.5m, Z = 16.5m .. 21.5m (高さ 5.0m)
+        for side_y in [-1.0, 1.0]:
+            ay = cy + side_y * 19.5
+            add_box(
+                bm,
+                center=Vector((ax, ay, park_deck_z + 2.5)),
+                size=Vector((0.75, 0.85, 5.0)),
+                mat_idx=0,
+            )
+            # 斜めニーブレース（アーチ肩部）: (y=±19.5, z=21.5) から (y=±10.5, z=24.8) を正確に結ぶ
+            brace_dy = -side_y * 9.0
+            brace_dz = 3.3
+            brace_len = math.hypot(brace_dy, brace_dz) + 0.65
+            t_vec = Vector((0.0, brace_dy, brace_dz)).normalized()
+            n_vec = Vector((1.0, 0.0, 0.0))
+            add_oriented_box(
+                bm,
+                center=Vector((ax, cy + side_y * 15.0, park_deck_z + 6.65)),
+                tangent_dir=t_vec,
+                normal_dir=n_vec,
+                size_tangent=brace_len,
+                size_normal=0.72,
+                size_z=0.72,
+                mat_idx=0,
+            )
+        # アーチ頂部水平ビーム: y = -10.8 .. +10.8m, Z = 24.8m
+        add_box(
+            bm,
+            center=Vector((ax, cy, park_deck_z + 8.3)),
+            size=Vector((0.78, 21.8, 0.78)),
+            mat_idx=0,
+        )
+
+    # アーチ列を縦断連結するルーバーパーゴラ＆植栽グリーンネット
+    for purlin_y in [-13.5, -7.5, 0.0, 7.5, 13.5]:
+        pz = (park_deck_z + 8.3) if abs(purlin_y) <= 10.5 else (park_deck_z + 7.2)
+        add_box(
+            bm,
+            center=Vector((cx - 7.0, cy + purlin_y, pz)),
+            size=Vector((w_x * 0.72, 0.48, 0.48)),
+            mat_idx=3,
+        )
+
+    # 3. 北端の18階建てホテルタワー「sequence MIYASHITA PARK」（Z = 16.5m .. 71.8m）
+    hotel_cx = cx + w_x * 0.31  # bx = 284.7 (北側)
+    hotel_cy = cy + 1.0
+    hw_x = 22.0
+    hd_y = 34.0
+    hotel_base_z = 16.5
+    hotel_top_z = 71.8
+    hotel_h = hotel_top_z - hotel_base_z
+    hotel_cz = (hotel_base_z + hotel_top_z) * 0.5
+
+    add_box(
+        bm,
+        center=Vector((hotel_cx, hotel_cy, hotel_cz)),
+        size=Vector((hw_x, hd_y, hotel_h)),
+        mat_idx=1,
+    )
+    # ホテル外装のダークチャコール＆白アルミ縦ルーバーと客室照明バンド
+    for hf_i in range(9):
+        hf_z = hotel_base_z + 4.5 + hf_i * 5.8
+        add_box(
+            bm,
+            center=Vector((hotel_cx, hotel_cy, hf_z)),
+            size=Vector((hw_x + 0.5, hd_y + 0.5, 0.52)),
+            mat_idx=0,
+        )
+        if hf_i % 2 == 0:
+            add_box(
+                bm,
+                center=Vector((hotel_cx, hotel_cy, hf_z + 2.4)),
+                size=Vector((hw_x + 0.25, hd_y + 0.25, 1.15)),
+                mat_idx=6,
+            )
+    # 屋上クラウン＆航空障害灯
+    add_box(
+        bm,
+        center=Vector((hotel_cx, hotel_cy, 70.2)),
+        size=Vector((hw_x * 0.86, hd_y * 0.86, 3.2)),
+        mat_idx=2,
+    )
+    for sx in [-1.0, 1.0]:
+        for sy in [-1.0, 1.0]:
+            add_cylinder_z(
+                bm,
+                center=Vector((hotel_cx + sx * 8.5, hotel_cy + sy * 13.5, 72.3)),
+                radius=0.42,
+                height=0.95,
+                segments=12,
+                mat_idx=7,
+            )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaMiyashitaPark_Complex", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_shibuya_qfront_109_complex(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    QFRONT・SHIBUYA109 街区（渋谷スクランブル交差点北西〜道玄坂分岐ランドマーク群, 実寸 78.5m / 地上16階）
+    Three.js ワールド座標 (x=-815.0, z=248.0) -> Blender 座標 (bx=263.0, by=-120.0):
+    1. QFRONT（キューフロント: 東側＝スクランブル交差点・明治通り側 `bx = 256.0, by = -104.0`, Z=0.0m〜47.5m）:
+       - 渋谷スクランブル交差点（南東側）に正対する象徴的な曲面ガラスカーテンウォール
+       - 壁面全体を覆う大型湾曲LEDビジョン「Q'S EYE」（シアンブルー＆マゼンタ発光）
+       - 2F「SHIBUYA TSUTAYA / Starbucks Coffee」のスクランブル交差点展望リボンウィンドウ（ウォーム発光帯）
+    2. SHIBUYA109（シブヤ109: 南西角・道玄坂二股分岐先端 `bx = 247.0, by = -131.5`, Z=0.0m〜78.5m）:
+       - 竹山実設計の象徴的な「鏡面シルバーメタリック円筒シリンダータワー」（半径 10.6m, 高さ 78.5m）が南東のハチ公前広場側からも遮られずに聳え立つ配置
+       - シリンダー頂部（Z=60.0m〜75.0m）の象徴的なマゼンタレッド発光クラウンバンド＆「109」立体ブロックロゴ
+       - 8階建て段状商業ビル本体と屋上テラス・航空障害灯
+    """
+    mesh = bpy.data.meshes.new("ShibuyaQfront109Mesh")
+    bm = bmesh.new()
+
+    cx = 263.0  # worldZ = 248.0 (南端 bx=238 -> worldZ=223: 宮下美竹通り worldZ=195 をクリア)
+    cy = (
+        -120.0
+    )  # worldX = -815.0 (西端 by=-143 -> worldX=-838, 東端 by=-97 -> worldX=-792: 明治通りをクリア)
+    w_x = 50.0
+    d_y = 46.0
+
+    # 1. 街区共通の低層商業ポディウム（1F〜5F, Z = 0.0m .. 24.0m）
+    add_box(
+        bm,
+        center=Vector((cx + 2.0, cy, 12.0)),
+        size=Vector((w_x - 8.0, d_y - 6.0, 24.0)),
+        mat_idx=2,
+    )
+    # 1F〜2F スクランブル交差点・文化村通り路面ショーウィンドウ
+    add_box(
+        bm,
+        center=Vector((cx, cy + 2.0, 5.2)),
+        size=Vector((w_x - 6.0, d_y - 4.0, 8.8)),
+        mat_idx=6,
+    )
+
+    # 2. QFRONT（南東〜東側 `bx = 252.0, by = -104.5`: 明治通り・スクランブル交差点に面する曲面メディアビル）
+    qfront_cx = cx - 9.0
+    qfront_cy = cy + 12.5
+    add_box(
+        bm,
+        center=Vector((qfront_cx + 4.0, qfront_cy, 23.0)),
+        size=Vector((24.0, 18.0, 46.0)),
+        mat_idx=1,
+    )
+    # スクランブル交差点側（南東角 `bx = 244.5, by = -101.5`）の曲面ガラス＆大型湾曲LEDビジョン「Q'S EYE」
+    q_corner_x = cx - 16.5
+    q_corner_y = cy + 15.5
+    add_cylinder_z(
+        bm,
+        center=Vector((q_corner_x, q_corner_y, 23.75)),
+        radius=9.2,
+        height=47.5,
+        segments=24,
+        mat_idx=1,
+    )
+    # 2F〜3F スターバックス展望ガラスバンド（Z = 5.5m .. 12.5m）
+    add_cylinder_z(
+        bm,
+        center=Vector((q_corner_x, q_corner_y, 9.0)),
+        radius=9.48,
+        height=6.8,
+        segments=24,
+        mat_idx=6,
+    )
+    # 大型湾曲LEDビジョン「Q'S EYE」（Z = 14.5m .. 39.5m: シアンブルー発光＋白/マゼンタフレーム）
+    add_cylinder_z(
+        bm,
+        center=Vector((q_corner_x, q_corner_y, 27.0)),
+        radius=9.65,
+        height=24.0,
+        segments=24,
+        mat_idx=10,
+    )
+    for border_z in [14.6, 27.0, 39.4]:
+        add_cylinder_z(
+            bm,
+            center=Vector((q_corner_x, q_corner_y, border_z)),
+            radius=9.82,
+            height=1.2,
+            segments=24,
+            mat_idx=0,
+        )
+    add_cylinder_z(
+        bm,
+        center=Vector((q_corner_x, q_corner_y, 27.0)),
+        radius=9.76,
+        height=3.8,
+        segments=24,
+        mat_idx=13,
+    )
+
+    # 3. SHIBUYA109（南西角〜道玄坂分岐先端 `bx = 247.5, by = -131.0`: 南側のスクランブル交差点からも全景が見える円筒シリンダータワー）
+    cyl_cx = cx - 14.5  # bx = 248.5 (南側前面に配置し QFRONT と並んでスクランブル交差点を見下ろす)
+    cyl_cy = cy - 11.5  # by = -131.5 (西側・道玄坂分岐角)
+    cyl_r = 10.8
+    cyl_h = 86.0
+
+    # 109 背後のステップ状商業ビル本体（北西側 `bx = 266.0, by = -126.0`, Z = 0.0m .. 64.0m）
+    add_box(
+        bm,
+        center=Vector((cx + 4.0, cy - 7.5, 32.0)),
+        size=Vector((28.0, 24.0, 64.0)),
+        mat_idx=0,
+    )
+    for band_z in range(16, 62, 6):
+        add_box(
+            bm,
+            center=Vector((cx + 4.0, cy - 7.5, float(band_z))),
+            size=Vector((28.5, 24.5, 1.5)),
+            mat_idx=1,
+        )
+
+    # 竹山実設計 SHIBUYA109 象徴のメタリックシルバー円筒シリンダータワー（Z = 0.0m .. 86.0m）
+    add_cylinder_z(
+        bm,
+        center=Vector((cyl_cx, cyl_cy, cyl_h * 0.5)),
+        radius=cyl_r,
+        height=cyl_h,
+        segments=28,
+        mat_idx=0,
+    )
+    # シリンダー外周の水平ステンレス目地リング（Z = 10m .. 62m）
+    for ring_z in range(10, 64, 6):
+        add_cylinder_z(
+            bm,
+            center=Vector((cyl_cx, cyl_cy, float(ring_z))),
+            radius=cyl_r + 0.22,
+            height=0.55,
+            segments=28,
+            mat_idx=3,
+        )
+    # 1F エントランス・リボンキャノピー＆ウォームショーウィンドウ
+    add_cylinder_z(
+        bm,
+        center=Vector((cyl_cx, cyl_cy, 4.2)),
+        radius=cyl_r + 0.38,
+        height=7.2,
+        segments=28,
+        mat_idx=6,
+    )
+    add_cylinder_z(
+        bm,
+        center=Vector((cyl_cx, cyl_cy, 8.2)),
+        radius=cyl_r + 1.25,
+        height=0.85,
+        segments=28,
+        mat_idx=13,
+    )
+
+    # シリンダー頂部（Z = 65.0m .. 82.0m）のホワイトパネル＆象徴的なマゼンタレッド発光クラウンバンド
+    add_cylinder_z(
+        bm,
+        center=Vector((cyl_cx, cyl_cy, 73.5)),
+        radius=cyl_r + 0.38,
+        height=16.5,
+        segments=28,
+        mat_idx=0,
+    )
+    for pink_z in [67.8, 79.2]:
+        add_cylinder_z(
+            bm,
+            center=Vector((cyl_cx, cyl_cy, pink_z)),
+            radius=cyl_r + 0.62,
+            height=1.65,
+            segments=28,
+            mat_idx=13,
+        )
+    # シリンダー正面（スクランブル交差点・明治通り向き南東面）の立体マゼンタ「1 0 9」ジオメトリック・エンブレム（Z = 73.5m）
+    # 南東（スクランブル交差点・明治通り側 bx=185..210, by=-55）からシリンダー (248.5, -131.5) を見たとき、
+    # 法線方向は (-0.54, 0.84, 0.0)、観察者から見た右方向（接線）は (-0.84, -0.54, 0.0)
+    logo_dir = Vector((-0.54, 0.84, 0.0)).normalized()
+    logo_tan = Vector((-0.84, -0.54, 0.0)).normalized()
+    logo_center = Vector((cyl_cx, cyl_cy, 73.5)) + logo_dir * (cyl_r + 0.92)
+    # シリンダー曲面に負けない高コントラスト白アルミバッキングプレート
+    add_oriented_box(
+        bm,
+        center=Vector((cyl_cx, cyl_cy, 73.5)) + logo_dir * (cyl_r + 0.45),
+        tangent_dir=logo_tan,
+        normal_dir=logo_dir,
+        size_tangent=11.8,
+        size_normal=0.72,
+        size_z=7.4,
+        mat_idx=0,
+    )
+    # "1" (左縦バー + トップセリフ)
+    add_oriented_box(
+        bm,
+        center=logo_center - logo_tan * 4.15,
+        tangent_dir=logo_tan,
+        normal_dir=logo_dir,
+        size_tangent=1.35,
+        size_normal=1.10,
+        size_z=6.0,
+        mat_idx=13,
+    )
+    add_oriented_box(
+        bm,
+        center=logo_center - logo_tan * 4.65 + Vector((0.0, 0.0, 2.35)),
+        tangent_dir=logo_tan,
+        normal_dir=logo_dir,
+        size_tangent=1.15,
+        size_normal=1.10,
+        size_z=1.25,
+        mat_idx=13,
+    )
+    # "0" (中央リング)
+    add_extruded_arc_ring(
+        bm,
+        center=logo_center - logo_tan * 0.35,
+        tangent_dir=logo_tan,
+        normal_dir=logo_dir,
+        outer_r=2.65,
+        inner_r=1.32,
+        depth=1.10,
+        start_deg=0.0,
+        end_deg=360.0,
+        segments=20,
+        mat_idx=13,
+    )
+    # "9" (上部ループ + 右縦ステム + 下部ボトムフック)
+    add_extruded_arc_ring(
+        bm,
+        center=logo_center,
+        tangent_dir=logo_tan,
+        normal_dir=logo_dir,
+        outer_r=1.95,
+        inner_r=0.82,
+        depth=1.10,
+        start_deg=0.0,
+        end_deg=360.0,
+        segments=18,
+        mat_idx=13,
+        offset_t=3.55,
+        offset_z=1.15,
+    )
+    add_oriented_box(
+        bm,
+        center=logo_center + logo_tan * 4.92 - Vector((0.0, 0.0, 0.45)),
+        tangent_dir=logo_tan,
+        normal_dir=logo_dir,
+        size_tangent=1.25,
+        size_normal=1.10,
+        size_z=5.1,
+        mat_idx=13,
+    )
+    add_oriented_box(
+        bm,
+        center=logo_center + logo_tan * 3.65 - Vector((0.0, 0.0, 2.42)),
+        tangent_dir=logo_tan,
+        normal_dir=logo_dir,
+        size_tangent=3.2,
+        size_normal=1.10,
+        size_z=1.22,
+        mat_idx=13,
+    )
+
+    # シリンダー最上部のダークスチール冠部＆航空障害灯（Z = 82.2m .. 86.0m）
+    add_cylinder_z(
+        bm,
+        center=Vector((cyl_cx, cyl_cy, 84.1)),
+        radius=cyl_r * 0.88,
+        height=3.6,
+        segments=24,
+        mat_idx=2,
+    )
+    for ang_deg in [0.0, 90.0, 180.0, 270.0]:
+        rad = math.radians(ang_deg)
+        add_cylinder_z(
+            bm,
+            center=Vector(
+                (
+                    cyl_cx + math.cos(rad) * (cyl_r * 0.78),
+                    cyl_cy + math.sin(rad) * (cyl_r * 0.78),
+                    86.5,
+                )
+            ),
+            radius=0.45,
+            height=1.0,
+            segments=12,
+            mat_idx=7,
+        )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaQfront109_Complex", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
 def generate_shibuya_stream():
-    """渋谷ストリーム（Shibuya Stream）3Dモデル全体を生成し GLB としてエクスポートする"""
+    """渋谷ストリームおよび渋谷駅周辺8大ランドマーク・首都高3号渋谷線高架橋の3Dモデル全体を生成し GLB としてエクスポートする"""
     clean_scene()
     materials = setup_materials()
 
@@ -1156,7 +2956,31 @@ def generate_shibuya_stream():
     stream_signage = build_stream_architectural_signage(materials)
     stream_signage.parent = root
 
-    print("High-precision Shibuya Stream modeling complete! Hierarchy:")
+    shutoko_viaduct = build_shutoko_route3_viaduct(materials)
+    shutoko_viaduct.parent = root
+
+    scramble_square = build_shibuya_scramble_square_tower(materials)
+    scramble_square.parent = root
+
+    hikarie = build_shibuya_hikarie_tower(materials)
+    hikarie.parent = root
+
+    pedestrian_deck = build_shibuya_pedestrian_deck_and_rail_overpass(materials)
+    pedestrian_deck.parent = root
+
+    sakura_stage = build_shibuya_sakura_stage_tower(materials)
+    sakura_stage.parent = root
+
+    fukuras = build_shibuya_fukuras_tower(materials)
+    fukuras.parent = root
+
+    miyashita_park = build_shibuya_miyashita_park_complex(materials)
+    miyashita_park.parent = root
+
+    qfront_109 = build_shibuya_qfront_109_complex(materials)
+    qfront_109.parent = root
+
+    print("High-precision Shibuya Station District & Shutoko Viaduct modeling complete! Hierarchy:")
     for obj in bpy.data.objects:
         p_name = obj.parent.name if obj.parent else "None"
         print(f"  - {obj.name} (Type: {obj.type}, Parent: {p_name})")
@@ -1175,12 +2999,12 @@ def generate_shibuya_stream():
         export_extras=True,
     )
     print(
-        f"Successfully exported Shibuya Stream model to: {out_path} ({os.path.getsize(out_path):,} bytes)"
+        f"Successfully exported Shibuya Stream & Landmarks model to: {out_path} ({os.path.getsize(out_path):,} bytes)"
     )
 
 
 def render_360_review(review_dir: str):
-    """360度マルチアングル（12視点）の検証レンダリング画像を出力する"""
+    """360度マルチアングル（16視点：渋谷ストリーム・首都高3号渋谷線・スクランブルSQ・ヒカリエ・サクラステージ・フクラス・MIYASHITA PARK・QFRONT/109を含む）の検証レンダリング画像を出力する"""
     os.makedirs(review_dir, exist_ok=True)
     scene = bpy.context.scene
     avail_engines = [
@@ -1221,33 +3045,67 @@ def render_360_review(review_dir: str):
 
     cam_data = bpy.data.cameras.new("ReviewCamera")
     cam_data.lens = 35.0
-    cam_data.clip_end = 1500.0
+    cam_data.clip_end = 2000.0
     cam_obj = bpy.data.objects.new("ReviewCamera", cam_data)
     scene.collection.objects.link(cam_obj)
     scene.camera = cam_obj
 
     views = [
-        ("00_front_meijidori", Vector((0.0, -245.0, 92.0)), Vector((0.0, 0.0, 88.0)), 35.0),
-        ("01_diag_front_right", Vector((175.0, -185.0, 95.0)), Vector((0.0, 0.0, 88.0)), 35.0),
-        ("02_right_ebisu", Vector((245.0, 0.0, 92.0)), Vector((0.0, 0.0, 88.0)), 35.0),
-        ("03_diag_back_right", Vector((175.0, 185.0, 95.0)), Vector((0.0, 0.0, 88.0)), 35.0),
-        ("04_back_river", Vector((0.0, 245.0, 92.0)), Vector((0.0, 0.0, 88.0)), 35.0),
-        ("05_diag_back_left", Vector((-175.0, 185.0, 95.0)), Vector((0.0, 0.0, 88.0)), 35.0),
-        ("06_left_station", Vector((-245.0, 0.0, 92.0)), Vector((0.0, 0.0, 88.0)), 35.0),
-        ("07_diag_front_left", Vector((-175.0, -185.0, 95.0)), Vector((0.0, 0.0, 88.0)), 35.0),
-        ("08_birdseye_crown", Vector((-125.0, -145.0, 235.0)), Vector((0.0, 0.0, 130.0)), 38.0),
-        ("09_driver_eye_level", Vector((-6.0, -68.0, 1.8)), Vector((-2.0, -20.0, 16.0)), 28.0),
+        ("00_front_meijidori", Vector((0.0, -245.0, 92.0)), Vector((40.0, -30.0, 88.0)), 32.0),
+        ("01_diag_front_right", Vector((245.0, -225.0, 105.0)), Vector((65.0, -45.0, 95.0)), 32.0),
+        ("02_right_north_246", Vector((350.0, -55.0, 105.0)), Vector((120.0, -55.0, 75.0)), 30.0),
+        ("03_diag_back_right", Vector((245.0, 165.0, 105.0)), Vector((65.0, -20.0, 95.0)), 32.0),
+        ("04_back_east_hikarie", Vector((45.0, 235.0, 95.0)), Vector((55.0, -30.0, 90.0)), 32.0),
+        ("05_diag_back_left", Vector((-165.0, 185.0, 95.0)), Vector((35.0, -25.0, 88.0)), 32.0),
+        ("06_left_south_ebisu", Vector((-235.0, -55.0, 92.0)), Vector((55.0, -55.0, 88.0)), 32.0),
+        ("07_diag_front_left", Vector((-175.0, -245.0, 95.0)), Vector((45.0, -65.0, 88.0)), 32.0),
         (
-            "10_closeup_podium_signage",
-            Vector((-10.0, -56.0, 14.0)),
-            Vector((-2.0, -21.0, 21.0)),
-            38.0,
+            "08_birdseye_district",
+            Vector((-160.0, -250.0, 320.0)),
+            Vector((110.0, -55.0, 85.0)),
+            28.0,
         ),
         (
-            "11_closeup_highrise_signage",
-            Vector((0.0, -68.0, 148.0)),
-            Vector((0.0, -19.5, 152.0)),
-            45.0,
+            "09_driver_eye_meijidori_north",
+            Vector((-27.0, -50.0, 1.8)),
+            Vector((135.0, -55.0, 38.0)),
+            22.0,
+        ),
+        (
+            "10_driver_eye_under_shutoko_246",
+            Vector((110.0, -68.0, 2.0)),
+            Vector((110.0, 30.0, 13.5)),
+            24.0,
+        ),
+        (
+            "11_closeup_scramble_sky_and_hikarie",
+            Vector((-35.0, -55.0, 135.0)),
+            Vector((160.0, -55.0, 140.0)),
+            24.0,
+        ),
+        (
+            "12_driver_eye_sakura_stage_and_fukuras",
+            Vector((-35.0, -48.0, 2.2)),
+            Vector((35.0, -115.0, 42.0)),
+            22.0,
+        ),
+        (
+            "13_driver_eye_miyashita_and_qfront_109",
+            Vector((185.0, -55.0, 2.4)),
+            Vector((263.0, -60.0, 32.0)),
+            22.0,
+        ),
+        (
+            "14_closeup_qfront_and_shibuya109",
+            Vector((205.0, -55.0, 28.0)),
+            Vector((265.0, -120.0, 38.0)),
+            26.0,
+        ),
+        (
+            "15_closeup_miyashita_park_arches",
+            Vector((200.0, -65.0, 34.0)),
+            Vector((263.0, 0.0, 26.0)),
+            26.0,
         ),
     ]
 
@@ -1268,5 +3126,5 @@ if __name__ == "__main__":
     generate_shibuya_stream()
     if "--render-review" in sys.argv:
         idx = sys.argv.index("--render-review")
-        target_dir = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else "/tmp/shibuya_review_r2"
+        target_dir = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else "/tmp/shibuya_review_r3"
         render_360_review(target_dir)

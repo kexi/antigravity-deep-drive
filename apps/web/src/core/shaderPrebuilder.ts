@@ -411,13 +411,24 @@ export async function prebuildSceneShaders(
   const compileSceneWithCamera = async (targetScene: THREE.Object3D, camera: THREE.Camera) => {
     const hasCompileAsync = typeof renderer.compileAsync === "function";
     if (hasCompileAsync) {
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
       try {
-        await renderer.compileAsync!(targetScene, camera);
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("compileAsync timeout"));
+          }, 4000);
+        });
+        await Promise.race([renderer.compileAsync!(targetScene, camera), timeoutPromise]);
         usedAsyncCompile = true;
         compiledScenesCount += 1;
         return;
       } catch {
-        // KHR_parallel_shader_compile 等で非同期コンパイルが失敗した場合は同期 compile へフォールバックする
+        // KHR_parallel_shader_compile 等で非同期コンパイルが失敗またはタイムアウトした場合は同期 compile へフォールバックする
+      } finally {
+        const hasTimeout = timeoutId !== null;
+        if (hasTimeout) {
+          clearTimeout(timeoutId!);
+        }
       }
     }
 

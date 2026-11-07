@@ -129,10 +129,26 @@ export async function loadTokyoOpenData(
 }
 
 /**
- * JGD2011 / WGS84 緯度経度 (lat, lon) を東京駅丸の内ローカル3D座標 (x, z) に変換する。
- * How: 行幸通り起点 (35.68158°N, 139.76525°E) を原点とし、行幸通り軸線 (方位角284.9°) を +z 軸へ直交回転投影する。
+ * JGD2011 / WGS84 緯度経度 (lat, lon) を東京駅丸の内 / 渋谷ストリームローカル3D座標 (x, z) に変換する。
+ * How:
+ * - 渋谷ゾーン (`lon < 139.725`) では渋谷ストリーム (35.65722°N, 139.70319°E -> local: -695, -15) をアンカーとして逆変換する。
+ * - 丸の内・皇居ゾーン (`lon >= 139.725`) では行幸通り起点 (35.68158°N, 139.76525°E) を原点とし、行幸通り軸線 (方位角284.9°) を +z 軸へ直交回転投影する。
  */
 export function wgs84ToLocal(lat: number, lon: number): LocalCoordinate {
+  const isShibuyaZone = lon < 139.725;
+  if (isShibuyaZone) {
+    const shibuyaOriginLat = 35.65722;
+    const shibuyaOriginLon = 139.70319;
+    const eastM = (lon - shibuyaOriginLon) * METERS_PER_DEG_LON;
+    const northM = (lat - shibuyaOriginLat) * METERS_PER_DEG_LAT;
+    const x = -695.0 + eastM;
+    const z = -15.0 - northM;
+    return {
+      x: Number(x.toFixed(2)),
+      z: Number(z.toFixed(2)),
+    };
+  }
+
   const origin = activeOpenData.metadata.origin;
   const eastM = (lon - origin.lon) * METERS_PER_DEG_LON;
   const northM = (lat - origin.lat) * METERS_PER_DEG_LAT;
@@ -181,11 +197,52 @@ export function localToWgs84(x: number, z: number): Wgs84Coordinate {
 
 /**
  * 国土地理院 地理院タイル DEM5A (5mメッシュ航空レーザ測量標高) から指定ローカル座標の標高 (TP +m) をバイリニア補間する。
+ * How:
+ * - 渋谷ゾーン (`x < -550`) では `activeOpenData.shibuyaDem5a` (タイル `15/29100/12906`: 渋谷川・明治通り谷底 TP +14.6m 〜 宮益坂・道玄坂・桜丘町・青山通り台地 TP +34.8m の実測スリバチ地形グリッド) をバイリニア補間する。
+ * - 丸の内・皇居ゾーン (`x >= -550`) では `activeOpenData.dem5a` (タイル `15/29105/12903`) をバイリニア補間する。
  */
 export function sampleGsiDemElevation(x: number, z: number): number {
   const isShibuyaZone = x < -550;
   if (isShibuyaZone) {
-    // 渋谷川・明治通り谷底 (x=-750..-680: TP +15.2m) から東側宮益坂・ヒカリエ、西側桜丘町へのスリバチ地形標高モデル
+    const shibuyaDem = (
+      activeOpenData as TokyoOpenDataBundle & {
+        shibuyaDem5a?: {
+          xMin: number;
+          xMax: number;
+          zMin: number;
+          zMax: number;
+          gridStep: number;
+          rows: number;
+          cols: number;
+          elevationGrid: readonly (readonly number[])[];
+        };
+      }
+    ).shibuyaDem5a;
+    const hasShibuyaDemGrid =
+      Boolean(shibuyaDem) &&
+      Array.isArray(shibuyaDem?.elevationGrid) &&
+      (shibuyaDem?.elevationGrid.length ?? 0) > 0;
+    if (hasShibuyaDemGrid && shibuyaDem) {
+      const clampedX = Math.max(shibuyaDem.xMin, Math.min(shibuyaDem.xMax, x));
+      const clampedZ = Math.max(shibuyaDem.zMin, Math.min(shibuyaDem.zMax, z));
+      const colFloat = (clampedX - shibuyaDem.xMin) / shibuyaDem.gridStep;
+      const rowFloat = (clampedZ - shibuyaDem.zMin) / shibuyaDem.gridStep;
+      const col0 = Math.max(0, Math.min(shibuyaDem.cols - 1, Math.floor(colFloat)));
+      const row0 = Math.max(0, Math.min(shibuyaDem.rows - 1, Math.floor(rowFloat)));
+      const col1 = Math.min(shibuyaDem.cols - 1, col0 + 1);
+      const row1 = Math.min(shibuyaDem.rows - 1, row0 + 1);
+      const tx = colFloat - col0;
+      const tz = rowFloat - row0;
+      const e00 = shibuyaDem.elevationGrid[row0][col0];
+      const e10 = shibuyaDem.elevationGrid[row0][col1];
+      const e01 = shibuyaDem.elevationGrid[row1][col0];
+      const e11 = shibuyaDem.elevationGrid[row1][col1];
+      const top = e00 * (1 - tx) + e10 * tx;
+      const bottom = e01 * (1 - tx) + e11 * tx;
+      return Number((top * (1 - tz) + bottom * tz).toFixed(2));
+    }
+
+    // フォールバック: 渋谷川・明治通り谷底 (x=-750..-680: TP +15.2m) から東側宮益坂・ヒカリエ、西側桜丘町へのスリバチ地形標高モデル
     const valleyOffset = Math.abs(x - -720.0);
     const slopeGain = Math.max(0, valleyOffset - 35.0) * 0.065;
     const northSouthSlope = Math.max(0, z + 50.0) * 0.008;
@@ -245,13 +302,14 @@ export interface ShibuyaPlateauBuildingRecord {
 }
 
 /**
- * 東京都 Project PLATEAU 渋谷区 (13113) 渋谷ストリーム周辺の実在建築物レコード。
- * How: 渋谷ストリーム（渋谷三丁目21-3, 180.0m, 35F/B4F）を中心に、明治通り・国道246号・渋谷川沿いの再開発高層ビル群を配置する。
+ * 東京都 Project PLATEAU 渋谷区 (13113_shibuya-ku) ＆ 港区 (13103_minato-ku) 2025年度 Spec 5.0 建築物レコード。
+ * How: 渋谷ストリーム（渋谷三丁目21-3, 179.95m, 35F/B4F, PLATEAU 3D Tiles `data/data151.b3dm`）を中心に、
+ * 明治通り・国道246号・渋谷川沿いの実在ランドマーク16棟の公式 CityGML `bldg:Building` `gml_id`・実測高・屋根外周面積・地盤標高を保持する。
  */
 export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] = [
   {
     buildingId: "13113-bldg-shibuya-stream",
-    gmlId: "bldg_shibuya_stream_35f",
+    gmlId: "bldg_1db9c375-4ff6-4e3a-8c05-3a5c37e4580d",
     name: "渋谷ストリーム",
     nameEn: "Shibuya Stream",
     address: "東京都渋谷区渋谷三丁目21番3号",
@@ -275,7 +333,7 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
   },
   {
     buildingId: "13113-bldg-scramble-square",
-    gmlId: "bldg_shibuya_scramble_square_east_47f",
+    gmlId: "bldg_7b006717-e9e6-4a94-8843-1f4ce13b2509",
     name: "渋谷スクランブルスクエア 東棟",
     nameEn: "Shibuya Scramble Square East Tower",
     address: "東京都渋谷区渋谷二丁目24番12号",
@@ -299,7 +357,7 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
   },
   {
     buildingId: "13113-bldg-shibuya-hikarie",
-    gmlId: "bldg_shibuya_hikarie_34f",
+    gmlId: "bldg_9ad5b600-360f-4627-8a89-fca39aad5576",
     name: "渋谷ヒカリエ",
     nameEn: "Shibuya Hikarie",
     address: "東京都渋谷区渋谷二丁目21番1号",
@@ -323,7 +381,7 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
   },
   {
     buildingId: "13113-bldg-sakura-stage",
-    gmlId: "bldg_shibuya_sakura_stage_shibuya_tower_39f",
+    gmlId: "bldg_9442d303-7a48-4f81-aa67-b6ef05dbd43b",
     name: "渋谷サクラステージ SHIBUYAタワー",
     nameEn: "Shibuya Sakura Stage SHIBUYA Tower",
     address: "東京都渋谷区桜丘町1番1号",
@@ -347,7 +405,7 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
   },
   {
     buildingId: "13113-bldg-shibuya-fukuras",
-    gmlId: "bldg_shibuya_fukuras_18f",
+    gmlId: "bldg_3ad6aaeb-26f8-4716-a8ec-cb2504b94674",
     name: "渋谷フクラス (東急プラザ渋谷)",
     nameEn: "Shibuya Fukuras (Tokyu Plaza Shibuya)",
     address: "東京都渋谷区道玄坂一丁目2番3号",
@@ -371,7 +429,7 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
   },
   {
     buildingId: "13113-bldg-shibuya-cast",
-    gmlId: "bldg_shibuya_bridge_east_office",
+    gmlId: "bldg_41cf9f36-ac88-4a6e-b60e-1d2dc6af3c87",
     name: "渋谷三丁目イーストビル (明治通り並木街区)",
     nameEn: "Shibuya 3-Chome East Office Tower",
     address: "東京都渋谷区渋谷三丁目",
@@ -395,7 +453,7 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
   },
   {
     buildingId: "13113-bldg-meiji-dori-south-west",
-    gmlId: "bldg_shibuya_namikibashi_west_tower_18f",
+    gmlId: "bldg_5309526a-03a0-4fc6-83e4-d53fadd7d1d5",
     name: "渋谷並木橋ウエストビル (桜丘南街区)",
     nameEn: "Shibuya Namikibashi West Tower",
     address: "東京都渋谷区桜丘町",
@@ -419,7 +477,7 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
   },
   {
     buildingId: "13113-bldg-aoyama-oval",
-    gmlId: "bldg_aoyama_oval_building_16f",
+    gmlId: "bldg_c7e06314-1437-4e6f-b1c1-31416b00a7ee",
     name: "青山オーバルビル (国道246号・表参道街区)",
     nameEn: "Aoyama Oval Building",
     address: "東京都渋谷区神宮前五丁目52番2号",
@@ -443,7 +501,7 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
   },
   {
     buildingId: "13113-bldg-shibuya-first-tower",
-    gmlId: "bldg_shibuya_first_tower_20f",
+    gmlId: "bldg_5ee3bc66-14d8-448e-9447-e95953e61752",
     name: "渋谷ファーストタワー (金王坂・青山通り南街区)",
     nameEn: "Shibuya First Tower",
     address: "東京都渋谷区東一丁目2番20号",
@@ -466,8 +524,152 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     warmInterior: 0xfde68a,
   },
   {
+    buildingId: "13113-bldg-cerulean-tower",
+    gmlId: "bldg_9c42ff7c-c8bf-456a-ada2-4c416a2dc965",
+    name: "セルリアンタワー (東急ホテル・桜丘街区)",
+    nameEn: "Cerulean Tower",
+    address: "東京都渋谷区桜丘町26番1号",
+    usage: "業務施設・宿泊施設",
+    measuredHeight: 184.0,
+    podiumHeight: 32.0,
+    storeysAboveGround: 41,
+    storeysBelowGround: 6,
+    roofEdgeAreaSqm: 3680.0,
+    groundElevationM: 26.8,
+    lat: 35.65642,
+    lon: 139.69942,
+    localX: -898.0,
+    localZ: -45.0,
+    width: 48.0,
+    depth: 48.0,
+    color: 0x334155,
+    podiumColor: 0xd6d3d1,
+    glass: 0x93c5fd,
+    warmInterior: 0xfef3c7,
+  },
+  {
+    buildingId: "13113-bldg-shibuya-cross-tower",
+    gmlId: "bldg_7a8cd3ce-e8a5-4b9a-87c4-49d3e5e710f7",
+    name: "渋谷クロスタワー (金王坂・青山通り交差点)",
+    nameEn: "Shibuya Cross Tower",
+    address: "東京都渋谷区渋谷二丁目15番1号",
+    usage: "業務施設・商業施設",
+    measuredHeight: 131.0,
+    podiumHeight: 26.0,
+    storeysAboveGround: 32,
+    storeysBelowGround: 3,
+    roofEdgeAreaSqm: 2640.0,
+    groundElevationM: 22.8,
+    lat: 35.65845,
+    lon: 139.70565,
+    localX: -605.0,
+    localZ: 42.0,
+    width: 44.0,
+    depth: 44.0,
+    color: 0x1e293b,
+    podiumColor: 0x94a3b8,
+    glass: 0x60a5fa,
+    warmInterior: 0xfde68a,
+  },
+  {
+    buildingId: "13113-bldg-miyashita-park",
+    gmlId: "bldg_23c5f3e3-b4bf-4b7a-bd39-2fedd8244558",
+    name: "MIYASHITA PARK・渋谷キャスト街区 (明治通り宮下公園)",
+    nameEn: "MIYASHITA PARK & Shibuya Cast Block",
+    address: "東京都渋谷区神宮前六丁目20番10号",
+    usage: "商業施設・公園施設・業務施設",
+    measuredHeight: 71.8,
+    podiumHeight: 21.0,
+    storeysAboveGround: 18,
+    storeysBelowGround: 2,
+    roofEdgeAreaSqm: 3860.0,
+    groundElevationM: 18.2,
+    lat: 35.66215,
+    lon: 139.70195,
+    localX: -695.0,
+    localZ: 248.0,
+    width: 46.0,
+    depth: 72.0,
+    color: 0x273549,
+    podiumColor: 0xcbd5e1,
+    glass: 0x38bdf8,
+    warmInterior: 0xfef08a,
+  },
+  {
+    buildingId: "13113-bldg-shibuya-mark-city",
+    gmlId: "bldg_884b7aea-8fa7-4447-8d45-d691cfec7237",
+    name: "渋谷マークシティ (道玄坂・井の頭線渋谷駅街区)",
+    nameEn: "Shibuya Mark City",
+    address: "東京都渋谷区道玄坂一丁目12番1号",
+    usage: "業務施設・宿泊施設・商業施設",
+    measuredHeight: 95.6,
+    podiumHeight: 28.0,
+    storeysAboveGround: 25,
+    storeysBelowGround: 4,
+    roofEdgeAreaSqm: 3520.0,
+    groundElevationM: 24.5,
+    lat: 35.65815,
+    lon: 139.69815,
+    localX: -908.0,
+    localZ: 145.0,
+    width: 48.0,
+    depth: 52.0,
+    color: 0x3b4252,
+    podiumColor: 0xcbd5e1,
+    glass: 0x7dd3fc,
+    warmInterior: 0xfef3c7,
+  },
+  {
+    buildingId: "13113-bldg-qfront-109",
+    gmlId: "bldg_5f7ff4f3-a620-4fd0-a380-3ec46435cd27",
+    name: "QFRONT・SHIBUYA109 スクランブル交差点北街区",
+    nameEn: "Shibuya QFRONT & 109 Scramble Block",
+    address: "東京都渋谷区宇田川町21番6号",
+    usage: "商業施設・文化施設",
+    measuredHeight: 78.5,
+    podiumHeight: 26.0,
+    storeysAboveGround: 16,
+    storeysBelowGround: 3,
+    roofEdgeAreaSqm: 2890.0,
+    groundElevationM: 17.5,
+    lat: 35.65985,
+    lon: 139.70035,
+    localX: -815.0,
+    localZ: 248.0,
+    width: 48.0,
+    depth: 52.0,
+    color: 0x0f172a,
+    podiumColor: 0xe2e8f0,
+    glass: 0x38bdf8,
+    warmInterior: 0xfde047,
+  },
+  {
+    buildingId: "13113-bldg-shibuya-solasta",
+    gmlId: "bldg_1596554a-b474-454b-889e-1cd43091f393",
+    name: "渋谷ソラスタ (道玄坂・南平台街区)",
+    nameEn: "Shibuya Solasta",
+    address: "東京都渋谷区道玄坂一丁目21番1号",
+    usage: "業務施設",
+    measuredHeight: 107.0,
+    podiumHeight: 24.0,
+    storeysAboveGround: 21,
+    storeysBelowGround: 2,
+    roofEdgeAreaSqm: 2620.0,
+    groundElevationM: 31.2,
+    lat: 35.65565,
+    lon: 139.69625,
+    localX: -898.0,
+    localZ: -145.0,
+    width: 46.0,
+    depth: 46.0,
+    color: 0x1e3a5f,
+    podiumColor: 0xd6d3d1,
+    glass: 0x60a5fa,
+    warmInterior: 0xfef3c7,
+  },
+  {
     buildingId: "13103-bldg-aoyama-twins",
-    gmlId: "bldg_shin_aoyama_building_23f",
+    gmlId: "bldg_a9407f99-0b86-45d5-9c12-403190002301",
     name: "新青山ビル (青山ツイン・国道246号沿道)",
     nameEn: "Shin-Aoyama Building (Aoyama Twin)",
     address: "東京都港区南青山一丁目1番1号",
@@ -491,7 +693,7 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
   },
   {
     buildingId: "13103-bldg-akasaka-intercity",
-    gmlId: "bldg_akasaka_aoyama_avenue_tower_28f",
+    gmlId: "bldg_c8104a12-7e94-41d8-8f23-403190002801",
     name: "青山通りアベニュータワー (赤坂・表参道街区)",
     nameEn: "Aoyama-dori Avenue Tower",
     address: "東京都港区北青山三丁目",
@@ -533,6 +735,15 @@ export const SHIBUYA_GSI_ROAD_SEGMENTS: readonly GsiRoadSegmentRecord[] = [
     routeCode: "国道246号",
     start: { x: -860, z: 95 },
     end: { x: -268, z: 95 },
+  },
+  {
+    rID: "533935-shibuya-rdcl-shutoko3",
+    rdCtg: "高速自動車国道等",
+    rnkWidth: "19.5m以上",
+    displayName: "首都高速3号渋谷線 (国道246号・渋谷高架橋)",
+    routeCode: "首都高速3号渋谷線",
+    start: { x: -875, z: 99 },
+    end: { x: -580, z: 99 },
   },
   {
     rID: "533935-shibuya-rdcl-river01",
@@ -592,27 +803,48 @@ export const SHIBUYA_GSI_ROAD_SEGMENTS: readonly GsiRoadSegmentRecord[] = [
 
 /**
  * 渋谷エリア（渋谷ストリーム周辺）の PLATEAU 建築物リストを取得する。
+ * How: `activeOpenData.shibuyaPlateauBuildings` のオープンデータ属性と描画パレット定義を統合して返す。
  */
 export function getShibuyaPlateauBuildingsForMap(): PlateauBuildingRenderSpec[] {
-  return SHIBUYA_PLATEAU_BUILDINGS.map((b) => ({
-    buildingId: b.buildingId,
-    gmlId: b.gmlId,
-    name: b.name,
-    nameEn: b.nameEn,
-    usage: b.usage,
-    x: b.localX,
-    z: b.localZ,
-    w: b.width,
-    h: b.measuredHeight,
-    d: b.depth,
-    podiumHeight: b.podiumHeight,
-    groundElevationM: b.groundElevationM,
-    storeysAboveGround: b.storeysAboveGround,
-    color: b.color,
-    podiumColor: b.podiumColor,
-    glass: b.glass,
-    warmInterior: b.warmInterior,
-  }));
+  const bundleShibuyaList = (
+    activeOpenData as TokyoOpenDataBundle & {
+      shibuyaPlateauBuildings?: ReadonlyArray<{
+        buildingId: string;
+        gmlId: string;
+        measuredHeight: number;
+        podiumHeight: number;
+        groundElevationM: number;
+        storeysAboveGround: number;
+      }>;
+    }
+  ).shibuyaPlateauBuildings;
+
+  const bundleById = new Map<string, NonNullable<typeof bundleShibuyaList>[number]>(
+    (bundleShibuyaList ?? []).map((item) => [item.buildingId, item]),
+  );
+
+  return SHIBUYA_PLATEAU_BUILDINGS.map((b) => {
+    const synced = bundleById.get(b.buildingId);
+    return {
+      buildingId: b.buildingId,
+      gmlId: synced?.gmlId ?? b.gmlId,
+      name: b.name,
+      nameEn: b.nameEn,
+      usage: b.usage,
+      x: b.localX,
+      z: b.localZ,
+      w: b.width,
+      h: synced?.measuredHeight ?? b.measuredHeight,
+      d: b.depth,
+      podiumHeight: synced?.podiumHeight ?? b.podiumHeight,
+      groundElevationM: synced?.groundElevationM ?? b.groundElevationM,
+      storeysAboveGround: synced?.storeysAboveGround ?? b.storeysAboveGround,
+      color: b.color,
+      podiumColor: b.podiumColor,
+      glass: b.glass,
+      warmInterior: b.warmInterior,
+    };
+  });
 }
 
 /**
@@ -691,9 +923,18 @@ function pointToSegmentDistance(
  * 現在座標 (x, z) から最も近い国土地理院ベクトルタイル道路中心線 (experimental_rdcl) セグメントを検索する。
  */
 export function findNearestGsiRoad(x: number, z: number): NearestGsiRoadResult {
+  const bundleShibuyaRoads = (
+    activeOpenData as TokyoOpenDataBundle & {
+      shibuyaGsiRoadSegments?: readonly GsiRoadSegmentRecord[];
+    }
+  ).shibuyaGsiRoadSegments;
+  const shibuyaRoads =
+    Array.isArray(bundleShibuyaRoads) && bundleShibuyaRoads.length > 0
+      ? bundleShibuyaRoads
+      : SHIBUYA_GSI_ROAD_SEGMENTS;
   const segments: readonly GsiRoadSegmentRecord[] = [
     ...activeOpenData.gsiRoadSegments,
-    ...SHIBUYA_GSI_ROAD_SEGMENTS,
+    ...shibuyaRoads,
   ];
   let bestSegment: GsiRoadSegmentRecord = segments[0];
   let minDistance = Number.POSITIVE_INFINITY;
@@ -743,9 +984,18 @@ export function findNearestGsiRoad(x: number, z: number): NearestGsiRoadResult {
  * 現在座標 (x, z) から最も近い東京都 Project PLATEAU 千代田区 (13101) / 渋谷区 (13113) 建築物を検索する。
  */
 export function findNearestPlateauBuilding(x: number, z: number): NearestPlateauBuildingResult {
+  const bundleShibuyaList = (
+    activeOpenData as TokyoOpenDataBundle & {
+      shibuyaPlateauBuildings?: ReadonlyArray<ShibuyaPlateauBuildingRecord>;
+    }
+  ).shibuyaPlateauBuildings;
+  const shibuyaList =
+    Array.isArray(bundleShibuyaList) && bundleShibuyaList.length > 0
+      ? bundleShibuyaList
+      : SHIBUYA_PLATEAU_BUILDINGS;
   const buildings: readonly (PlateauBuildingRecord | ShibuyaPlateauBuildingRecord)[] = [
     ...activeOpenData.plateauBuildings,
-    ...SHIBUYA_PLATEAU_BUILDINGS,
+    ...shibuyaList,
   ];
   let bestBuilding: PlateauBuildingRecord | ShibuyaPlateauBuildingRecord = buildings[0];
   let minEdgeDistance = Number.POSITIVE_INFINITY;

@@ -771,12 +771,17 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
     en: "Konnozaka / Shibuya 3-Chome East St. (Shibuya Ward Rd)",
     zh: "金王坂・涩谷三丁目东通 (涩谷区道)",
   },
+  "首都高速3号渋谷線 (国道246号・渋谷高架橋)": {
+    en: "Shutoko Expwy Route 3 Shibuya Line (Route 246 Viaduct)",
+    zh: "首都高速3号涩谷线 (国道246号・涩谷高架桥)",
+  },
 };
 
 /**
  * GSI 道路分類 (`rdCtg`) の多言語辞書
  */
 const ROAD_CATEGORY_TRANSLATIONS: Readonly<Record<string, { en: string; zh: string }>> = {
+  高速自動車国道等: { en: "Expressway", zh: "都市高速道路" },
   国道: { en: "National Hwy", zh: "国道" },
   都道府県道: { en: "Prefectural Rd", zh: "都道" },
   市区町村道等: { en: "Municipal Rd", zh: "市政区道" },
@@ -836,6 +841,12 @@ const BUILDING_NAME_ZH_BY_ID: Readonly<Record<string, string>> = {
   "13113-bldg-meiji-dori-south-west": "涩谷并木桥西大楼 (樱丘南街区)",
   "13113-bldg-aoyama-oval": "青山椭圆大厦 (国道246号・表参道街区)",
   "13113-bldg-shibuya-first-tower": "涩谷第一塔楼 (金王坂・青山通南街区)",
+  "13113-bldg-cerulean-tower": "涩谷东急蓝塔大饭店 (Cerulean Tower)",
+  "13113-bldg-shibuya-cross-tower": "涩谷Cross Tower (金王坂・青山通)",
+  "13113-bldg-miyashita-park": "MIYASHITA PARK・涩谷Cast街区 (宫下公园)",
+  "13113-bldg-shibuya-mark-city": "涩谷Mark City (道玄坂街区)",
+  "13113-bldg-qfront-109": "涩谷QFRONT・SHIBUYA109 十字路口街区",
+  "13113-bldg-shibuya-solasta": "涩谷Solasta (道玄坂・南平台街区)",
   "13103-bldg-aoyama-twins": "新青山大厦 (青山双子塔・国道246号沿线)",
   "13103-bldg-akasaka-intercity": "青山通大道塔楼 (赤坂・表参道街区)",
 };
@@ -1819,9 +1830,12 @@ export function getNavigationMapLabels(
     if (isEnglish) {
       return [
         { text: "Shibuya Stream", x: -695, z: -15, color: "#fde047" },
-        { text: "Scramble Square", x: -808, z: 145, color: "#93c5fd" },
+        { text: "Scramble Sq / SHIBUYA SKY", x: -808, z: 145, color: "#93c5fd" },
         { text: "Shibuya Hikarie", x: -692, z: 162, color: "#e2e8f0" },
         { text: "Sakura Stage", x: -808, z: -28, color: "#fca5a5" },
+        { text: "Shutoko Expwy Rte 3", x: -750, z: 108, color: "#34d399" },
+        { text: "MIYASHITA PARK", x: -695, z: 248, color: "#a7f3d0" },
+        { text: "Cerulean Tower", x: -898, z: -45, color: "#c4b5fd" },
         { text: "Shibuya River", x: -726, z: -85, color: "#7dd3fc" },
         { text: "Meiji-dori Ave", x: -750, z: 30, color: "#86efac" },
         { text: "Route 246 (Aoyama)", x: -660, z: 95, color: "#86efac" },
@@ -1831,9 +1845,12 @@ export function getNavigationMapLabels(
     if (isChinese) {
       return [
         { text: "涩谷Stream", x: -695, z: -15, color: "#fde047" },
-        { text: "涩谷Scramble广场", x: -808, z: 145, color: "#93c5fd" },
+        { text: "涩谷Scramble广场 (SHIBUYA SKY)", x: -808, z: 145, color: "#93c5fd" },
         { text: "涩谷Hikarie", x: -692, z: 162, color: "#e2e8f0" },
         { text: "涩谷Sakura Stage", x: -808, z: -28, color: "#fca5a5" },
+        { text: "首都高速3号涩谷线", x: -750, z: 108, color: "#34d399" },
+        { text: "MIYASHITA PARK (宫下公园)", x: -695, z: 248, color: "#a7f3d0" },
+        { text: "东急蓝塔 (Cerulean)", x: -898, z: -45, color: "#c4b5fd" },
         { text: "涩谷川步道", x: -726, z: -85, color: "#7dd3fc" },
         { text: "明治通", x: -750, z: 30, color: "#86efac" },
         { text: "国道246号 (青山通)", x: -660, z: 95, color: "#86efac" },
@@ -1841,9 +1858,12 @@ export function getNavigationMapLabels(
     }
     return [
       { text: "渋谷ストリーム", x: -695, z: -15, color: "#fde047" },
-      { text: "渋谷スクランブルSQ", x: -808, z: 145, color: "#93c5fd" },
+      { text: "渋谷スクランブルSQ (SHIBUYA SKY)", x: -808, z: 145, color: "#93c5fd" },
       { text: "渋谷ヒカリエ", x: -692, z: 162, color: "#e2e8f0" },
       { text: "渋谷サクラステージ", x: -808, z: -28, color: "#fca5a5" },
+      { text: "首都高3号渋谷線 (高架)", x: -750, z: 108, color: "#34d399" },
+      { text: "MIYASHITA PARK", x: -695, z: 248, color: "#a7f3d0" },
+      { text: "セルリアンタワー", x: -898, z: -45, color: "#c4b5fd" },
       { text: "渋谷川プロムナード", x: -726, z: -85, color: "#7dd3fc" },
       { text: "明治通り", x: -750, z: 30, color: "#86efac" },
       { text: "国道246号 (青山通り)", x: -660, z: 95, color: "#86efac" },

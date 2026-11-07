@@ -2261,6 +2261,48 @@ export class CarModel {
       }
     }
 
+    // 4.3b 首都高速3号渋谷線（高架都市高速道路）＆ JR山手線高架橋の立体オーバーレイ描画
+    if (isShibuyaZone) {
+      const shutokoStart = worldToMapPx(-875, 99);
+      const shutokoEnd = worldToMapPx(-300, 99);
+      // 高架橋の外枠シャドウケーシング
+      ctx.strokeStyle = "rgba(2, 44, 34, 0.88)";
+      ctx.lineWidth = 10.5;
+      ctx.beginPath();
+      ctx.moveTo(shutokoStart.x, shutokoStart.y);
+      ctx.lineTo(shutokoEnd.x, shutokoEnd.y);
+      ctx.stroke();
+
+      // 首都高グリーンの高架道路ライン
+      ctx.strokeStyle = "#10b981";
+      ctx.lineWidth = 5.2;
+      ctx.beginPath();
+      ctx.moveTo(shutokoStart.x, shutokoStart.y);
+      ctx.lineTo(shutokoEnd.x, shutokoEnd.y);
+      ctx.stroke();
+
+      // 高架中央分離帯の白破線
+      ctx.strokeStyle = "rgba(236, 253, 245, 0.78)";
+      ctx.lineWidth = 1.3;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(shutokoStart.x, shutokoStart.y);
+      ctx.lineTo(shutokoEnd.x, shutokoEnd.y);
+      ctx.stroke();
+
+      // JR山手線・埼京線 鉄道高架ライン (x = -779)
+      const jrSouth = worldToMapPx(-779, -220);
+      const jrNorth = worldToMapPx(-779, 240);
+      ctx.strokeStyle = "rgba(148, 163, 184, 0.65)";
+      ctx.lineWidth = 3.2;
+      ctx.setLineDash([8, 5]);
+      ctx.beginPath();
+      ctx.moveTo(jrSouth.x, jrSouth.y);
+      ctx.lineTo(jrNorth.x, jrNorth.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // 4.4 推奨ナビゲーションルート（交差点コーナーR補間付きシアン＆ブルー発光ライン＋進行方向シェブロン）
     // Why コーナーR補間 (quadraticCurveTo) を入れるか:
     // 交差点で直角 (90度) に折れ曲がるポリラインや180度折り返し点をそのまま lineTo で結ぶと、

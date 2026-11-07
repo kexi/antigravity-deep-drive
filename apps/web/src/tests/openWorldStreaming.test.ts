@@ -569,4 +569,114 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
     expect(stationProxy!.userData.appliedLodTier).toBe("low");
     expect(cityMap.getLodStats().landmarkProxyActiveCount).toBeGreaterThanOrEqual(1);
   });
+
+  it("渋谷チャンクに首都高速3号渋谷線高架橋・東口歩道橋・JR/銀座線高架およびスクランブルスクエア（SHIBUYA SKY）・渋谷ヒカリエ（東急シアターオーブ）・MIYASHITA PARK・QFRONTのランドマーク意匠が生成され、GLBマテリアル変換が機能することを保証する", async () => {
+    const { mockWorld, mockRapier } = createMockPhysicsContext();
+    const scene = new THREE.Scene();
+    const cityMap = new TokyoStationMap(scene, mockWorld, mockRapier, { deferGlbLoads: true });
+
+    await cityMap.activateWorldChunk("shibuya-core");
+
+    const shutokoGroup = cityMap.group.children.find(
+      (c) => c.name === "ShutokoRoute3ViaductGroup",
+    ) as THREE.Group;
+    expect(shutokoGroup).toBeDefined();
+
+    const meshNames = new Set<string>();
+    shutokoGroup.traverse((node) => {
+      if (node.name) {
+        meshNames.add(node.name);
+      }
+    });
+    expect(meshNames.has("ShutokoSteelBoxGirder")).toBe(true);
+    expect(meshNames.has("ShutokoConcreteDeck")).toBe(true);
+    expect(meshNames.has("ShutokoSoundBarrierWall")).toBe(true);
+    expect(meshNames.has("ShutokoRoute3GreenSign")).toBe(true);
+    expect(meshNames.has("ShibuyaEastPedestrianDeckBridge")).toBe(true);
+    expect(meshNames.has("ShibuyaGinzaLineStationVault")).toBe(true);
+    expect(meshNames.has("ShibuyaJrYamanoteOverpass")).toBe(true);
+
+    const allSceneNames = new Set<string>();
+    cityMap.group.traverse((node) => {
+      if (node.name) {
+        allSceneNames.add(node.name);
+      }
+    });
+    expect(allSceneNames.has("ShibuyaSkyObservationDeck")).toBe(true);
+    expect(allSceneNames.has("ShibuyaSkyHelipad")).toBe(true);
+    expect(allSceneNames.has("HikarieTokyuTheatreOrb")).toBe(true);
+    expect(allSceneNames.has("MiyashitaParkRoofLawn")).toBe(true);
+    expect(allSceneNames.has("ShibuyaQfrontMediaWall")).toBe(true);
+
+    // GLB マテリアル変換（首都高緑標識・SHIBUYA SKY エッジ・ヒカリエ黄金球体・RC橋脚・サクラステージ・109）の検証
+    const matNames = [
+      "ShutokoHighwayGreenSign",
+      "ShibuyaSkyEdgeGlow",
+      "HikarieGoldOrb",
+      "ShutokoConcretePier",
+      "SakuraStagePinkGlow",
+      "ShibuyaQfront109Accent",
+    ];
+    for (const name of matNames) {
+      const mat = new THREE.MeshStandardMaterial({ name });
+      cityMap.applyShibuyaStreamGlbMaterial3DTexture(mat);
+      expect(mat.roughness).toBeGreaterThan(0);
+    }
+
+    // shibuya_stream.glb ロード完了時（LOD0）に、同一座標のプロシージャル版スクランブルスクエア・ヒカリエ・サクラステージ・フクラス・MIYASHITA PARK・QFRONT/109・首都高渋谷コア区間が非表示化されて Z-fighting せず、青山通り東側区間（ShutokoConcreteDeckEast）は連続表示され続けることを検証
+    const mockShibuyaGlb = new THREE.Group();
+    mockShibuyaGlb.name = "MockShibuyaDistrictGlb";
+    mockShibuyaGlb.position.set(-695, 0, -15);
+    const glbBoundsMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(300, 230, 320),
+      new THREE.MeshBasicMaterial(),
+    );
+    glbBoundsMesh.position.set(-55, 115, 115); // covers Stream (-15) & Sakura Stage (-25) to MIYASHITA PARK / QFRONT (+248)
+    mockShibuyaGlb.add(glbBoundsMesh);
+    cityMap.glbShibuyaStreamGroup = mockShibuyaGlb;
+    cityMap.group.add(mockShibuyaGlb);
+
+    const procScramble = cityMap.group.children.find(
+      (c) => c.name === "13113-bldg-scramble-square",
+    )!;
+    const procHikarie = cityMap.group.children.find(
+      (c) => c.name === "13113-bldg-shibuya-hikarie",
+    )!;
+    const procSakuraStage = cityMap.group.children.find(
+      (c) => c.name === "13113-bldg-sakura-stage",
+    )!;
+    const procFukuras = cityMap.group.children.find(
+      (c) => c.name === "13113-bldg-shibuya-fukuras",
+    )!;
+    const procMiyashitaPark = cityMap.group.children.find(
+      (c) => c.name === "13113-bldg-miyashita-park",
+    )!;
+    const procQfront109 = cityMap.group.children.find((c) => c.name === "13113-bldg-qfront-109")!;
+    const coreDeckMesh = shutokoGroup.children.find((c) => c.name === "ShutokoConcreteDeck")!;
+    const eastDeckMesh = shutokoGroup.children.find((c) => c.name === "ShutokoConcreteDeckEast")!;
+
+    // 1. 宮下公園・スクランブル交差点北側（x=-750, z=240: ストリーム単体からは 255m > 185m だがスクランブルスクエア・MIYASHITA PARK・109からは <= 185m）でも GLB が維持され、重複プロシージャルメッシュがすべて非表示になること
+    cityMap.updateDistanceCulling(new THREE.Vector3(-750, 0, 240), 380, true);
+    expect(mockShibuyaGlb.visible).toBe(true);
+    expect(procScramble.visible).toBe(false);
+    expect(procHikarie.visible).toBe(false);
+    expect(procSakuraStage.visible).toBe(false);
+    expect(procFukuras.visible).toBe(false);
+    expect(procMiyashitaPark.visible).toBe(false);
+    expect(procQfront109.visible).toBe(false);
+    expect(coreDeckMesh.visible).toBe(false);
+    expect(eastDeckMesh.visible).toBe(true);
+
+    // 2. 渋谷エリアから 300m 以上離れた表参道東側（x=-350, z=95）へ移動すると、GLB が非表示になりプロシージャル Proxy が復帰すること
+    cityMap.updateDistanceCulling(new THREE.Vector3(-350, 0, 95), 380, true);
+    expect(mockShibuyaGlb.visible).toBe(false);
+    expect(procScramble.visible).toBe(true);
+    expect(procHikarie.visible).toBe(true);
+    expect(procSakuraStage.visible).toBe(true);
+    expect(procFukuras.visible).toBe(true);
+    expect(procMiyashitaPark.visible).toBe(true);
+    expect(procQfront109.visible).toBe(true);
+    expect(coreDeckMesh.visible).toBe(true);
+    expect(eastDeckMesh.visible).toBe(true);
+  });
 });

@@ -102,6 +102,13 @@ export class TokyoStationMap {
   private customSignInstances = new Map<string, CreatedRoadSignInstance>();
   private proceduralStationGroup: THREE.Group | null = null;
   private proceduralShibuyaStreamGroup: THREE.Group | null = null;
+  private proceduralScrambleSquareGroup: THREE.Group | null = null;
+  private proceduralHikarieGroup: THREE.Group | null = null;
+  private proceduralSakuraStageGroup: THREE.Group | null = null;
+  private proceduralFukurasGroup: THREE.Group | null = null;
+  private proceduralMiyashitaParkGroup: THREE.Group | null = null;
+  private proceduralQfront109Group: THREE.Group | null = null;
+  private proceduralShutokoCoreMeshes: THREE.Mesh[] = [];
   private treeSlots: {
     slotGroup: THREE.Group;
     fallbackGroup: THREE.Group;
@@ -1949,6 +1956,13 @@ export class TokyoStationMap {
         roughness: 0.2,
       });
       this.applyArchitecture3DTexture(stripeMat, "curtain_glass");
+      const isScrambleSquare = b.buildingId === "13113-bldg-scramble-square";
+      const isHikarie = b.buildingId === "13113-bldg-shibuya-hikarie";
+      const isSakuraStage = b.buildingId === "13113-bldg-sakura-stage";
+      const isFukuras = b.buildingId === "13113-bldg-shibuya-fukuras";
+      const isMiyashitaPark = b.buildingId === "13113-bldg-miyashita-park";
+      const isQfront109 = b.buildingId === "13113-bldg-qfront-109";
+
       for (let i = 0; i < stripeCount; i++) {
         const stripeY =
           -b.h / 2 + podiumHeight + 3 + i * (Math.max(5, towerHeight - 6) / stripeCount);
@@ -1959,6 +1973,168 @@ export class TokyoStationMap {
         stripeMesh.position.y = stripeY;
         stripeMesh.userData.lodDetailTier = "medium";
         bGroup.add(stripeMesh);
+      }
+
+      // ランドマーク固有のプロシージャル造形（LOD1/LOD2 フォールバックおよび専用ディテール）
+      if (isScrambleSquare) {
+        // 渋谷スクランブルスクエア 東棟: 屋上展望施設「SHIBUYA SKY」スカイエッジ発光ガラス回廊＆ヘリポート＋斜め白ルーバーフィン
+        const skyEdgeMat = new THREE.MeshStandardMaterial({
+          color: 0x7dd3fc,
+          emissive: 0x38bdf8,
+          emissiveIntensity: this.isNightActive ? 1.35 : 0.72,
+          roughness: 0.12,
+          metalness: 0.3,
+        });
+        this.shibuyaStreamEmissiveEntries.push({
+          material: skyEdgeMat,
+          dayIntensity: 0.72,
+          nightIntensity: 1.35,
+        });
+        this.applyArchitecture3DTexture(skyEdgeMat, "curtain_glass");
+
+        const skyGalleryMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(towerW + 1.2, 8.8, towerD + 1.2),
+          skyEdgeMat,
+        );
+        skyGalleryMesh.name = "ShibuyaSkyObservationDeck";
+        skyGalleryMesh.position.y = b.h / 2 - crownHeight - 1.5;
+        bGroup.add(skyGalleryMesh);
+
+        // ヘリポート着陸帯パッド
+        const helipadMat = new THREE.MeshStandardMaterial({
+          color: 0x059669,
+          emissive: 0x047857,
+          emissiveIntensity: 0.35,
+          roughness: 0.4,
+        });
+        const helipadMesh = new THREE.Mesh(new THREE.BoxGeometry(18, 0.6, 18), helipadMat);
+        helipadMesh.name = "ShibuyaSkyHelipad";
+        helipadMesh.position.y = b.h / 2 + 0.3;
+        helipadMesh.userData.lodDetailTier = "medium";
+        bGroup.add(helipadMesh);
+
+        // 斜めホワイトアルミルーバーバンド（6段の階段状ダイアゴナルフィン）
+        for (let dIdx = 0; dIdx < 6; dIdx++) {
+          const ratio = (dIdx + 0.5) / 6 - 0.5;
+          const diagFin = new THREE.Mesh(
+            new THREE.BoxGeometry(towerW + 0.9, 6.5, 6.2),
+            whitePanelMat,
+          );
+          diagFin.position.set(
+            0,
+            towerCenterY + ratio * (towerHeight * 0.78),
+            ratio * (towerD * 0.72),
+          );
+          diagFin.userData.lodDetailTier = "medium";
+          bGroup.add(diagFin);
+        }
+      } else if (isHikarie) {
+        // 渋谷ヒカリエ: 中層11F〜16Fに浮かぶ球体・円筒劇場「東急シアターオーブ (Tokyu Theatre Orb)」＆スカイロビー
+        const orbMat = new THREE.MeshStandardMaterial({
+          color: 0xf59e0b,
+          emissive: 0xd97706,
+          emissiveIntensity: this.isNightActive ? 1.15 : 0.58,
+          roughness: 0.22,
+          metalness: 0.48,
+        });
+        this.shibuyaStreamEmissiveEntries.push({
+          material: orbMat,
+          dayIntensity: 0.58,
+          nightIntensity: 1.15,
+        });
+        this.applyArchitecture3DTexture(orbMat, "anodized_metal");
+
+        const theatreOrbMesh = new THREE.Mesh(
+          new THREE.CylinderGeometry(20.5, 20.5, 24.0, 24),
+          orbMat,
+        );
+        theatreOrbMesh.name = "HikarieTokyuTheatreOrb";
+        theatreOrbMesh.position.set(-4.5, -b.h / 2 + podiumHeight + 18.0, -3.5);
+        bGroup.add(theatreOrbMesh);
+
+        const skyLobbyFrame = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w + 3.0, 2.2, b.d + 3.0),
+          whitePanelMat,
+        );
+        skyLobbyFrame.position.y = -b.h / 2 + podiumHeight + 4.0;
+        bGroup.add(skyLobbyFrame);
+      } else if (isSakuraStage) {
+        // 渋谷サクラステージ: 桜色（チェリーピンク）発光アトリウム＆段状グリーンテラス
+        const sakuraGlowMat = new THREE.MeshStandardMaterial({
+          color: 0xfda4af,
+          emissive: 0xf43f5e,
+          emissiveIntensity: this.isNightActive ? 1.1 : 0.52,
+          roughness: 0.2,
+        });
+        this.shibuyaStreamEmissiveEntries.push({
+          material: sakuraGlowMat,
+          dayIntensity: 0.52,
+          nightIntensity: 1.1,
+        });
+        const sakuraAtrium = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w + 1.8, 12.0, b.d * 0.55),
+          sakuraGlowMat,
+        );
+        sakuraAtrium.name = "SakuraStageAtrium";
+        sakuraAtrium.position.set(4.0, -b.h / 2 + podiumHeight + 6.0, 0);
+        bGroup.add(sakuraAtrium);
+      } else if (isFukuras) {
+        // 渋谷フクラス (東急プラザ渋谷): 折り紙モチーフのプリーツ白ルーバー基壇＆17F屋上庭園「SHIBUYA NIWA」
+        for (let fStep = 0; fStep < 4; fStep++) {
+          const pleatMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(b.w + 1.6, 2.4, b.d + 1.6),
+            whitePanelMat,
+          );
+          pleatMesh.position.y = -b.h / 2 + 8.0 + fStep * 5.8;
+          pleatMesh.rotation.y = (fStep % 2 === 0 ? 1 : -1) * 0.035;
+          pleatMesh.userData.lodDetailTier = "medium";
+          bGroup.add(pleatMesh);
+        }
+      } else if (isMiyashitaPark) {
+        // MIYASHITA PARK (宮下公園): 3F 屋上公園の象徴的な白アーチキャノピー＆屋上芝生パーク
+        const parkGreenMat = new THREE.MeshStandardMaterial({
+          color: 0x22c55e,
+          roughness: 0.85,
+          metalness: 0.02,
+        });
+        const roofLawn = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w + 1.2, 1.8, b.d + 1.2),
+          parkGreenMat,
+        );
+        roofLawn.name = "MiyashitaParkRoofLawn";
+        roofLawn.position.y = -b.h / 2 + podiumHeight + 0.9;
+        bGroup.add(roofLawn);
+
+        for (let archIdx = 0; archIdx < 6; archIdx++) {
+          const az = -b.d * 0.4 + (archIdx / 5) * (b.d * 0.8);
+          const archCanopy = new THREE.Mesh(
+            new THREE.BoxGeometry(b.w * 0.92, 5.5, 1.2),
+            whitePanelMat,
+          );
+          archCanopy.position.set(0, -b.h / 2 + podiumHeight + 3.6, az);
+          archCanopy.userData.lodDetailTier = "medium";
+          bGroup.add(archCanopy);
+        }
+      } else if (isQfront109) {
+        // QFRONT・SHIBUYA109 街区: スクランブル交差点正面の大型湾曲LEDビジョン＆109シリンダータワー
+        const mediaWallMat = new THREE.MeshStandardMaterial({
+          color: 0x38bdf8,
+          emissive: 0x0ea5e9,
+          emissiveIntensity: this.isNightActive ? 1.55 : 0.85,
+          roughness: 0.15,
+        });
+        this.shibuyaStreamEmissiveEntries.push({
+          material: mediaWallMat,
+          dayIntensity: 0.85,
+          nightIntensity: 1.55,
+        });
+        const qfrontMedia = new THREE.Mesh(
+          new THREE.CylinderGeometry(14.0, 14.0, 28.0, 20),
+          mediaWallMat,
+        );
+        qfrontMedia.name = "ShibuyaQfrontMediaWall";
+        qfrontMedia.position.set(b.w * 0.25, -b.h / 2 + 22.0, -b.d * 0.28);
+        bGroup.add(qfrontMedia);
       }
 
       const crownMesh = new THREE.Mesh(
@@ -1980,6 +2156,19 @@ export class TokyoStationMap {
         bGroup.add(beaconMesh);
       }
 
+      if (isScrambleSquare) {
+        this.proceduralScrambleSquareGroup = bGroup;
+      } else if (isHikarie) {
+        this.proceduralHikarieGroup = bGroup;
+      } else if (isSakuraStage) {
+        this.proceduralSakuraStageGroup = bGroup;
+      } else if (isFukuras) {
+        this.proceduralFukurasGroup = bGroup;
+      } else if (isMiyashitaPark) {
+        this.proceduralMiyashitaParkGroup = bGroup;
+      } else if (isQfront109) {
+        this.proceduralQfront109Group = bGroup;
+      }
       this.group.add(bGroup);
       this.plateauBuildingGroups.push(bGroup);
 
@@ -1992,16 +2181,251 @@ export class TokyoStationMap {
       this.registerCollider(world.createCollider(bCol, bBody), true);
     }
 
-    // 5. Blender 生成 `shibuya_stream.glb` の非同期ロードと 3D テクスチャシェーダー統合
+    // 5. 首都高速3号渋谷線 高架橋（Shutoko Route 3 Shibuya Line Viaduct）＆ 渋谷駅東口歩道橋・鉄道高架のプロシージャル構造物＋歩道橋脚コライダー
+    this.buildShutokoRoute3AndShibuyaOverpass(world, rapier, whitePanelMat, darkFrameMat);
+
+    // 6. Blender 生成 `shibuya_stream.glb` の非同期ロードと 3D テクスチャシェーダー統合
     if (!this.deferGlbLoads) {
       this.glbLoadPromises.push(this.loadGlbShibuyaStreamModel());
     }
   }
 
   /**
+   * 首都高速3号渋谷線高架橋（国道246号・玉川通り／青山通り上空 y=11.4m..17.1m）および
+   * 渋谷駅東口歩道橋・JR山手線・東京メトロ銀座線高架橋のプロシージャル構造物と Rapier 橋脚コライダーを構築する。
+   * How:
+   * - `shibuya_stream.glb` ロード前やヘッドレス単体テスト、および遠距離 LOD 時にも首都高高架橋・緑案内標識・
+   *   渋谷駅東口歩道橋・JR/銀座線高架橋が途切れず立体的に存在するよう構築する。
+   * - 渋谷駅コア区間（`x = -865 .. -575`）のプロシージャル高架・歩道橋・鉄道高架は `proceduralShutokoCoreMeshes` に登録し、
+   *   `shibuya_stream.glb` が近距離 LOD0 で表示されている間は非表示に切り替えることで同一座標での Z-fighting と二重ドローコールを防止する。
+   * - 青山通り東側区間（`x = -575 .. -265`）は GLB 範囲外のため常時連続描画し、GLB の東端（`x = -575`）とシームレスに接続する。
+   * - 橋脚コライダーはすべて国道246号（車道 z = 86..104）および明治通り（車道 x = -762..-738）の外側歩道上にのみ配置し、
+   *   走行車線を一切阻害しない。
+   */
+  private buildShutokoRoute3AndShibuyaOverpass(
+    world: RAPIER.World,
+    rapier: typeof RAPIER,
+    whitePanelMat: THREE.MeshStandardMaterial,
+    darkSteelMat: THREE.MeshStandardMaterial,
+  ): void {
+    const viaductGroup = new THREE.Group();
+    viaductGroup.name = "ShutokoRoute3ViaductGroup";
+    viaductGroup.position.set(-720, 0, 95);
+    viaductGroup.userData = {
+      isLargeStructure: true,
+      isRoadInfrastructure: true,
+      routeCode: "首都高速3号渋谷線",
+    };
+    this.proceduralShutokoCoreMeshes = [];
+
+    const registerCoreFallbackMesh = (mesh: THREE.Mesh): void => {
+      viaductGroup.add(mesh);
+      this.proceduralShutokoCoreMeshes.push(mesh);
+    };
+
+    const concretePierMat = new THREE.MeshStandardMaterial({
+      color: 0x94a3b8,
+      roughness: 0.76,
+      metalness: 0.08,
+    });
+    this.applyArchitecture3DTexture(concretePierMat, "white_granite");
+
+    const shutokoGreenSignMat = new THREE.MeshStandardMaterial({
+      color: 0x047857,
+      emissive: 0x059669,
+      emissiveIntensity: this.isNightActive ? 0.95 : 0.52,
+      roughness: 0.26,
+      metalness: 0.15,
+    });
+    this.shibuyaStreamEmissiveEntries.push({
+      material: shutokoGreenSignMat,
+      dayIntensity: 0.52,
+      nightIntensity: 0.95,
+    });
+
+    const underpassLightMat = new THREE.MeshStandardMaterial({
+      color: 0xfde68a,
+      emissive: 0xf59e0b,
+      emissiveIntensity: this.isNightActive ? 1.65 : 0.85,
+      roughness: 0.2,
+    });
+    this.shibuyaStreamEmissiveEntries.push({
+      material: underpassLightMat,
+      dayIntensity: 0.85,
+      nightIntensity: 1.65,
+    });
+
+    const deckWidthZ = 21.6;
+
+    // 1A. 渋谷駅コア区間（x = -865 .. -575, 長さ 290m: GLB 内の ShutokoRoute3_Viaduct と一致するプロシージャル Proxy 区間）
+    const coreSpanLenX = 290;
+    const coreSpanCenterX = 0; // viaductGroup (-720) 基準で -145..+145 -> worldX = -865..-575
+    const steelGirderCore = new THREE.Mesh(
+      new THREE.BoxGeometry(coreSpanLenX, 1.8, deckWidthZ - 2.0),
+      darkSteelMat,
+    );
+    steelGirderCore.name = "ShutokoSteelBoxGirder";
+    steelGirderCore.position.set(coreSpanCenterX, 12.3, 0);
+    steelGirderCore.castShadow = true;
+    steelGirderCore.receiveShadow = true;
+    registerCoreFallbackMesh(steelGirderCore);
+
+    const concreteDeckCore = new THREE.Mesh(
+      new THREE.BoxGeometry(coreSpanLenX, 1.1, deckWidthZ),
+      concretePierMat,
+    );
+    concreteDeckCore.name = "ShutokoConcreteDeck";
+    concreteDeckCore.position.set(coreSpanCenterX, 13.65, 0);
+    concreteDeckCore.castShadow = true;
+    concreteDeckCore.receiveShadow = true;
+    registerCoreFallbackMesh(concreteDeckCore);
+
+    for (const sideZ of [-deckWidthZ * 0.5 + 0.35, deckWidthZ * 0.5 - 0.35]) {
+      const soundWallCore = new THREE.Mesh(
+        new THREE.BoxGeometry(coreSpanLenX, 2.8, 0.55),
+        concretePierMat,
+      );
+      soundWallCore.name = "ShutokoSoundBarrierWall";
+      soundWallCore.position.set(coreSpanCenterX, 15.6, sideZ);
+      soundWallCore.castShadow = true;
+      registerCoreFallbackMesh(soundWallCore);
+    }
+
+    // 1B. 青山通り東側延長区間（x = -575 .. -265, 長さ 310m: GLB 範囲外のため常時表示して表参道方面まで連続させる）
+    const eastSpanLenX = 310;
+    const eastSpanCenterX = 300; // viaductGroup (-720) 基準で +145..+455 -> worldX = -575..-265
+    const steelGirderEast = new THREE.Mesh(
+      new THREE.BoxGeometry(eastSpanLenX, 1.8, deckWidthZ - 2.0),
+      darkSteelMat,
+    );
+    steelGirderEast.name = "ShutokoSteelBoxGirderEast";
+    steelGirderEast.position.set(eastSpanCenterX, 12.3, 0);
+    steelGirderEast.castShadow = true;
+    steelGirderEast.receiveShadow = true;
+    viaductGroup.add(steelGirderEast);
+
+    const concreteDeckEast = new THREE.Mesh(
+      new THREE.BoxGeometry(eastSpanLenX, 1.1, deckWidthZ),
+      concretePierMat,
+    );
+    concreteDeckEast.name = "ShutokoConcreteDeckEast";
+    concreteDeckEast.position.set(eastSpanCenterX, 13.65, 0);
+    concreteDeckEast.castShadow = true;
+    concreteDeckEast.receiveShadow = true;
+    viaductGroup.add(concreteDeckEast);
+
+    for (const sideZ of [-deckWidthZ * 0.5 + 0.35, deckWidthZ * 0.5 - 0.35]) {
+      const soundWallEast = new THREE.Mesh(
+        new THREE.BoxGeometry(eastSpanLenX, 2.8, 0.55),
+        concretePierMat,
+      );
+      soundWallEast.name = "ShutokoSoundBarrierWallEast";
+      soundWallEast.position.set(eastSpanCenterX, 15.6, sideZ);
+      soundWallEast.castShadow = true;
+      viaductGroup.add(soundWallEast);
+    }
+
+    // 首都高3号渋谷線の緑案内標識パネル（signX < 145 は渋谷コア区間、signX >= 145 は青山通り東側区間）
+    for (const signX of [-30, 0, 42, 160]) {
+      const isCoreSign = signX < 145;
+      const greenSignBoard = new THREE.Mesh(
+        new THREE.BoxGeometry(13.5, 2.3, 0.45),
+        shutokoGreenSignMat,
+      );
+      greenSignBoard.name = "ShutokoRoute3GreenSign";
+      greenSignBoard.position.set(signX, 15.8, -deckWidthZ * 0.5 - 0.35);
+      if (isCoreSign) {
+        registerCoreFallbackMesh(greenSignBoard);
+      } else {
+        viaductGroup.add(greenSignBoard);
+      }
+
+      const greenSignBoardNorth = new THREE.Mesh(
+        new THREE.BoxGeometry(13.5, 2.3, 0.45),
+        shutokoGreenSignMat,
+      );
+      greenSignBoardNorth.position.set(signX, 15.8, deckWidthZ * 0.5 + 0.35);
+      if (isCoreSign) {
+        registerCoreFallbackMesh(greenSignBoardNorth);
+      } else {
+        viaductGroup.add(greenSignBoardNorth);
+      }
+    }
+
+    // 高架下アンバーナトリウム道路照明列
+    for (let lx = -140; lx <= 420; lx += 30) {
+      const underLight = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.25, 8.0), underpassLightMat);
+      underLight.position.set(lx, 11.35, 0);
+      underLight.userData.lodDetailTier = "medium";
+      if (lx <= 140) {
+        registerCoreFallbackMesh(underLight);
+      } else {
+        viaductGroup.add(underLight);
+      }
+    }
+
+    // 首都高ラーメン橋脚＆Rapier物理コライダー（国道246号の歩道外側 z = 80.5, 109.5 に配置し車道を完全クリア）
+    // -830..-618 は GLB 内橋脚座標（by = -135, -87, -33, +23, +77 -> worldX = -830, -782, -728, -672, -618）と完全一致
+    const pierWorldXList = [-830, -782, -728, -672, -618, -540, -450, -360];
+    const shutokoPierBody = world.createRigidBody(
+      rapier.RigidBodyDesc.fixed().setTranslation(-720, 0, 95),
+    );
+    for (const worldX of pierWorldXList) {
+      const localX = worldX - -720;
+      const isCorePier = worldX >= -865 && worldX <= -575;
+      const crossBeam = new THREE.Mesh(new THREE.BoxGeometry(2.8, 1.7, 31.2), concretePierMat);
+      crossBeam.position.set(localX, 10.65, 0);
+      crossBeam.castShadow = true;
+      if (isCorePier) {
+        registerCoreFallbackMesh(crossBeam);
+      } else {
+        viaductGroup.add(crossBeam);
+      }
+
+      for (const localZ of [-14.5, 14.5]) {
+        const pierColMesh = new THREE.Mesh(new THREE.BoxGeometry(2.5, 10.6, 2.5), concretePierMat);
+        pierColMesh.position.set(localX, 5.3, localZ);
+        pierColMesh.castShadow = true;
+        pierColMesh.receiveShadow = true;
+        if (isCorePier) {
+          registerCoreFallbackMesh(pierColMesh);
+        } else {
+          viaductGroup.add(pierColMesh);
+        }
+
+        const pierCol = rapier.ColliderDesc.cuboid(1.25, 5.3, 1.25)
+          .setTranslation(localX, 5.3, localZ)
+          .setFriction(0.6);
+        this.registerCollider(world.createCollider(pierCol, shutokoPierBody), true);
+      }
+    }
+
+    // 渋谷駅東口歩道橋（ペデストリアンデッキ）＆ JR山手線・東京メトロ銀座線高架橋（プロシージャル Proxy 構造）
+    const eastDeckCrossSouth = new THREE.Mesh(new THREE.BoxGeometry(54, 1.1, 5.6), whitePanelMat);
+    eastDeckCrossSouth.name = "ShibuyaEastPedestrianDeckBridge";
+    eastDeckCrossSouth.position.set(-29, 7.8, -24); // worldX = -749, worldZ = 71
+    registerCoreFallbackMesh(eastDeckCrossSouth);
+
+    const ginzaLineRoof = new THREE.Mesh(new THREE.BoxGeometry(92, 3.6, 15.2), whitePanelMat);
+    ginzaLineRoof.name = "ShibuyaGinzaLineStationVault";
+    ginzaLineRoof.position.set(-30, 17.2, 48); // worldX = -750, worldZ = 143
+    registerCoreFallbackMesh(ginzaLineRoof);
+
+    const jrYamanoteBridge = new THREE.Mesh(
+      new THREE.BoxGeometry(13.5, 3.8, 300),
+      shutokoGreenSignMat,
+    );
+    jrYamanoteBridge.name = "ShibuyaJrYamanoteOverpass";
+    jrYamanoteBridge.position.set(-59, 10.2, -60); // worldX = -779
+    registerCoreFallbackMesh(jrYamanoteBridge);
+
+    this.group.add(viaductGroup);
+  }
+
+  /**
    * `shibuya_stream.glb` 内のマテリアルを解析し、
-   * 屋上航空障害灯・イエローアクセント・暖色ロビー窓は固有の発光と色調を保持し、
-   * 白アルミ千鳥パネル・溶融亜鉛メッキ鉄骨・コンクリート基壇・壁面緑化・カーテンウォールには WebGL2 3D ボリュームテクスチャを適用する。
+   * 屋上航空障害灯・イエローアクセント・暖色ロビー窓・首都高緑標識・SHIBUYA SKY・ヒカリエシアターオーブは固有の発光と色調を保持し、
+   * 白アルミ千鳥パネル・溶融亜鉛メッキ鉄骨・コンクリート橋脚・壁面緑化・カーテンウォールには WebGL2 3D ボリュームテクスチャを適用する。
    * Why not: メッシュ名のみで一括判定するとマルチマテリアルメッシュが共有参照する
    * `StreamDarkVoidSteel` や `StreamYellowAccent` のマテリアルインスタンスまで別属性に上書きされてしまうため、
    * マテリアル名 (`stdMat.name`) に基づいて厳密に振り分ける。
@@ -2049,7 +2473,106 @@ export class TokyoStationMap {
       return;
     }
 
-    // 5. 商業フロア・大階段アトリウム・オフィス点灯窓のウォームインテリア発光ガラス
+    // 3. 首都高速3号渋谷線 緑案内標識ボード＆ヘリポート着陸帯
+    const isShutokoGreenSign = matName.includes("ShutokoHighwayGreenSign");
+    if (isShutokoGreenSign) {
+      const dayIntensity = 0.52;
+      const nightIntensity = 1.05;
+      stdMat.emissive = new THREE.Color(0x059669);
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.26;
+      stdMat.metalness = 0.15;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "anodized_metal");
+      return;
+    }
+
+    // 4. 渋谷スクランブルスクエア 屋上展望施設「SHIBUYA SKY」スカイエッジ発光ガラス
+    const isShibuyaSkyEdge = matName.includes("ShibuyaSkyEdgeGlow");
+    if (isShibuyaSkyEdge) {
+      const dayIntensity = 0.68;
+      const nightIntensity = 1.42;
+      stdMat.emissive = new THREE.Color(0x38bdf8);
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.12;
+      stdMat.metalness = 0.28;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "curtain_glass");
+      return;
+    }
+
+    // 5. 渋谷ヒカリエ 東急シアターオーブ球体劇場＆首都高高架下アンバーナトリウム照明
+    const isHikarieGoldOrb = matName.includes("HikarieGoldOrb");
+    if (isHikarieGoldOrb) {
+      const dayIntensity = 0.65;
+      const nightIntensity = 1.38;
+      stdMat.emissive = new THREE.Color(0xf59e0b);
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.22;
+      stdMat.metalness = 0.48;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "anodized_metal");
+      return;
+    }
+
+    // 5b. 渋谷サクラステージ「KINETIC GATE（ときめきSTAGE）」チェリーピンク発光ガラス
+    const isSakuraPinkGlow = matName.includes("SakuraStagePinkGlow");
+    if (isSakuraPinkGlow) {
+      const dayIntensity = 0.68;
+      const nightIntensity = 1.45;
+      stdMat.emissive = new THREE.Color(0xf43f5e);
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.14;
+      stdMat.metalness = 0.22;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "curtain_glass");
+      return;
+    }
+
+    // 5c. SHIBUYA109 シリンダークラウン＆立体ロゴ・QFRONT 大型ビジョン マゼンタレッド発光アクセント
+    const isQfront109Accent = matName.includes("ShibuyaQfront109Accent");
+    if (isQfront109Accent) {
+      const dayIntensity = 0.78;
+      const nightIntensity = 1.65;
+      stdMat.emissive = new THREE.Color(0xec4899);
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.16;
+      stdMat.metalness = 0.28;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "anodized_metal");
+      return;
+    }
+
+    // 6. 首都高速3号渋谷線・鉄道高架のプレキャストコンクリート橋脚・床版・遮音壁
+    const isShutokoConcrete = matName.includes("ShutokoConcretePier");
+    if (isShutokoConcrete) {
+      stdMat.roughness = 0.76;
+      stdMat.metalness = 0.08;
+      this.applyArchitecture3DTexture(stdMat, "white_granite");
+      return;
+    }
+
+    // 7. 商業フロア・大階段アトリウム・オフィス点灯窓のウォームインテリア発光ガラス
     const isWarmPlazaGlow =
       matName.includes("WarmPlazaGlow") || matName.includes("StreamWarmLobby");
     if (isWarmPlazaGlow) {
@@ -2068,7 +2591,7 @@ export class TokyoStationMap {
       return;
     }
 
-    // 6. 中層・低層ボイドおよび屋上テラスの垂直壁面緑化（グリーンウォール植栽）
+    // 8. 中層・低層ボイドおよび屋上テラスの垂直壁面緑化（グリーンウォール植栽）
     const isVerticalGreen =
       matName.includes("StreamVerticalGreen") || matName.includes("StreamFoliageGreen");
     if (isVerticalGreen) {
@@ -2078,7 +2601,7 @@ export class TokyoStationMap {
       return;
     }
 
-    // 7. 白アルミカーテンウォールパネル（渋谷ストリーム象徴の白い縦横千鳥ルーバーフィン）
+    // 9. 白アルミカーテンウォールパネル（渋谷ストリーム象徴の白い縦横千鳥ルーバーフィン）
     const isWhiteAluminumFin =
       matName.includes("StreamWhitePanel") || matName.includes("ShibuyaStreamFacade");
     if (isWhiteAluminumFin) {
@@ -2088,7 +2611,7 @@ export class TokyoStationMap {
       return;
     }
 
-    // 8. 屋上オープンフレーム＆デッキ梁の溶融亜鉛めっき鋼材（シルバーグレー）
+    // 10. 屋上オープンフレーム＆デッキ梁の溶融亜鉛めっき鋼材（シルバーグレー）
     const isGalvanizedFrame = matName.includes("StreamGalvanizedFrame");
     if (isGalvanizedFrame) {
       stdMat.roughness = 0.36;
@@ -2097,7 +2620,7 @@ export class TokyoStationMap {
       return;
     }
 
-    // 9. 中層ボイド・低層ピロティ・渋谷川護岸・大階段のダークチャコール鉄骨＆杉板本実コンクリート
+    // 11. 中層ボイド・低層ピロティ・渋谷川護岸・大階段のダークチャコール鉄骨＆杉板本実コンクリート
     const isDarkVoidSteel =
       matName.includes("StreamDarkVoidSteel") || matName.includes("StreamConcretePodium");
     if (isDarkVoidSteel) {
@@ -2107,7 +2630,7 @@ export class TokyoStationMap {
       return;
     }
 
-    // 10. 高層 Low-E ブルーグレー反射カーテンウォールガラス
+    // 12. 高層 Low-E ブルーグレー反射カーテンウォールガラス
     const isGlassOrWater =
       matName.includes("StreamCurtainGlass") || matName.includes("StreamWaterWall");
     if (isGlassOrWater) {
@@ -2188,12 +2711,9 @@ export class TokyoStationMap {
           this.group.add(glbModel);
           this.registerObjectInChunk(glbModel, "shibuya-core");
 
-          const hasProceduralStream = Boolean(this.proceduralShibuyaStreamGroup);
-          if (hasProceduralStream) {
-            this.proceduralShibuyaStreamGroup!.visible = false;
-          }
           const isShibuyaCoreUnloaded = this.unloadedChunkIds.has("shibuya-core");
           glbModel.visible = !isShibuyaCoreUnloaded;
+          this.setShibuyaGlbOverlappingProceduralVisible(isShibuyaCoreUnloaded);
 
           const hasValidLastFocus = !Number.isNaN(this.lastCulledFocusPos.x);
           if (hasValidLastFocus) {
@@ -3309,9 +3829,7 @@ export class TokyoStationMap {
       this.objectToChunkId.delete(this.glbShibuyaStreamGroup);
       this.cullingBoundsCache.delete(this.glbShibuyaStreamGroup);
       this.glbShibuyaStreamGroup = null;
-      if (this.proceduralShibuyaStreamGroup) {
-        this.proceduralShibuyaStreamGroup.userData.permanentlyHiddenByGlb = false;
-      }
+      this.setShibuyaGlbOverlappingProceduralVisible(true);
     }
 
     // 該当チャンクの街路樹GLBクローンを解放
@@ -3347,6 +3865,39 @@ export class TokyoStationMap {
         continue;
       }
       obj.visible = false;
+    }
+  }
+
+  /**
+   * `shibuya_stream.glb` に一体収録されている渋谷ストリーム・渋谷スクランブルスクエア・渋谷ヒカリエ・
+   * 渋谷サクラステージ・渋谷フクラス・MIYASHITA PARK・QFRONT/SHIBUYA109・
+   * 首都高3号渋谷線コア区間（x = -865..-575）・東口歩道橋のプロシージャル Proxy メッシュ群の可視性を一括切り替えする。
+   * - Why: GLB が近距離 LOD0 で表示されている間に同じワールド座標のプロシージャルメッシュも `visible = true` のままだと、
+   *   高架床版・遮音壁・橋脚や各ランドマーク壁面で Z-fighting と二重描画が発生するため。
+   */
+  private setShibuyaGlbOverlappingProceduralVisible(showProcedural: boolean): void {
+    const isPermanentlyHidden = !showProcedural;
+    for (const procGroup of [
+      this.proceduralShibuyaStreamGroup,
+      this.proceduralScrambleSquareGroup,
+      this.proceduralHikarieGroup,
+      this.proceduralSakuraStageGroup,
+      this.proceduralFukurasGroup,
+      this.proceduralMiyashitaParkGroup,
+      this.proceduralQfront109Group,
+    ]) {
+      if (procGroup) {
+        procGroup.visible = showProcedural;
+        procGroup.userData.permanentlyHiddenByGlb = isPermanentlyHidden;
+      }
+    }
+    for (let i = 0; i < this.proceduralShutokoCoreMeshes.length; i++) {
+      const coreMesh = this.proceduralShutokoCoreMeshes[i];
+      coreMesh.visible = showProcedural;
+      coreMesh.userData.permanentlyHiddenByGlb = isPermanentlyHidden;
+      if (showProcedural && coreMesh.parent) {
+        coreMesh.parent.userData.appliedLodTier = undefined;
+      }
     }
   }
 
@@ -3424,6 +3975,10 @@ export class TokyoStationMap {
       return;
     }
 
+    const isShibuyaGlbActive =
+      this.glbShibuyaStreamGroup !== null && !this.unloadedChunkIds.has("shibuya-core");
+    this.setShibuyaGlbOverlappingProceduralVisible(!isShibuyaGlbActive);
+
     for (const def of WORLD_CHUNK_DEFINITIONS) {
       const isUnloaded = this.unloadedChunkIds.has(def.id);
       const objects = this.chunkObjectsMap.get(def.id) ?? [];
@@ -3431,11 +3986,16 @@ export class TokyoStationMap {
         const obj = objects[i];
         const isHiddenProceduralStation =
           obj === this.proceduralStationGroup && this.glbStationGroup !== null && !isUnloaded;
-        const isHiddenProceduralStream =
-          obj === this.proceduralShibuyaStreamGroup &&
-          this.glbShibuyaStreamGroup !== null &&
-          !isUnloaded;
-        if (isHiddenProceduralStation || isHiddenProceduralStream) {
+        const isHiddenProceduralShibuya =
+          (obj === this.proceduralShibuyaStreamGroup ||
+            obj === this.proceduralScrambleSquareGroup ||
+            obj === this.proceduralHikarieGroup ||
+            obj === this.proceduralSakuraStageGroup ||
+            obj === this.proceduralFukurasGroup ||
+            obj === this.proceduralMiyashitaParkGroup ||
+            obj === this.proceduralQfront109Group) &&
+          isShibuyaGlbActive;
+        if (isHiddenProceduralStation || isHiddenProceduralShibuya) {
           obj.visible = false;
           continue;
         }
@@ -3498,6 +4058,11 @@ export class TokyoStationMap {
 
     for (let i = 0; i < root.children.length; i++) {
       const subChild = root.children[i];
+      const isHiddenByGlb = subChild.userData.permanentlyHiddenByGlb === true;
+      if (isHiddenByGlb) {
+        subChild.visible = false;
+        continue;
+      }
       const isGuardrailSlot =
         subChild.userData.isGuardrailSlot === true || subChild.name === "JapaneseGuardrailSlot";
       if (isGuardrailSlot) {
@@ -3562,6 +4127,10 @@ export class TokyoStationMap {
 
     for (let i = 0; i < roadGroup.children.length; i++) {
       const propChild = roadGroup.children[i];
+      if (propChild.userData.permanentlyHiddenByGlb === true) {
+        propChild.visible = false;
+        continue;
+      }
       const isGuardrailSlot =
         propChild.userData.isGuardrailSlot === true || propChild.name === "JapaneseGuardrailSlot";
       if (isGuardrailSlot) {
@@ -3653,7 +4222,7 @@ export class TokyoStationMap {
     let simplifiedSubMeshCount = 0;
     let landmarkProxyActiveCount = 0;
 
-    // 1. 大型ランドマーク GLB（東京駅丸の内駅舎・渋谷ストリーム）の距離 LOD 切替（<= 185m: GLB LOD0, > 185m またはチャンク未ロード時: 軽量プロシージャル Proxy）
+    // 1. 大型ランドマーク GLB（東京駅丸の内駅舎・渋谷ストリーム＆渋谷駅複合街区）の距離 LOD 切替（<= 185m: GLB LOD0, > 185m またはチャンク未ロード時: 軽量プロシージャル Proxy）
     const landmarkHighLodDist = Math.min(185, maxDrawDistance * 0.55);
     const largeStructureMaxDist = Math.max(maxDrawDistance * 2.8, 1100);
     const isMarunouchiChunkLoaded = !this.unloadedChunkIds.has("marunouchi-core");
@@ -3677,24 +4246,33 @@ export class TokyoStationMap {
 
     let streamActiveObject: THREE.Object3D | null = this.proceduralShibuyaStreamGroup;
     let isStreamProxyActive = false;
+    let useHighShibuyaGlb = false;
     if (this.proceduralShibuyaStreamGroup !== null) {
-      const distStream = this.computeDistanceToObject(
-        this.proceduralShibuyaStreamGroup,
-        focusPosition,
-      );
-      const useHighGlb =
+      // Why glbShibuyaStreamGroup がロード済みの場合はその統合バウンディングボックスまでの最短距離を使うか:
+      // shibuya_stream.glb には渋谷ストリーム（z=-15）だけでなく首都高3号高架（z=95）・スクランブルスクエア（z=145）・ヒカリエ（z=146）も一体収録されているため、
+      // 宮下公園やスクランブル交差点北側（z=240）を走行中に渋谷ストリーム単体からの距離（>185m）だけで判定すると、
+      // すぐ目の前（約95m）にあるスクランブルスクエアやヒカリエ・首都高高架まで GLB から Proxy に切り替わってしまうため。
+      const distStream =
+        this.glbShibuyaStreamGroup !== null
+          ? Math.min(
+              this.computeDistanceToObject(this.proceduralShibuyaStreamGroup, focusPosition),
+              this.computeDistanceToObject(this.glbShibuyaStreamGroup, focusPosition),
+            )
+          : this.computeDistanceToObject(this.proceduralShibuyaStreamGroup, focusPosition);
+      useHighShibuyaGlb =
         this.glbShibuyaStreamGroup !== null &&
         isShibuyaChunkLoaded &&
         distStream <= landmarkHighLodDist;
       streamActiveObject =
-        useHighGlb && this.glbShibuyaStreamGroup
+        useHighShibuyaGlb && this.glbShibuyaStreamGroup
           ? this.glbShibuyaStreamGroup
           : this.proceduralShibuyaStreamGroup;
       isStreamProxyActive =
-        !useHighGlb &&
+        !useHighShibuyaGlb &&
         distStream <= largeStructureMaxDist &&
         (this.glbShibuyaStreamGroup !== null || !isShibuyaChunkLoaded);
     }
+    this.setShibuyaGlbOverlappingProceduralVisible(!useHighShibuyaGlb);
 
     // 2. 街路樹スロット（this.treeSlots）の3段階 LOD 更新（LOD0 <= 85m GLB, LOD1 85..165m 枝付きFallback, LOD2 165..260m 幹+樹冠のみ）
     const processedTreeSlotGroups = new Set<THREE.Object3D>();
@@ -3779,14 +4357,22 @@ export class TokyoStationMap {
         continue;
       }
 
-      // 東京駅・渋谷ストリームの GLB とプロシージャル Proxy の排他選択
+      // 東京駅・渋谷ストリーム（および GLB 内包のスクランブルスクエア・ヒカリエ・サクラステージ・フクラス・MIYASHITA PARK・QFRONT/109）の GLB とプロシージャル Proxy の排他選択
       const isInactiveStationVariant =
         (child === this.proceduralStationGroup || child === this.glbStationGroup) &&
         child !== stationActiveObject;
       const isInactiveStreamVariant =
         (child === this.proceduralShibuyaStreamGroup || child === this.glbShibuyaStreamGroup) &&
         child !== streamActiveObject;
-      if (isInactiveStationVariant || isInactiveStreamVariant) {
+      const isInactiveShibuyaSubLandmark =
+        useHighShibuyaGlb &&
+        (child === this.proceduralScrambleSquareGroup ||
+          child === this.proceduralHikarieGroup ||
+          child === this.proceduralSakuraStageGroup ||
+          child === this.proceduralFukurasGroup ||
+          child === this.proceduralMiyashitaParkGroup ||
+          child === this.proceduralQfront109Group);
+      if (isInactiveStationVariant || isInactiveStreamVariant || isInactiveShibuyaSubLandmark) {
         child.visible = false;
         continue;
       }

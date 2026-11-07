@@ -61,6 +61,14 @@ models:
       midVoid: "ShibuyaStream_MidVoid"
       podium: "ShibuyaStream_Podium"
       signage: "ShibuyaStream_Signage"
+      shutokoViaduct: "ShutokoRoute3_Viaduct"
+      scrambleSquare: "ShibuyaScrambleSquare_Tower"
+      hikarie: "ShibuyaHikarie_Tower"
+      pedestrianDeck: "ShibuyaEastPedestrianDeck"
+      sakuraStage: "ShibuyaSakuraStage_Tower"
+      fukuras: "ShibuyaFukuras_Tower"
+      miyashitaPark: "ShibuyaMiyashitaPark_Complex"
+      qfront109: "ShibuyaQfront109_Complex"
     fallbackColor: 0xe2e8f0
 
 textures3d:
@@ -359,6 +367,14 @@ signs:
     rotationY: 3.14159
     speedLimit: 50
     auxiliaryText: "終日"
+
+  - id: "overhead_guide_shibuya_246_shutoko"
+    type: "overhead_guide"
+    position: [-750.0, 0.0, 62.0]
+    rotationY: 0.0
+    label: "原宿 首都高3号・国道246号"
+    subLabel: "Harajuku / Shutoko Rte 3 / Rte 246"
+    arrowDirections: ["左折", "直進", "右折"]
 
 weatherPresets:
   - id: "sunset"

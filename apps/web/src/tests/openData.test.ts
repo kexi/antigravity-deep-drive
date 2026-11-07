@@ -195,8 +195,11 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
     }
 
     const wgs = localToWgs84(-695, -15);
-    expect(wgs.lat).toBeCloseTo(35.65726, 3);
-    expect(wgs.lon).toBeCloseTo(139.70312, 3);
+    expect(wgs.lat).toBeCloseTo(35.65722, 4);
+    expect(wgs.lon).toBeCloseTo(139.70319, 4);
+    const shibuyaRoundTrip = wgs84ToLocal(wgs.lat, wgs.lon);
+    expect(shibuyaRoundTrip.x).toBeCloseTo(-695, 1);
+    expect(shibuyaRoundTrip.z).toBeCloseTo(-15, 1);
 
     const shibuyaDem = sampleGsiDemElevation(-695, -15);
     const isShibuyaValleyElevation = shibuyaDem >= 14.0 && shibuyaDem <= 16.5;
@@ -204,7 +207,16 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
     expect(getRelativeTerrainDisplacement(-750, -15)).toBe(0);
 
     const shibuyaSurrounding = getShibuyaPlateauBuildingsForMap();
-    expect(shibuyaSurrounding.length).toBeGreaterThanOrEqual(10);
+    expect(shibuyaSurrounding.length).toBeGreaterThanOrEqual(16);
+    const shibuyaIds = new Set(shibuyaSurrounding.map((b) => b.buildingId));
+    expect(shibuyaIds.has("13113-bldg-scramble-square")).toBe(true);
+    expect(shibuyaIds.has("13113-bldg-shibuya-hikarie")).toBe(true);
+    expect(shibuyaIds.has("13113-bldg-cerulean-tower")).toBe(true);
+    expect(shibuyaIds.has("13113-bldg-shibuya-cross-tower")).toBe(true);
+    expect(shibuyaIds.has("13113-bldg-miyashita-park")).toBe(true);
+    expect(shibuyaIds.has("13113-bldg-shibuya-mark-city")).toBe(true);
+    expect(shibuyaIds.has("13113-bldg-qfront-109")).toBe(true);
+    expect(shibuyaIds.has("13113-bldg-shibuya-solasta")).toBe(true);
     for (const b of shibuyaSurrounding) {
       const minX = b.x - b.w / 2;
       const maxX = b.x + b.w / 2;
@@ -213,7 +225,10 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
       expect(overlapsMeijiDori).toBe(false);
     }
 
-    // 渋谷街中周回ストリート（稲荷橋通り・並木橋通り・宮下公園通り・桜丘西通り・金王坂通り）が GSI 道路検索で特定できること
+    // 首都高速3号渋谷線および渋谷街中周回ストリートが GSI 道路検索で特定できること
+    const shutokoRoad = findNearestGsiRoad(-830, 99);
+    expect(shutokoRoad.routeCode).toBe("首都高速3号渋谷線");
+    expect(shutokoRoad.rdCtg).toBe("高速自動車国道等");
     const inaribashiRoad = findNearestGsiRoad(-695, -95);
     expect(inaribashiRoad.routeCode).toBe("渋谷区道稲荷橋線");
     const konnozakaRoad = findNearestGsiRoad(-645, -15);
@@ -223,6 +238,22 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
     expect(getRelativeTerrainDisplacement(-156, 100)).toBe(0);
     expect(getRelativeTerrainDisplacement(156, 100)).toBe(0);
     expect(getRelativeTerrainDisplacement(-645, -95)).toBe(0);
+
+    // 渋谷エリアの全 PLATEAU 建築物の gmlId が仮文字列ではなく実測の Spec 5.0 CityGML UUID 形式 (`bldg_<UUID>`) であり、
+    // TOKYO_MARUNOUCHI_OPEN_DATA にも shibuyaDem5a / shibuyaPlateauBuildings / shibuyaGsiRoadSegments が統合されていること
+    const openData = getTokyoOpenData();
+    expect(openData.shibuyaDem5a.tileId).toBe("15/29100/12906");
+    expect(openData.shibuyaDem5a.rows).toBeGreaterThanOrEqual(20);
+    expect(openData.shibuyaDem5a.cols).toBeGreaterThanOrEqual(20);
+    expect(openData.shibuyaPlateauBuildings.length).toBeGreaterThanOrEqual(16);
+    expect(openData.shibuyaGsiRoadSegments.length).toBeGreaterThanOrEqual(12);
+    expect(shibuyaStream.gmlId).toBe("bldg_1db9c375-4ff6-4e3a-8c05-3a5c37e4580d");
+    for (const sb of shibuyaSurrounding) {
+      expect(sb.gmlId).toMatch(
+        /^bldg_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      );
+      expect(sb.gmlId).not.toContain("1311-430");
+    }
   });
 
   it("カーナビ地図描画用の階層別道路コリドー (getNavigationRoadCorridors) と主要交差点 (getNavigationIntersections) が丸の内・渋谷の全主要路線を網羅し、細切れ端数セグメントを持たないことを保証する", () => {
