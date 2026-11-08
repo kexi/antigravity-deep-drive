@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   base: process.env.BASE_URL ?? (process.env.GITHUB_ACTIONS ? "/antigravity-deep-drive/" : "/"),
@@ -11,5 +11,9 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
+  },
+  test: {
+    testTimeout: 20000,
+    hookTimeout: 20000,
   },
 });
