@@ -4,3 +4,5 @@ dist
 .ruff_cache
 .cache
 .turbo
+__pycache__
+*.pyc

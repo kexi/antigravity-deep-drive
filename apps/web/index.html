@@ -128,6 +128,9 @@
         flex-direction: column;
         gap: 8px;
         min-width: 0;
+        flex-shrink: 0;
+        width: 390px;
+        max-width: 100%;
       }
       .title-box {
         background: rgba(10, 16, 28, 0.75);
@@ -347,6 +350,27 @@
         flex-wrap: wrap;
         justify-content: flex-end;
         gap: 8px;
+        max-width: calc(100% - 410px);
+        min-width: 0;
+        max-height: calc(100dvh - 220px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(96, 165, 250, 0.4) transparent;
+        padding-right: 4px;
+      }
+      .hud-controls::-webkit-scrollbar {
+        width: 6px;
+      }
+      .hud-controls::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .hud-controls::-webkit-scrollbar-thumb {
+        background: rgba(96, 165, 250, 0.35);
+        border-radius: 3px;
+      }
+      .hud-controls::-webkit-scrollbar-thumb:hover {
+        background: rgba(96, 165, 250, 0.6);
       }
       .drawer-header-bar {
         display: none;
@@ -1192,6 +1216,12 @@
           flex-direction: column;
           align-items: stretch;
           gap: 6px;
+        }
+        .header-left-stack {
+          width: 100%;
+        }
+        .hud-controls {
+          max-width: 100%;
         }
         .title-box {
           padding: 7px 10px;

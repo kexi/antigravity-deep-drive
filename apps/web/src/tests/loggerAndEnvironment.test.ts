@@ -182,6 +182,39 @@ describe("StructuredLogger (Zod Schema) & TimeOfDay × WeatherCondition 直交�
     weatherSystem.setEnvironment("night", "rain", "puddle");
     expect(weatherSystem.rainIntensity).toBe(1.0);
     expect(weatherSystem.getPuddleEnvironmentParams().rippleIntensity).toBe(1.0);
+
+    // 5. 天候プリセット（WeatherPreset）適用時：非降雨プリセット（sunset/day/night/cloudy）では路面が dry(0.0) に初期化され、降雨プリセットでは puddle(>=0.92) になること
+    weatherSystem.applyPreset({
+      id: "sunset",
+      name: "夕暮れ",
+      sunPosition: [4, 40, 180],
+      sunColor: 0xff9944,
+      ambientColor: 0xfdba74,
+      skyColor: 0x4c1d95,
+      fogDensity: 0.0025,
+      fogColor: 0xfb923c,
+      rain: { enabled: false, intensity: 0, wiperSpeed: 0, windshieldWetness: 0 },
+      lensflare: { enabled: true, intensity: 1.0, color: 0xffbb66 },
+    });
+    expect(weatherSystem.currentRoadSurface).toBe("dry");
+    expect(weatherSystem.wetness).toBe(0.0);
+    expect(weatherSystem.rainIntensity).toBe(0.0);
+
+    weatherSystem.applyPreset({
+      id: "rain",
+      name: "雨天",
+      sunPosition: [0, 80, 100],
+      sunColor: 0x94a3b8,
+      ambientColor: 0x64748b,
+      skyColor: 0x334155,
+      fogDensity: 0.008,
+      fogColor: 0x475569,
+      rain: { enabled: true, intensity: 0.85, wiperSpeed: 1.2, windshieldWetness: 0.95 },
+      lensflare: { enabled: false, intensity: 0, color: 0 },
+    });
+    expect(weatherSystem.currentRoadSurface).toBe("puddle");
+    expect(weatherSystem.wetness).toBeGreaterThanOrEqual(0.92);
+    expect(weatherSystem.rainIntensity).toBe(0.85);
   });
 
   it("クラウン セダンの4眼Bi-Beam LEDヘッドライト光源・ロービーム補助光源・車内ライティングと、1フレーム遅延揺れのないドライバー視点カメラを保証する", () => {

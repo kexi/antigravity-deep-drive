@@ -386,6 +386,9 @@ export class CarModel {
                     stdMat.color.setHex(0x94a3b8);
                     this.applyCrownInterior3DTexture(stdMat, "satin");
                   } else if (isBodyPaint) {
+                    stdMat.color.setHex(0x767d8a);
+                    stdMat.metalness = 0.88;
+                    stdMat.roughness = 0.28;
                     this.applyVehicleExterior3DTexture(stdMat, "body_mica");
                   } else if (isPianoBlack) {
                     stdMat.color.setHex(0x0b0e14);
@@ -553,9 +556,9 @@ export class CarModel {
     // トヨタ クラウン セダン（AZSH32 / KZSM30）象徴カラー「プレシャスメタル (1L5)」
     const bodyMaterial = new THREE.MeshPhysicalMaterial({
       name: "BodyPaint",
-      color: 0x9ca3af,
+      color: 0x767d8a,
       metalness: 0.88,
-      roughness: 0.16,
+      roughness: 0.28,
       clearcoat: 1.0,
       clearcoatRoughness: 0.05,
     });

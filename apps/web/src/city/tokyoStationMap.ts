@@ -1981,13 +1981,13 @@ export class TokyoStationMap {
         const skyEdgeMat = new THREE.MeshStandardMaterial({
           color: 0x7dd3fc,
           emissive: 0x38bdf8,
-          emissiveIntensity: this.isNightActive ? 1.35 : 0.72,
+          emissiveIntensity: this.isNightActive ? 1.35 : 0.12,
           roughness: 0.12,
           metalness: 0.3,
         });
         this.shibuyaStreamEmissiveEntries.push({
           material: skyEdgeMat,
-          dayIntensity: 0.72,
+          dayIntensity: 0.12,
           nightIntensity: 1.35,
         });
         this.applyArchitecture3DTexture(skyEdgeMat, "curtain_glass");
@@ -2033,13 +2033,13 @@ export class TokyoStationMap {
         const orbMat = new THREE.MeshStandardMaterial({
           color: 0xf59e0b,
           emissive: 0xd97706,
-          emissiveIntensity: this.isNightActive ? 1.15 : 0.58,
+          emissiveIntensity: this.isNightActive ? 1.15 : 0.0,
           roughness: 0.22,
           metalness: 0.48,
         });
         this.shibuyaStreamEmissiveEntries.push({
           material: orbMat,
-          dayIntensity: 0.58,
+          dayIntensity: 0.0,
           nightIntensity: 1.15,
         });
         this.applyArchitecture3DTexture(orbMat, "anodized_metal");
@@ -2063,12 +2063,12 @@ export class TokyoStationMap {
         const sakuraGlowMat = new THREE.MeshStandardMaterial({
           color: 0xfda4af,
           emissive: 0xf43f5e,
-          emissiveIntensity: this.isNightActive ? 1.1 : 0.52,
+          emissiveIntensity: this.isNightActive ? 1.1 : 0.15,
           roughness: 0.2,
         });
         this.shibuyaStreamEmissiveEntries.push({
           material: sakuraGlowMat,
-          dayIntensity: 0.52,
+          dayIntensity: 0.15,
           nightIntensity: 1.1,
         });
         const sakuraAtrium = new THREE.Mesh(
@@ -2120,12 +2120,12 @@ export class TokyoStationMap {
         const mediaWallMat = new THREE.MeshStandardMaterial({
           color: 0x38bdf8,
           emissive: 0x0ea5e9,
-          emissiveIntensity: this.isNightActive ? 1.55 : 0.85,
+          emissiveIntensity: this.isNightActive ? 1.55 : 0.35,
           roughness: 0.15,
         });
         this.shibuyaStreamEmissiveEntries.push({
           material: mediaWallMat,
-          dayIntensity: 0.85,
+          dayIntensity: 0.35,
           nightIntensity: 1.55,
         });
         const qfrontMedia = new THREE.Mesh(
@@ -2233,26 +2233,26 @@ export class TokyoStationMap {
     const shutokoGreenSignMat = new THREE.MeshStandardMaterial({
       color: 0x047857,
       emissive: 0x059669,
-      emissiveIntensity: this.isNightActive ? 0.95 : 0.52,
+      emissiveIntensity: this.isNightActive ? 0.95 : 0.05,
       roughness: 0.26,
       metalness: 0.15,
     });
     this.shibuyaStreamEmissiveEntries.push({
       material: shutokoGreenSignMat,
-      dayIntensity: 0.52,
+      dayIntensity: 0.05,
       nightIntensity: 0.95,
     });
 
     const underpassLightMat = new THREE.MeshStandardMaterial({
       color: 0xfde68a,
       emissive: 0xf59e0b,
-      emissiveIntensity: this.isNightActive ? 1.65 : 0.85,
+      emissiveIntensity: this.isNightActive ? 1.45 : 0.18,
       roughness: 0.2,
     });
     this.shibuyaStreamEmissiveEntries.push({
       material: underpassLightMat,
-      dayIntensity: 0.85,
-      nightIntensity: 1.65,
+      dayIntensity: 0.18,
+      nightIntensity: 1.45,
     });
 
     const deckWidthZ = 21.6;
@@ -2458,7 +2458,7 @@ export class TokyoStationMap {
     // 2. 渋谷ストリーム象徴のライムイエロー・デッキエッジ＆サインアクセント
     const isYellowAccent = matName.includes("StreamYellowAccent");
     if (isYellowAccent) {
-      const dayIntensity = 0.48;
+      const dayIntensity = 0.08;
       const nightIntensity = 0.95;
       stdMat.emissive = new THREE.Color(0xd6e614);
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
@@ -2476,7 +2476,7 @@ export class TokyoStationMap {
     // 3. 首都高速3号渋谷線 緑案内標識ボード＆ヘリポート着陸帯
     const isShutokoGreenSign = matName.includes("ShutokoHighwayGreenSign");
     if (isShutokoGreenSign) {
-      const dayIntensity = 0.52;
+      const dayIntensity = 0.05;
       const nightIntensity = 1.05;
       stdMat.emissive = new THREE.Color(0x059669);
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
@@ -2494,7 +2494,7 @@ export class TokyoStationMap {
     // 4. 渋谷スクランブルスクエア 屋上展望施設「SHIBUYA SKY」スカイエッジ発光ガラス
     const isShibuyaSkyEdge = matName.includes("ShibuyaSkyEdgeGlow");
     if (isShibuyaSkyEdge) {
-      const dayIntensity = 0.68;
+      const dayIntensity = 0.12;
       const nightIntensity = 1.42;
       stdMat.emissive = new THREE.Color(0x38bdf8);
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
@@ -2512,7 +2512,7 @@ export class TokyoStationMap {
     // 5. 渋谷ヒカリエ 東急シアターオーブ球体劇場＆首都高高架下アンバーナトリウム照明
     const isHikarieGoldOrb = matName.includes("HikarieGoldOrb");
     if (isHikarieGoldOrb) {
-      const dayIntensity = 0.65;
+      const dayIntensity = 0.0;
       const nightIntensity = 1.38;
       stdMat.emissive = new THREE.Color(0xf59e0b);
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
@@ -2530,7 +2530,7 @@ export class TokyoStationMap {
     // 5b. 渋谷サクラステージ「KINETIC GATE（ときめきSTAGE）」チェリーピンク発光ガラス
     const isSakuraPinkGlow = matName.includes("SakuraStagePinkGlow");
     if (isSakuraPinkGlow) {
-      const dayIntensity = 0.68;
+      const dayIntensity = 0.15;
       const nightIntensity = 1.45;
       stdMat.emissive = new THREE.Color(0xf43f5e);
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
@@ -2548,7 +2548,7 @@ export class TokyoStationMap {
     // 5c. SHIBUYA109 シリンダークラウン＆立体ロゴ・QFRONT 大型ビジョン マゼンタレッド発光アクセント
     const isQfront109Accent = matName.includes("ShibuyaQfront109Accent");
     if (isQfront109Accent) {
-      const dayIntensity = 0.78;
+      const dayIntensity = 0.35;
       const nightIntensity = 1.65;
       stdMat.emissive = new THREE.Color(0xec4899);
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
@@ -2576,7 +2576,7 @@ export class TokyoStationMap {
     const isWarmPlazaGlow =
       matName.includes("WarmPlazaGlow") || matName.includes("StreamWarmLobby");
     if (isWarmPlazaGlow) {
-      const dayIntensity = 0.72;
+      const dayIntensity = 0.04;
       const nightIntensity = 1.32;
       stdMat.emissive = new THREE.Color(0xffd28a);
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;

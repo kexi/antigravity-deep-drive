@@ -95,7 +95,7 @@ const TIME_LIGHTING_PROFILES: Record<TimeOfDay, TimeLightingProfile> = {
     baseWetness: 0.68,
   },
   day: {
-    sunPosition: [-5, 52, 180],
+    sunPosition: [25, 210, 55],
     moonPosition: [14, 48, -180],
     moonColor: 0xe2e8f0,
     moonIntensity: 0.0,
@@ -177,7 +177,7 @@ const TIME_LIGHTING_PROFILES: Record<TimeOfDay, TimeLightingProfile> = {
 export class WeatherSystem {
   public currentTimeOfDay: TimeOfDay = "day";
   public currentWeatherCondition: WeatherCondition = "clear";
-  public currentRoadSurface: RoadSurfaceCondition = "wet";
+  public currentRoadSurface: RoadSurfaceCondition = "dry";
   public currentWeather: WeatherType = "clear";
   public currentGraphicsQuality: GraphicsQuality = "high";
   public activeRainCount = 8500;
@@ -707,6 +707,8 @@ export class WeatherSystem {
       this.currentRoadSurface = roadSurface;
     } else if (weather === "rain") {
       this.currentRoadSurface = "puddle";
+    } else {
+      this.currentRoadSurface = "dry";
     }
 
     const base = TIME_LIGHTING_PROFILES[timeOfDay];
@@ -866,7 +868,7 @@ export class WeatherSystem {
         ? "cloudy"
         : "clear";
 
-    const targetRoadSurface: RoadSurfaceCondition = isRainPreset ? "puddle" : "wet";
+    const targetRoadSurface: RoadSurfaceCondition = isRainPreset ? "puddle" : "dry";
 
     // まず 3D ボリュメトリック雲（coverage, type, altitude, silverLining, cirrus）と月パラメータ一式を完全初期化する
     this.setEnvironment(targetTimeOfDay, targetWeatherCondition, targetRoadSurface);
@@ -907,18 +909,10 @@ export class WeatherSystem {
       this.rainIntensity = preset.rain.intensity;
       this.currentRoadSurface = "puddle";
       this.wetness = Math.max(0.92, preset.rain.windshieldWetness);
-    } else if (isNightPreset) {
-      this.rainIntensity = 0.0;
-      this.currentRoadSurface = "wet";
-      this.wetness = 0.85;
-    } else if (isSunsetPreset) {
-      this.rainIntensity = 0.0;
-      this.currentRoadSurface = "wet";
-      this.wetness = 0.82;
     } else {
       this.rainIntensity = 0.0;
-      this.currentRoadSurface = "wet";
-      this.wetness = 0.76;
+      this.currentRoadSurface = "dry";
+      this.wetness = 0.0;
     }
 
     const presetNightFactor = isNightPreset ? 1.0 : isSunsetPreset ? 0.35 : 0.0;

@@ -45,7 +45,7 @@ export const GRAPHICS_QUALITY_PRESETS: Record<GraphicsQuality, GraphicsQualityPr
     maxPixelRatio: 1.25,
     renderScale: 0.85,
     shadowsEnabled: true,
-    shadowMapType: THREE.PCFSoftShadowMap,
+    shadowMapType: THREE.PCFShadowMap,
     shadowMapSize: 2048,
     cloudMarchSteps: 14,
     cloudSunSteps: 2,

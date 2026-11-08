@@ -331,7 +331,7 @@ describe("車両およびゲームシステムの仕様検証", () => {
     });
     cityMap.applyShibuyaStreamGlbMaterial3DTexture(yellowAccentMat, "ShibuyaStream_Podium_2");
     expect(yellowAccentMat.emissive.getHex()).toBe(0xd6e614);
-    expect(yellowAccentMat.emissiveIntensity).toBeCloseTo(0.48, 2);
+    expect(yellowAccentMat.emissiveIntensity).toBeCloseTo(0.08, 2);
 
     const verticalGreenMat = new THREE.MeshStandardMaterial({
       name: "StreamVerticalGreen",
@@ -347,7 +347,7 @@ describe("車両およびゲームシステムの仕様検証", () => {
     });
     cityMap.applyShibuyaStreamGlbMaterial3DTexture(warmGlowMat, "ShibuyaStream_Podium_1");
     expect(warmGlowMat.userData?.arch3DMode).toBe("curtain_glass");
-    expect(warmGlowMat.emissiveIntensity).toBeCloseTo(0.72, 2);
+    expect(warmGlowMat.emissiveIntensity).toBeCloseTo(0.04, 2);
 
     const beaconMat = new THREE.MeshStandardMaterial({
       name: "BeaconRed",
@@ -362,8 +362,8 @@ describe("車両およびゲームシステムの仕様検証", () => {
     expect(yellowAccentMat.emissiveIntensity).toBeCloseTo(0.95, 2);
     expect(warmGlowMat.emissiveIntensity).toBeCloseTo(1.32, 2);
     cityMap.setNightMode(false);
-    expect(yellowAccentMat.emissiveIntensity).toBeCloseTo(0.48, 2);
-    expect(warmGlowMat.emissiveIntensity).toBeCloseTo(0.72, 2);
+    expect(yellowAccentMat.emissiveIntensity).toBeCloseTo(0.08, 2);
+    expect(warmGlowMat.emissiveIntensity).toBeCloseTo(0.04, 2);
 
     // 稲荷橋広場（ShibuyaInaribashiPlaza）が渋谷川開渠区間（z = -195..-55）を上から塞がず、
     // 渋谷川水面（13113-wtr-shibuya-river, y = 0.18）が地面（y = -0.01）および河床（ShibuyaRiverBed, y = 0.04）より上に配置されていることを保証する

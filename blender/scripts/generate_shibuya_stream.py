@@ -126,11 +126,11 @@ def setup_materials() -> dict[str, bpy.types.Material]:
         # 6: 商業フロア・カフェ・オフィス窓のウォームインテリア発光ガラス
         "WarmPlazaGlow": create_material(
             "WarmPlazaGlow",
-            base_color=(1.0, 0.88, 0.68, 1.0),
+            base_color=(1.0, 0.90, 0.78, 1.0),
             roughness=0.18,
             metallic=0.10,
-            emission_color=(1.0, 0.82, 0.54, 1.0),
-            emission_strength=0.85,
+            emission_color=(1.0, 0.85, 0.60, 1.0),
+            emission_strength=0.05,
         ),
         # 7: 航空障害灯レッド発光
         "BeaconRed": create_material(
@@ -152,10 +152,10 @@ def setup_materials() -> dict[str, bpy.types.Material]:
         "ShutokoHighwayGreenSign": create_material(
             "ShutokoHighwayGreenSign",
             base_color=(0.04, 0.42, 0.24, 1.0),
-            roughness=0.28,
-            metallic=0.15,
+            roughness=0.35,
+            metallic=0.10,
             emission_color=(0.05, 0.48, 0.28, 1.0),
-            emission_strength=0.62,
+            emission_strength=0.05,
         ),
         # 10: 渋谷スクランブルスクエア 屋上展望施設「SHIBUYA SKY」スカイエッジ発光ガラス＆ヘリポートライン
         "ShibuyaSkyEdgeGlow": create_material(
@@ -164,16 +164,16 @@ def setup_materials() -> dict[str, bpy.types.Material]:
             roughness=0.12,
             metallic=0.25,
             emission_color=(0.38, 0.78, 1.0, 1.0),
-            emission_strength=1.45,
+            emission_strength=0.25,
         ),
         # 11: 渋谷ヒカリエ 東急シアターオーブ球体劇場＆首都高高架下アンバーナトリウム照明
         "HikarieGoldOrb": create_material(
             "HikarieGoldOrb",
-            base_color=(0.95, 0.72, 0.32, 1.0),
-            roughness=0.22,
-            metallic=0.48,
-            emission_color=(1.0, 0.68, 0.24, 1.0),
-            emission_strength=1.15,
+            base_color=(0.92, 0.78, 0.42, 1.0),
+            roughness=0.25,
+            metallic=0.75,
+            emission_color=(0.95, 0.75, 0.35, 1.0),
+            emission_strength=0.0,
         ),
         # 12: 渋谷サクラステージ（Shibuya Sakura Stage）「KINETIC GATE（ときめきSTAGE）」チェリーピンク発光ガラス
         "SakuraStagePinkGlow": create_material(
@@ -182,7 +182,7 @@ def setup_materials() -> dict[str, bpy.types.Material]:
             roughness=0.14,
             metallic=0.22,
             emission_color=(0.96, 0.32, 0.50, 1.0),
-            emission_strength=1.35,
+            emission_strength=0.25,
         ),
         # 13: SHIBUYA109 シリンダークラウン＆QFRONT 大型ビジョン マゼンタレッド発光アクセント
         "ShibuyaQfront109Accent": create_material(
@@ -191,7 +191,7 @@ def setup_materials() -> dict[str, bpy.types.Material]:
             roughness=0.16,
             metallic=0.28,
             emission_color=(1.0, 0.16, 0.45, 1.0),
-            emission_strength=1.65,
+            emission_strength=0.35,
         ),
     }
     return mats
@@ -249,6 +249,64 @@ def add_oriented_box(
     for q in quads:
         f = bm.faces.new([v[q[0]], v[q[1]], v[q[2]], v[q[3]]])
         f.material_index = mat_idx
+
+
+def add_cylindrical_panel_z(
+    bm: bmesh.types.BMesh,
+    center: Vector,
+    r_inner: float,
+    r_outer: float,
+    height: float,
+    start_rad: float,
+    end_rad: float,
+    segments: int = 20,
+    mat_idx: int = 0,
+):
+    """
+    円柱表面に沿った扇形円筒シェル（厚み r_outer - r_inner、角度範囲 start_rad .. end_rad）を bmesh に追加する。
+    SHIBUYA109 シリンダー曲面ファサードに完全密着したバッキングプレート・看板ベース生成用。
+    """
+    hz = height * 0.5
+    p_in_bot = []
+    p_in_top = []
+    p_out_bot = []
+    p_out_top = []
+
+    for i in range(segments + 1):
+        ratio = i / segments
+        ang = start_rad + (end_rad - start_rad) * ratio
+        ca = math.cos(ang)
+        sa = math.sin(ang)
+
+        c_in = center + Vector((ca * r_inner, sa * r_inner, 0.0))
+        c_out = center + Vector((ca * r_outer, sa * r_outer, 0.0))
+
+        p_in_bot.append(bm.verts.new(c_in - Vector((0.0, 0.0, hz))))
+        p_in_top.append(bm.verts.new(c_in + Vector((0.0, 0.0, hz))))
+        p_out_bot.append(bm.verts.new(c_out - Vector((0.0, 0.0, hz))))
+        p_out_top.append(bm.verts.new(c_out + Vector((0.0, 0.0, hz))))
+
+    for i in range(segments):
+        ni = i + 1
+        # 外周面
+        f_out = bm.faces.new([p_out_bot[i], p_out_bot[ni], p_out_top[ni], p_out_top[i]])
+        f_out.material_index = mat_idx
+        # 内周面
+        f_in = bm.faces.new([p_in_bot[ni], p_in_bot[i], p_in_top[i], p_in_top[ni]])
+        f_in.material_index = mat_idx
+        # 底面
+        f_bot = bm.faces.new([p_in_bot[i], p_in_bot[ni], p_out_bot[ni], p_out_bot[i]])
+        f_bot.material_index = mat_idx
+        # 天面
+        f_top = bm.faces.new([p_in_top[ni], p_in_top[i], p_out_top[i], p_out_top[ni]])
+        f_top.material_index = mat_idx
+
+    # 左側小口 (i = 0)
+    f_left = bm.faces.new([p_in_bot[0], p_out_bot[0], p_out_top[0], p_in_top[0]])
+    f_left.material_index = mat_idx
+    # 右側小口 (i = segments)
+    f_right = bm.faces.new([p_out_bot[-1], p_in_bot[-1], p_in_top[-1], p_out_top[-1]])
+    f_right.material_index = mat_idx
 
 
 def add_cylinder_z(
@@ -2791,14 +2849,14 @@ def build_shibuya_qfront_109_complex(
         mat_idx=13,
     )
 
-    # シリンダー頂部（Z = 65.0m .. 82.0m）のホワイトパネル＆象徴的なマゼンタレッド発光クラウンバンド
+    # シリンダー頂部（Z = 65.0m .. 82.0m）のメタリックシルバーパネル＆象徴的なマゼンタレッド発光クラウンバンド
     add_cylinder_z(
         bm,
         center=Vector((cyl_cx, cyl_cy, 73.5)),
         radius=cyl_r + 0.38,
         height=16.5,
         segments=28,
-        mat_idx=0,
+        mat_idx=3,
     )
     for pink_z in [67.8, 79.2]:
         add_cylinder_z(
@@ -2813,88 +2871,112 @@ def build_shibuya_qfront_109_complex(
     # 南東（スクランブル交差点・明治通り側 bx=185..210, by=-55）からシリンダー (248.5, -131.5) を見たとき、
     # 法線方向は (-0.54, 0.84, 0.0)、観察者から見た右方向（接線）は (-0.84, -0.54, 0.0)
     logo_dir = Vector((-0.54, 0.84, 0.0)).normalized()
-    logo_tan = Vector((-0.84, -0.54, 0.0)).normalized()
-    logo_center = Vector((cyl_cx, cyl_cy, 73.5)) + logo_dir * (cyl_r + 0.92)
-    # シリンダー曲面に負けない高コントラスト白アルミバッキングプレート
-    add_oriented_box(
+    theta_center = math.atan2(logo_dir.y, logo_dir.x)
+
+    # シリンダー曲面外側に美しく浮き彫りされた白アルミバッキングプレート（Z-fighting・埋没ゼロ）
+    add_cylindrical_panel_z(
         bm,
-        center=Vector((cyl_cx, cyl_cy, 73.5)) + logo_dir * (cyl_r + 0.45),
-        tangent_dir=logo_tan,
-        normal_dir=logo_dir,
-        size_tangent=11.8,
-        size_normal=0.72,
-        size_z=7.4,
+        center=Vector((cyl_cx, cyl_cy, 73.5)),
+        r_inner=cyl_r + 0.40,
+        r_outer=cyl_r + 0.52,
+        height=7.2,
+        start_rad=theta_center - 0.48,
+        end_rad=theta_center + 0.54,
+        segments=28,
         mat_idx=0,
     )
-    # "1" (左縦バー + トップセリフ)
+
+    # 各文字のシリンダー曲面上の配置角度（左から 1, 0, 9）
+    cyl_center = Vector((cyl_cx, cyl_cy, 0.0))
+    letter_r = cyl_r + 0.58
+    letter_depth = 0.36
+
+    # "1" (左側 theta = theta_center - 0.27: 0 との間に 0.556m のクリアランスを確保)
+    theta_1 = theta_center - 0.27
+    n_1 = Vector((math.cos(theta_1), math.sin(theta_1), 0.0))
+    t_1 = Vector((-math.sin(theta_1), math.cos(theta_1), 0.0))
+    pos_1 = cyl_center + n_1 * letter_r + Vector((0.0, 0.0, 73.5))
+    # 縦ステム
     add_oriented_box(
         bm,
-        center=logo_center - logo_tan * 4.15,
-        tangent_dir=logo_tan,
-        normal_dir=logo_dir,
-        size_tangent=1.35,
-        size_normal=1.10,
-        size_z=6.0,
+        center=pos_1,
+        tangent_dir=t_1,
+        normal_dir=n_1,
+        size_tangent=1.05,
+        size_normal=letter_depth,
+        size_z=5.0,
         mat_idx=13,
     )
+    # トップセリフ
     add_oriented_box(
         bm,
-        center=logo_center - logo_tan * 4.65 + Vector((0.0, 0.0, 2.35)),
-        tangent_dir=logo_tan,
-        normal_dir=logo_dir,
-        size_tangent=1.15,
-        size_normal=1.10,
-        size_z=1.25,
+        center=pos_1 - t_1 * 0.60 + Vector((0.0, 0.0, 1.85)),
+        tangent_dir=t_1,
+        normal_dir=n_1,
+        size_tangent=0.85,
+        size_normal=letter_depth,
+        size_z=1.10,
         mat_idx=13,
     )
-    # "0" (中央リング)
+
+    # "0" (中央 theta = theta_center)
+    theta_0 = theta_center
+    n_0 = Vector((math.cos(theta_0), math.sin(theta_0), 0.0))
+    t_0 = Vector((-math.sin(theta_0), math.cos(theta_0), 0.0))
+    pos_0 = cyl_center + n_0 * letter_r + Vector((0.0, 0.0, 73.5))
     add_extruded_arc_ring(
         bm,
-        center=logo_center - logo_tan * 0.35,
-        tangent_dir=logo_tan,
-        normal_dir=logo_dir,
-        outer_r=2.65,
-        inner_r=1.32,
-        depth=1.10,
+        center=pos_0,
+        tangent_dir=t_0,
+        normal_dir=n_0,
+        outer_r=2.10,
+        inner_r=1.15,
+        depth=letter_depth,
         start_deg=0.0,
         end_deg=360.0,
-        segments=20,
+        segments=28,
         mat_idx=13,
     )
-    # "9" (上部ループ + 右縦ステム + 下部ボトムフック)
+
+    # "9" (右側 theta = theta_center + 0.33: 0 との間に 0.585m の完全なクリアランスを確保し衝突を完全解消)
+    theta_9 = theta_center + 0.33
+    n_9 = Vector((math.cos(theta_9), math.sin(theta_9), 0.0))
+    t_9 = Vector((-math.sin(theta_9), math.cos(theta_9), 0.0))
+    pos_9 = cyl_center + n_9 * letter_r + Vector((0.0, 0.0, 73.5))
+    # 上部ループ (全高・プロポーションを0と統一)
     add_extruded_arc_ring(
         bm,
-        center=logo_center,
-        tangent_dir=logo_tan,
-        normal_dir=logo_dir,
-        outer_r=1.95,
-        inner_r=0.82,
-        depth=1.10,
+        center=pos_9 + Vector((0.0, 0.0, 1.0)) - t_9 * 0.20,
+        tangent_dir=t_9,
+        normal_dir=n_9,
+        outer_r=1.35,
+        inner_r=0.60,
+        depth=letter_depth,
         start_deg=0.0,
         end_deg=360.0,
-        segments=18,
-        mat_idx=13,
-        offset_t=3.55,
-        offset_z=1.15,
-    )
-    add_oriented_box(
-        bm,
-        center=logo_center + logo_tan * 4.92 - Vector((0.0, 0.0, 0.45)),
-        tangent_dir=logo_tan,
-        normal_dir=logo_dir,
-        size_tangent=1.25,
-        size_normal=1.10,
-        size_z=5.1,
+        segments=24,
         mat_idx=13,
     )
+    # 右縦ステム (ループ右端 -0.20 + 1.35 = +1.15 と完全同一面で接合)
     add_oriented_box(
         bm,
-        center=logo_center + logo_tan * 3.65 - Vector((0.0, 0.0, 2.42)),
-        tangent_dir=logo_tan,
-        normal_dir=logo_dir,
-        size_tangent=3.2,
-        size_normal=1.10,
-        size_z=1.22,
+        center=pos_9 + t_9 * 0.75 - Vector((0.0, 0.0, 0.10)),
+        tangent_dir=t_9,
+        normal_dir=n_9,
+        size_tangent=0.80,
+        size_normal=letter_depth,
+        size_z=4.6,
+        mat_idx=13,
+    )
+    # 下部ボトムフック (右端 +1.15 から左へ滑らかに弧を描くように接続し、不要な段差や飛び出しフットを完全排除)
+    add_oriented_box(
+        bm,
+        center=pos_9 - t_9 * 0.05 - Vector((0.0, 0.0, 2.0)),
+        tangent_dir=t_9,
+        normal_dir=n_9,
+        size_tangent=2.40,
+        size_normal=letter_depth,
+        size_z=0.80,
         mat_idx=13,
     )
 
@@ -3097,9 +3179,9 @@ def render_360_review(review_dir: str):
         ),
         (
             "14_closeup_qfront_and_shibuya109",
-            Vector((205.0, -55.0, 28.0)),
-            Vector((265.0, -120.0, 38.0)),
-            26.0,
+            Vector((205.0, -55.0, 36.0)),
+            Vector((255.0, -125.0, 58.0)),
+            28.0,
         ),
         (
             "15_closeup_miyashita_park_arches",

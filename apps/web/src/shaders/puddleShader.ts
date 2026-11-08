@@ -62,7 +62,7 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
 
     this.uRainWetness = { value: 0.0 };
     this.uTime = { value: 0.0 };
-    this.uPuddleThreshold = { value: options.puddleThreshold ?? 0.42 };
+    this.uPuddleThreshold = { value: options.puddleThreshold ?? 0.62 };
     this.uRippleIntensity = { value: 1.0 };
     this.uRippleSpeed = { value: options.rippleSpeed ?? 1.25 };
     this.uSunDirection = {
@@ -230,9 +230,9 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
           vec3 R = reflect(-V, N);
           R.y = max(R.y, 0.015);
 
-          // 1. 水のフレネル反射率 (Schlick近似: 水の屈折率 IOR = 1.333 + 浅い視線角度での鏡面強調)
+          // 1. 水の物理フレネル反射率 (Schlick近似: 水の屈折率 IOR = 1.333, F0 = 0.0204)
           float NoV = max(dot(N, V), 0.0);
-          float fresnel = 0.14 + 0.86 * pow(1.0 - NoV, 3.2);
+          float fresnel = 0.02 + 0.98 * pow(1.0 - NoV, 5.0);
 
           // 2. 大気スカイドーム反射（地平線〜天頂のグラデーション + 立体雲レイヤー + 太陽方向のグロー）
           float skyElev = pow(clamp(R.y, 0.0, 1.0), 0.50);
@@ -241,7 +241,7 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
           vec3 flatR = vec3(R.x, R.y * 0.35 + 0.001, R.z);
           vec3 flatSun = vec3(sunDir.x, sunDir.y * 0.35 + 0.001, sunDir.z);
           float sunAzimuthGlow = pow(max(dot(flatR / max(length(flatR), 0.001), flatSun / max(length(flatSun), 0.001)), 0.0), 3.0);
-          skyGrad += uSunColor * sunAzimuthGlow * (0.56 * (1.0 - uNightFactor * 0.45));
+          skyGrad += uSunColor * sunAzimuthGlow * (0.32 * (1.0 - uNightFactor * 0.45));
 
           vec2 skyCloudUv = R.xz / (R.y + 0.38) * 0.36 + vec2(uTime * 0.006, -uTime * 0.004);
           float cloudReflNoise = puddleFbm(skyCloudUv);
@@ -278,19 +278,18 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
 
           envColor += lampGlowColor;
 
-          // 5. 太陽・月光のデュアルローブ水面スペキュラ
-          float sunSpecCore = pow(max(dot(R, sunDir), 0.0), 72.0);
-          float sunSpecGlitter = pow(max(dot(R, sunDir), 0.0), 12.0);
-          vec3 sunSpecular = uSunColor * (sunSpecCore * 2.1 + sunSpecGlitter * 0.55) * (1.0 - uNightFactor * 0.35);
+          // 5. 太陽・月光の補助水面ハイライト（PBR直接光スペキュラとの二重加算白飛びを抑制）
+          float sunSpecCore = pow(max(dot(R, sunDir), 0.0), 64.0);
+          vec3 sunSpecular = uSunColor * (sunSpecCore * 0.15) * (1.0 - uNightFactor * 0.35);
 
           // 6. 波紋リングの繊細なハイライト
           float rippleTilt = length(N.xz);
-          vec3 rippleEdgeSparkle = mix(uSkyHorizonColor, vec3(0.90, 0.96, 1.0), 0.55) * smoothstep(0.015, 0.18, rippleTilt) * (0.30 + 0.42 * clamp(uRippleIntensity, 0.0, 1.0));
+          vec3 rippleEdgeSparkle = mix(uSkyHorizonColor, vec3(0.90, 0.96, 1.0), 0.55) * smoothstep(0.015, 0.18, rippleTilt) * (0.20 + 0.30 * clamp(uRippleIntensity, 0.0, 1.0));
 
-          // 水深に応じた水色吸収とフレネル合成
+          // 水深に応じた水色吸収とフレネル合成 (Schlick: mix(waterTint, reflectedRadiance, fresnel))
           vec3 waterTint = vec3(0.025, 0.048, 0.078);
-          vec3 reflectedRadiance = (envColor + sunSpecular + rippleEdgeSparkle) * mix(0.60, 1.06, fresnel);
-          return mix(waterTint, reflectedRadiance, clamp(fresnel + 0.40, 0.0, 1.0)) * (0.76 + 0.24 * puddleDepth);
+          vec3 reflectedRadiance = envColor + sunSpecular + rippleEdgeSparkle;
+          return mix(waterTint, reflectedRadiance, fresnel) * (0.85 + 0.15 * puddleDepth);
         }
         `,
       );
@@ -318,7 +317,7 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
         if (uRainWetness > 0.01 && normalCamDist < 165.0) {
           float normalDistFade = 1.0 - smoothstep(115.0, 165.0, normalCamDist);
           float pMap = samplePuddleBasin(vWorldPosition.xz);
-          float effectiveThreshold = uPuddleThreshold - uRainWetness * 0.12;
+          float effectiveThreshold = uPuddleThreshold - uRainWetness * 0.08;
           float isPuddleArea = smoothstep(effectiveThreshold, effectiveThreshold + 0.07, pMap) * smoothstep(0.0, 0.25, uRainWetness) * normalDistFade;
 
           if (isPuddleArea > 0.01) {
@@ -343,7 +342,7 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
         if (uRainWetness > 0.01 && puddleCamDist < 175.0) {
           float puddleDistFade = 1.0 - smoothstep(125.0, 175.0, puddleCamDist);
           float pNoise = samplePuddleBasin(vWorldPosition.xz);
-          float effectiveThreshold = uPuddleThreshold - uRainWetness * 0.12;
+          float effectiveThreshold = uPuddleThreshold - uRainWetness * 0.08;
 
           // 濡れ縁（水たまり周囲のアスファルト・石畳浸透湿潤帯）
           float wetEdge = smoothstep(effectiveThreshold - 0.18, effectiveThreshold, pNoise) * puddleDistFade;
