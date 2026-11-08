@@ -225,14 +225,16 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     }
   });
 
-  it("ShibuyaTextureManager が全12種の実写ストリートビューテクスチャと各種マテリアル生成を正常に行うことを保証する", async () => {
+  it("ShibuyaTextureManager が全13種の実写ストリートビューおよびPLATEAU LOD2テクスチャと各種マテリアル生成を正常に行うことを保証する", async () => {
     const textureIds = Object.keys(SHIBUYA_TEXTURE_CONFIGS) as ShibuyaTextureId[];
-    expect(textureIds).toHaveLength(12);
+    expect(textureIds).toHaveLength(13);
 
     for (const id of textureIds) {
       const tex = shibuyaTextureManager.getTexture(id);
       expect(tex).toBeDefined();
       expect(tex.name).toBe(`ShibuyaTex_${id}`);
+      expect(tex.generateMipmaps).toBe(true);
+      expect(tex.minFilter).toBe(THREE.LinearMipmapLinearFilter);
     }
 
     // 商業路面店舗マテリアル
@@ -247,6 +249,29 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     expect(commercialMatNight.emissiveIntensity).toBe(
       SHIBUYA_TEXTURE_CONFIGS.commercialFacade.emissiveIntensityNight,
     );
+
+    // PLATEAU LOD2 実写ファサードマテリアル
+    const plateauLod2MatDay = shibuyaTextureManager.createPlateauLod2Material(false);
+    expect(plateauLod2MatDay.map).toBeDefined();
+    expect(plateauLod2MatDay.emissiveMap).toBe(plateauLod2MatDay.map);
+    expect(plateauLod2MatDay.emissiveIntensity).toBe(
+      SHIBUYA_TEXTURE_CONFIGS.plateauLod2Facade.emissiveIntensityDay,
+    );
+
+    const plateauLod2MatNight = shibuyaTextureManager.createPlateauLod2Material(true);
+    expect(plateauLod2MatNight.emissiveIntensity).toBe(
+      SHIBUYA_TEXTURE_CONFIGS.plateauLod2Facade.emissiveIntensityNight,
+    );
+
+    // PLATEAU LOD2 遠景軽量プロキシマテリアル
+    const plateauProxyMatDay = shibuyaTextureManager.createPlateauLod2ProxyMaterial(false);
+    expect(plateauProxyMatDay.map).toBeDefined();
+    expect(plateauProxyMatDay.name).toBe("PlateauLod2ProxyMat");
+    expect(plateauProxyMatDay.roughness).toBe(0.65);
+    expect(plateauProxyMatDay.emissiveIntensity).toBe(0.05);
+
+    const plateauProxyMatNight = shibuyaTextureManager.createPlateauLod2ProxyMaterial(true);
+    expect(plateauProxyMatNight.emissiveIntensity).toBe(0.45);
 
     // ビルボードマテリアル
     const billboardMatNight = shibuyaTextureManager.createBillboardMaterial("billboards", true);
@@ -341,24 +366,39 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     expect(jrSteelMat.userData.arch3DVolumeChannel).toBe("anodized_metal");
     expect(jrSteelMat.map).toBeNull();
 
-    // PLATEAU 実在建物群向けマテリアル
+    // PLATEAU 実在建物群向けマテリアル（LOD2実写テクスチャ＆Mipmap検証）
     const plateauTowerMat = new THREE.MeshStandardMaterial({ name: "PlateauGlassTower" });
     cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauTowerMat);
     expect(plateauTowerMat.userData.arch3DVolumeChannel).toBe("curtain_glass");
+    expect(plateauTowerMat.map).toBeDefined();
+    expect(plateauTowerMat.map?.generateMipmaps).toBe(true);
+    expect(plateauTowerMat.emissiveMap).toBe(plateauTowerMat.map);
 
     const plateauCommercialMat = new THREE.MeshStandardMaterial({
       name: "PlateauCommercialFacade",
     });
     cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauCommercialMat);
     expect(plateauCommercialMat.userData.arch3DVolumeChannel).toBe("retail_storefront");
+    expect(plateauCommercialMat.map).toBeDefined();
+    expect(plateauCommercialMat.map?.generateMipmaps).toBe(true);
+    expect(plateauCommercialMat.emissiveMap).toBe(plateauCommercialMat.map);
 
     const plateauAlleyMat = new THREE.MeshStandardMaterial({ name: "PlateauAlleyCommercial" });
     cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauAlleyMat);
     expect(plateauAlleyMat.userData.arch3DVolumeChannel).toBe("stone_punched");
+    expect(plateauAlleyMat.map).toBeDefined();
+    expect(plateauAlleyMat.map?.generateMipmaps).toBe(true);
 
     const plateauRoofMat = new THREE.MeshStandardMaterial({ name: "PlateauRooftop" });
     cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauRoofMat);
     expect(plateauRoofMat.userData.arch3DVolumeChannel).toBe("white_granite");
+
+    const plateauProxyMat = new THREE.MeshStandardMaterial({ name: "PlateauLod2Proxy" });
+    cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauProxyMat);
+    expect(plateauProxyMat.userData.arch3DVolumeChannel).toBeUndefined(); // 3Dボリュームノイズをスキップ
+    expect(plateauProxyMat.map).toBeDefined();
+    expect(plateauProxyMat.map?.generateMipmaps).toBe(true);
+    expect(plateauProxyMat.emissiveMap).toBe(plateauProxyMat.map);
   });
 
   it("渋谷エリアの路面店舗・袖看板群・交差点ビルボード群が生成され、夜間切り替え時に一括で発光輝度が連動することを保証する", async () => {

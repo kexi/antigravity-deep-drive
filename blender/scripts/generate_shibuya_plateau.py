@@ -129,10 +129,13 @@ def create_pbr_material(
     metallic: float = 0.1,
     emissive_color: tuple[float, float, float, float] | None = None,
     emissive_strength: float = 0.0,
+    image_path: str | None = None,
 ) -> bpy.types.Material:
-    """Blender 5.0+ Principled BSDF マテリアルを構築する"""
+    """Blender 5.0+ Principled BSDF マテリアルを構築する（写真ベーステクスチャ対応）"""
     mat = bpy.data.materials.new(name=name)
-    mat.use_nodes = True
+    has_node_tree = mat.node_tree is not None
+    if not has_node_tree:
+        mat.use_nodes = True
     bsdf = next(n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
     bsdf.inputs["Base Color"].default_value = base_color
     bsdf.inputs["Roughness"].default_value = roughness
@@ -140,12 +143,24 @@ def create_pbr_material(
     if emissive_color is not None and "Emission Color" in bsdf.inputs:
         bsdf.inputs["Emission Color"].default_value = emissive_color
         bsdf.inputs["Emission Strength"].default_value = emissive_strength
+
+    if image_path:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+        full_img_path = os.path.join(project_root, image_path.lstrip("/"))
+        if os.path.exists(full_img_path):
+            tex_node = mat.node_tree.nodes.new(type="ShaderNodeTexImage")
+            img = bpy.data.images.load(full_img_path)
+            tex_node.image = img
+            mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
+            if emissive_strength > 0.0 and "Emission Color" in bsdf.inputs:
+                mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Emission Color"])
     return mat
 
 
 def setup_materials() -> list[bpy.types.Material]:
-    """PLATEAU 建築用途および高さに応じた実在感のある PBR マテリアル群を作成する"""
-    # 0: 高層オフィスタワー（カーテンウォールガラス・反射スチール）
+    """PLATEAU 建築用途および高さに応じた実在感のある PBR マテリアル群を作成する（LOD2実写テクスチャ適用）"""
+    # 0: 高層オフィスタワー（PLATEAU LOD2 実写ファサード・木々＆地面映り込み）
     mat_tower = create_pbr_material(
         "PlateauGlassTower",
         (0.18, 0.24, 0.35, 1.0),
@@ -153,8 +168,9 @@ def setup_materials() -> list[bpy.types.Material]:
         metallic=0.82,
         emissive_color=(0.35, 0.55, 0.85, 1.0),
         emissive_strength=0.28,
+        image_path="apps/web/public/textures/shibuya/plateau_lod2_facade.jpg",
     )
-    # 1: 中高層商業・オフィスファサード（アルミパネル・石張り・窓グリッド）
+    # 1: 中高層商業・オフィスファサード（PLATEAU LOD2 実写ファサード・路面店＆木々映り込み）
     mat_commercial = create_pbr_material(
         "PlateauCommercialFacade",
         (0.36, 0.38, 0.42, 1.0),
@@ -162,6 +178,7 @@ def setup_materials() -> list[bpy.types.Material]:
         metallic=0.28,
         emissive_color=(0.95, 0.88, 0.65, 1.0),
         emissive_strength=0.32,
+        image_path="apps/web/public/textures/shibuya/plateau_lod2_facade.jpg",
     )
     # 2: センター街・道玄坂路地裏・低層商業テナントビル（暖色店舗照明・看板）
     mat_alley = create_pbr_material(
@@ -171,6 +188,7 @@ def setup_materials() -> list[bpy.types.Material]:
         metallic=0.18,
         emissive_color=(1.0, 0.82, 0.52, 1.0),
         emissive_strength=0.38,
+        image_path="apps/web/public/textures/shibuya/shibuya_dogenzaka_commercial.jpg",
     )
     # 3: 屋上・パラペット（防水アスファルトコンクリート・設備機械基礎）
     mat_roof = create_pbr_material(
@@ -179,7 +197,17 @@ def setup_materials() -> list[bpy.types.Material]:
         roughness=0.82,
         metallic=0.10,
     )
-    return [mat_tower, mat_commercial, mat_alley, mat_roof]
+    # 4: 遠景（LOD2）軽量プロキシ用マテリアル（単一ドローコール・テクスチャMipmap対応・低負荷シェーディング）
+    mat_proxy = create_pbr_material(
+        "PlateauLod2Proxy",
+        (0.32, 0.34, 0.38, 1.0),
+        roughness=0.65,
+        metallic=0.15,
+        emissive_color=(0.90, 0.82, 0.60, 1.0),
+        emissive_strength=0.20,
+        image_path="apps/web/public/textures/shibuya/plateau_lod2_facade.jpg",
+    )
+    return [mat_tower, mat_commercial, mat_alley, mat_roof, mat_proxy]
 
 
 def prepare_b3dm_and_extract_glb(tile_name: str, cache_dir: str) -> tuple[str, dict]:
@@ -255,16 +283,11 @@ def prepare_b3dm_and_extract_glb(tile_name: str, cache_dir: str) -> tuple[str, d
 
 
 def generate_shibuya_plateau_city() -> str:
-    """Project PLATEAU 渋谷区全8タイルの実在建築メッシュを統合した GLB を生成する"""
+    """Project PLATEAU 渋谷区全8タイルの実在建築メッシュを統合した GLB を生成する（距離ベース多段階LOD対応・個別タイルオブジェクト分割）"""
     clean_scene()
     cache_dir = "/tmp/shibuya_tiles"
     materials = setup_materials()
 
-    merged_mesh = bpy.data.meshes.new("ShibuyaPlateauCityMesh")
-    for m in materials:
-        merged_mesh.materials.append(m)
-
-    bm = bmesh.new()
     total_buildings = 0
     total_faces_kept = 0
     total_landmarks_skipped = 0
@@ -302,7 +325,11 @@ def generate_shibuya_plateau_city() -> str:
             rel_y = max(0.0, alt - 36.7 - 14.5)
             local_verts.append((lx, -lz, rel_y))
 
-        # ポリゴン単位で bmesh へコピー（マテリアル判定・コリドー干渉除外・ランドマーク重複除外）
+        bm = bmesh.new()
+        uv_layer = bm.loops.layers.uv.verify()
+        tile_faces_count = 0
+
+        # ポリゴン単位で bmesh へコピー（マテリアル判定・コリドー干渉除外・ランドマーク重複除外・UV生成）
         for poly in obj.data.polygons:
             p_verts = [local_verts[vi] for vi in poly.vertices]
             p_bids = [batch_vals[vi] for vi in poly.vertices]
@@ -386,7 +413,8 @@ def generate_shibuya_plateau_city() -> str:
 
             # 3. マテリアル分類（屋根・高層・中層・路地商業）
             normal_z = poly.normal.z
-            if normal_z > 0.72:
+            is_roof = normal_z > 0.72
+            if is_roof:
                 mat_idx = 3  # PlateauRooftop
             elif h >= 75.0:
                 mat_idx = 0  # PlateauGlassTower
@@ -399,24 +427,74 @@ def generate_shibuya_plateau_city() -> str:
             try:
                 f = bm.faces.new(bm_verts)
                 f.material_index = mat_idx
+
+                # UV座標計算（LOD2実写ファサード＆屋根マッピング）
+                norm_x = abs(poly.normal.x)
+                norm_y = abs(poly.normal.y)
+                is_ew = norm_x > norm_y
+                for loop in f.loops:
+                    co = loop.vert.co
+                    if is_roof:
+                        u = co.x / 14.0
+                        v = -co.y / 14.0
+                    else:
+                        u = (-co.y if is_ew else co.x) / 12.0
+                        v = co.z / 12.0
+                    loop[uv_layer].uv = (u, v)
+
+                tile_faces_count += 1
                 total_faces_kept += 1
             except Exception:
                 pass
 
         bpy.data.objects.remove(obj, do_unlink=True)
 
+        if tile_faces_count > 0:
+            bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.01)
+            tile_mesh = bpy.data.meshes.new(f"ShibuyaPlateauTileMesh_{tile_name}")
+            for m in materials[:4]:
+                tile_mesh.materials.append(m)
+            bm.to_mesh(tile_mesh)
+
+            tile_obj = bpy.data.objects.new(f"PlateauTile_{tile_name}", tile_mesh)
+            bpy.context.scene.collection.objects.link(tile_obj)
+            tile_obj["tile_id"] = tile_name
+            tile_obj["is_plateau_tile"] = True
+
+            # LOD2 軽量プロキシメッシュ生成 (Decimate による低ポリゴン化 80%削減 + 単一プロキシマテリアル)
+            mod = tile_obj.modifiers.new("Decimate", "DECIMATE")
+            mod.ratio = 0.20
+            bpy.context.view_layer.objects.active = tile_obj
+            dg = bpy.context.evaluated_depsgraph_get()
+            eval_mesh = bpy.data.meshes.new_from_object(tile_obj.evaluated_get(dg))
+            tile_obj.modifiers.remove(mod)
+
+            eval_mesh.name = f"ShibuyaPlateauProxyMesh_{tile_name}"
+            eval_mesh.materials.clear()
+            eval_mesh.materials.append(materials[4])
+            for p in eval_mesh.polygons:
+                p.material_index = 0
+            eval_mesh.validate()
+
+            proxy_obj = bpy.data.objects.new(f"PlateauProxyTile_{tile_name}", eval_mesh)
+            bpy.context.scene.collection.objects.link(proxy_obj)
+            proxy_obj["tile_id"] = tile_name
+            proxy_obj["is_plateau_proxy"] = True
+            proxy_obj["target_tile"] = f"PlateauTile_{tile_name}"
+
+            bm.free()
+            print(
+                f"[PLATEAU] Built tile object PlateauTile_{tile_name} ({tile_faces_count} faces) "
+                f"and proxy PlateauProxyTile_{tile_name} ({len(eval_mesh.polygons)} faces)"
+            )
+        else:
+            bm.free()
+
     print(
         f"[PLATEAU] Total {total_buildings} real buildings processed: "
         f"kept {total_faces_kept} faces, skipped {total_landmarks_skipped} landmark faces, "
         f"clipped {total_road_clipped} roadway faces."
     )
-
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.01)
-    bm.to_mesh(merged_mesh)
-    bm.free()
-
-    city_obj = bpy.data.objects.new("ShibuyaPlateauCity", merged_mesh)
-    bpy.context.scene.collection.objects.link(city_obj)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))

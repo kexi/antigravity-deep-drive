@@ -12,7 +12,8 @@ export type ShibuyaTextureId =
   | "magnet"
   | "markCity"
   | "toeiBic"
-  | "dogenzakaCommercial";
+  | "dogenzakaCommercial"
+  | "plateauLod2Facade";
 
 export interface ShibuyaTextureConfig {
   id: ShibuyaTextureId;
@@ -133,6 +134,15 @@ export const SHIBUYA_TEXTURE_CONFIGS: Record<ShibuyaTextureId, ShibuyaTextureCon
     emissiveIntensityDay: 0.28,
     emissiveIntensityNight: 1.55,
   },
+  plateauLod2Facade: {
+    id: "plateauLod2Facade",
+    url: "/textures/shibuya/plateau_lod2_facade.jpg",
+    repeat: [1, 1],
+    roughness: 0.25,
+    metalness: 0.35,
+    emissiveIntensityDay: 0.12,
+    emissiveIntensityNight: 0.85,
+  },
 };
 
 /**
@@ -153,7 +163,7 @@ export class ShibuyaTextureManager {
   }
 
   /**
-   * テクスチャを取得する（キャッシュ済みなら即時返却）
+   * テクスチャを取得する（キャッシュ済みなら即時返却・Mipmap完全対応）
    */
   public getTexture(id: ShibuyaTextureId): THREE.Texture {
     const cached = this.textures.get(id);
@@ -169,6 +179,9 @@ export class ShibuyaTextureManager {
       // ヘッドレス・単体テスト環境: 1x1 ダミー DataTexture を生成して安定動作を保証
       const dummyData = new Uint8Array([200, 200, 200, 255]);
       texture = new THREE.DataTexture(dummyData, 1, 1, THREE.RGBAFormat);
+      texture.generateMipmaps = true;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
       texture.needsUpdate = true;
     } else {
       if (!this.loader) {
@@ -178,6 +191,9 @@ export class ShibuyaTextureManager {
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.wrapS = THREE.RepeatWrapping;
       texture.wrapT = THREE.RepeatWrapping;
+      texture.generateMipmaps = true;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
       if (cfg.repeat) {
         texture.repeat.set(cfg.repeat[0], cfg.repeat[1]);
       }
@@ -186,6 +202,43 @@ export class ShibuyaTextureManager {
     texture.name = `ShibuyaTex_${id}`;
     this.textures.set(id, texture);
     return texture;
+  }
+
+  /**
+   * PLATEAU LOD2 写真ベースの実写ファサードマテリアル（木々や地面の映り込み）を生成する
+   */
+  public createPlateauLod2Material(isNight = false): THREE.MeshStandardMaterial {
+    const tex = this.getTexture("plateauLod2Facade");
+    const cfg = SHIBUYA_TEXTURE_CONFIGS.plateauLod2Facade;
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: cfg.roughness ?? 0.25,
+      metalness: cfg.metalness ?? 0.35,
+      emissive: new THREE.Color(0xffffff),
+      emissiveMap: tex,
+      emissiveIntensity: isNight
+        ? (cfg.emissiveIntensityNight ?? 0.85)
+        : (cfg.emissiveIntensityDay ?? 0.12),
+    });
+    mat.name = "PlateauLod2PhotorealisticMat";
+    return mat;
+  }
+
+  /**
+   * 遠景（LOD2）用の軽量プロキシマテリアルを生成する（単一ドローコール・テクスチャMipmap・低負荷シェーディング）
+   */
+  public createPlateauLod2ProxyMaterial(isNight = false): THREE.MeshStandardMaterial {
+    const tex = this.getTexture("plateauLod2Facade");
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: 0.65,
+      metalness: 0.15,
+      emissive: new THREE.Color(0xffe8ba),
+      emissiveMap: tex,
+      emissiveIntensity: isNight ? 0.45 : 0.05,
+    });
+    mat.name = "PlateauLod2ProxyMat";
+    return mat;
   }
 
   /**

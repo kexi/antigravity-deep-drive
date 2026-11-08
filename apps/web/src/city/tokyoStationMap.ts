@@ -96,6 +96,7 @@ export class TokyoStationMap {
   public glbStationGroup: THREE.Group | null = null;
   public glbShibuyaStreamGroup: THREE.Group | null = null;
   public glbShibuyaPlateauGroup: THREE.Group | null = null;
+  public plateauTileMeshes: THREE.Mesh[] = [];
   public glbTreeTemplate: THREE.Group | null = null;
   public readonly signSystem: RoadSignSystem;
 
@@ -1118,8 +1119,8 @@ export class TokyoStationMap {
         vec4 archVolMicro = vec4(0.5);
         vec4 propVolSample = vec4(0.5);
 
-        // 3D ボリュームテクスチャ（近〜中距離サンプリング）
-        if (archViewDist < 72.0) {
+        // 3D ボリュームテクスチャ（近〜中距離サンプリング: LOD0 <= 72m, LOD1 <= 135m, LOD2 > 135m は軽量化バイパス）
+        if (archViewDist < 135.0) {
           archVolMacro = texture(uArchVolumeTex, vArchWorldPos * 0.22);
           if (archViewDist < 30.0) {
             archVolMicro = texture(uArchVolumeTex, vArchWorldPos * 0.65);
@@ -1138,13 +1139,29 @@ export class TokyoStationMap {
         float dWallU = max(fwidth(facadeU) * 1.5, 0.002);
         float dWallV = max(fwidth(facadeV) * 1.5, 0.002);
 
+        // PLATEAU LOD2 環境映り込み（木々の緑・路面アスファルトの照り返し）
+        // 沿道街路樹（y in [1.5, 15.0]）および路面（y < 3.2）の反射環境光を近景・中景（archViewDist < 135.0）で合成
+        if (archViewDist < 135.0 && isFacadeWall) {
+          float treeReflectionFactor = smoothstep(1.5, 4.5, vArchWorldPos.y) * (1.0 - smoothstep(8.5, 15.0, vArchWorldPos.y));
+          float groundReflectionFactor = 1.0 - smoothstep(0.0, 3.2, vArchWorldPos.y);
+          vec3 treeFoliageReflection = vec3(0.12, 0.26, 0.14) * (0.8 + 0.4 * archVolMacro.g);
+          vec3 groundWarmReflection = vec3(0.24, 0.22, 0.20) * (0.85 + 0.3 * archVolMacro.r);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb + treeFoliageReflection, treeReflectionFactor * 0.28);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb + groundWarmReflection, groundReflectionFactor * 0.22);
+        }
+
         #ifdef USE_MAP
-        // 実写テクスチャ（Google マップ / ストリートビュー写真、看板、電子ビジョン、道路標識等）が存在する場合は、
+        // 実写テクスチャ（PLATEAU LOD2写真、Google マップ / ストリートビュー写真、看板、電子ビジョン、道路標識等）が存在する場合は、
         // プロシージャル色帯での上書きを行わず、テクスチャ本来の高解像度な実写色彩を100%保持。
-        // 3Dボリュームノイズによる微細な結晶・風化ディテールのみを微量（5-8%）に乗算ブレンドする。
-        diffuseColor.rgb *= mix(0.93, 1.05, archVolMacro.r * 0.65 + archVolMicro.r * 0.35);
+        // 遠距離（LOD2: archViewDist >= 180.0）ではテクスチャMipmapサンプリングのみで3Dノイズ演算を完全スキップ
+        if (archViewDist < 180.0) {
+          diffuseColor.rgb *= mix(0.93, 1.05, archVolMacro.r * 0.65 + archVolMicro.r * 0.35);
+        }
         #else
-        if (uArchSurfaceMode == 0) {
+        if (archViewDist > 235.0) {
+          // 遠距離（LOD2）: 複雑なプロシージャル計算を完全スキップして軽量均一シェーディング
+          diffuseColor.rgb *= mix(0.92, 1.02, archVolMacro.r);
+        } else if (uArchSurfaceMode == 0) {
           // 赤レンガ・テラコッタ（東京駅丸の内駅舎・東京海上日動ビルなど）
           float clayGrain = mix(archVolMacro.r, archVolMicro.r, 0.45);
           float mortarJoint = smoothstep(0.62, 0.88, archVolMacro.g);
@@ -3284,14 +3301,47 @@ export class TokyoStationMap {
           glbModel.userData.isLargeStructure = true;
           glbModel.userData.maxLodDrawDistance = 800;
 
+          this.plateauTileMeshes = [];
+          const detailedTileMeshes: THREE.Mesh[] = [];
+          const proxyTileMap = new Map<string, THREE.Mesh>();
+
           glbModel.traverse((child) => {
             const isMesh = (child as THREE.Mesh).isMesh;
             if (!isMesh) {
               return;
             }
             const mesh = child as THREE.Mesh;
+            const meshName = mesh.name || "";
+            const isProxy = meshName.startsWith("PlateauProxyTile_");
+
+            if (isProxy) {
+              mesh.castShadow = false;
+              mesh.receiveShadow = false;
+              mesh.visible = false;
+              mesh.userData.isPlateauProxy = true;
+              const tileId = meshName.replace("PlateauProxyTile_", "");
+              proxyTileMap.set(tileId, mesh);
+
+              const isMaterialArray = Array.isArray(mesh.material);
+              if (isMaterialArray) {
+                const matList = mesh.material as THREE.Material[];
+                for (let i = 0; i < matList.length; i++) {
+                  this.applyShibuyaPlateauGlbMaterial3DTexture(matList[i]);
+                }
+              } else {
+                this.applyShibuyaPlateauGlbMaterial3DTexture(mesh.material as THREE.Material);
+              }
+              return;
+            }
+
             mesh.castShadow = true;
             mesh.receiveShadow = true;
+            mesh.userData.initialCastShadow = true;
+            mesh.userData.isLargeStructure = true;
+            mesh.userData.maxLodDrawDistance = 800;
+
+            const tileBounds = new THREE.Box3().setFromObject(mesh);
+            mesh.userData.cullingBounds = tileBounds;
 
             const isMaterialArray = Array.isArray(mesh.material);
             if (isMaterialArray) {
@@ -3302,7 +3352,24 @@ export class TokyoStationMap {
             } else {
               this.applyShibuyaPlateauGlbMaterial3DTexture(mesh.material as THREE.Material);
             }
+            detailedTileMeshes.push(mesh);
           });
+
+          for (let i = 0; i < detailedTileMeshes.length; i++) {
+            const tileMesh = detailedTileMeshes[i];
+            const tileId = (tileMesh.name || "").replace("PlateauTile_", "");
+            const proxyMesh = proxyTileMap.get(tileId);
+            if (proxyMesh) {
+              tileMesh.userData.proxyMesh = proxyMesh;
+              tileMesh.userData.detailedGeometry = tileMesh.geometry;
+              tileMesh.userData.proxyGeometry = proxyMesh.geometry;
+              tileMesh.userData.detailedMaterial = tileMesh.material;
+              tileMesh.userData.proxyMaterial = proxyMesh.material;
+            } else {
+              this.ensurePlateauTileProxy(tileMesh);
+            }
+            this.plateauTileMeshes.push(tileMesh);
+          }
 
           this.glbShibuyaPlateauGroup = glbModel;
           this.group.add(glbModel);
@@ -3343,11 +3410,14 @@ export class TokyoStationMap {
     const matName = stdMat.name || "";
 
     if (matName.includes("PlateauGlassTower")) {
+      const tex = shibuyaTextureManager.getTexture("plateauLod2Facade");
+      stdMat.map = tex;
       stdMat.roughness = 0.18;
       stdMat.metalness = 0.45;
       const dayIntensity = 0.05;
       const nightIntensity = 1.25;
       stdMat.emissive = new THREE.Color(0xa5f3fc);
+      stdMat.emissiveMap = tex;
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
       this.shibuyaStreamEmissiveEntries.push({
         material: stdMat,
@@ -3359,11 +3429,14 @@ export class TokyoStationMap {
     }
 
     if (matName.includes("PlateauCommercialFacade")) {
+      const tex = shibuyaTextureManager.getTexture("plateauLod2Facade");
+      stdMat.map = tex;
       stdMat.roughness = 0.35;
       stdMat.metalness = 0.2;
       const dayIntensity = 0.06;
       const nightIntensity = 1.15;
       stdMat.emissive = new THREE.Color(0xfde68a);
+      stdMat.emissiveMap = tex;
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
       this.shibuyaStreamEmissiveEntries.push({
         material: stdMat,
@@ -3375,11 +3448,14 @@ export class TokyoStationMap {
     }
 
     if (matName.includes("PlateauAlleyCommercial")) {
+      const tex = shibuyaTextureManager.getTexture("dogenzakaCommercial");
+      stdMat.map = tex;
       stdMat.roughness = 0.45;
       stdMat.metalness = 0.15;
       const dayIntensity = 0.04;
       const nightIntensity = 0.95;
       stdMat.emissive = new THREE.Color(0xfef08a);
+      stdMat.emissiveMap = tex;
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
       this.shibuyaStreamEmissiveEntries.push({
         material: stdMat,
@@ -3387,6 +3463,24 @@ export class TokyoStationMap {
         nightIntensity,
       });
       this.applyArchitecture3DTexture(stdMat, "stone_punched");
+      return;
+    }
+
+    if (matName.includes("PlateauLod2Proxy")) {
+      const tex = shibuyaTextureManager.getTexture("plateauLod2Facade");
+      stdMat.map = tex;
+      stdMat.roughness = 0.65;
+      stdMat.metalness = 0.15;
+      const dayIntensity = 0.05;
+      const nightIntensity = 0.45;
+      stdMat.emissive = new THREE.Color(0xffe8ba);
+      stdMat.emissiveMap = tex;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
       return;
     }
 
@@ -3398,6 +3492,46 @@ export class TokyoStationMap {
     }
 
     this.applyArchitecture3DTexture(stdMat, "anodized_metal");
+  }
+
+  /**
+   * PLATEAU タイルメッシュに LOD2 軽量プロキシ表現（低ポリゴン・軽量マテリアル）を保証・付与する
+   */
+  public ensurePlateauTileProxy(tileMesh: THREE.Mesh): void {
+    if (tileMesh.userData.proxyGeometry && tileMesh.userData.proxyMaterial) {
+      return;
+    }
+    if (!tileMesh.userData.detailedGeometry) {
+      tileMesh.userData.detailedGeometry = tileMesh.geometry;
+    }
+    if (!tileMesh.userData.detailedMaterial) {
+      tileMesh.userData.detailedMaterial = tileMesh.material;
+    }
+
+    const bounds =
+      (tileMesh.userData.cullingBounds as THREE.Box3) ?? this.getOrComputeBounds(tileMesh);
+    const size = new THREE.Vector3();
+    bounds.getSize(size);
+
+    const proxyGeo = new THREE.BoxGeometry(
+      Math.max(1, size.x),
+      Math.max(1, size.y),
+      Math.max(1, size.z),
+    );
+    const center = new THREE.Vector3();
+    bounds.getCenter(center);
+    const offset = center.clone().sub(tileMesh.position);
+    proxyGeo.translate(offset.x, offset.y, offset.z);
+
+    const proxyMat = shibuyaTextureManager.createPlateauLod2ProxyMaterial(this.isNightActive);
+    this.shibuyaStreamEmissiveEntries.push({
+      material: proxyMat,
+      dayIntensity: 0.05,
+      nightIntensity: 0.45,
+    });
+
+    tileMesh.userData.proxyGeometry = proxyGeo;
+    tileMesh.userData.proxyMaterial = proxyMat;
   }
 
   private buildSurroundingSkyscrapers(world: RAPIER.World, rapier: typeof RAPIER): void {
@@ -3467,11 +3601,14 @@ export class TokyoStationMap {
       baseMesh.receiveShadow = true;
       bGroup.add(baseMesh);
 
-      // 1b. 低層1F〜2F 商業路面ショーウィンドウ・ロビーガラス＆コロネード（retail_storefront プロシージャルテクスチャ）
+      // 1b. 低層1F〜2F 商業路面ショーウィンドウ・ロビーガラス＆コロネード（PLATEAU LOD2 実写ファサード・木々＆地面映り込み）
       const storefrontGeo = new THREE.BoxGeometry(b.w * 0.96, 6.5, b.d * 0.96);
+      const lod2StorefrontTex = shibuyaTextureManager.getTexture("plateauLod2Facade");
       const lobbyGlassMat = new THREE.MeshStandardMaterial({
-        color: b.warmInterior,
+        map: lod2StorefrontTex,
+        color: 0xffffff,
         emissive: b.warmInterior,
+        emissiveMap: lod2StorefrontTex,
         emissiveIntensity: 0.38,
         roughness: 0.2,
       });
@@ -4518,6 +4655,7 @@ export class TokyoStationMap {
       this.objectToChunkId.delete(this.glbShibuyaPlateauGroup);
       this.cullingBoundsCache.delete(this.glbShibuyaPlateauGroup);
       this.glbShibuyaPlateauGroup = null;
+      this.plateauTileMeshes = [];
     }
 
     // 該当チャンクの街路樹GLBクローンを解放
@@ -4612,6 +4750,12 @@ export class TokyoStationMap {
       const mesh = node as THREE.Mesh;
       if (mesh.geometry) {
         mesh.geometry.dispose();
+      }
+      if (mesh.userData.detailedGeometry && mesh.userData.detailedGeometry !== mesh.geometry) {
+        mesh.userData.detailedGeometry.dispose();
+      }
+      if (mesh.userData.proxyGeometry && mesh.userData.proxyGeometry !== mesh.geometry) {
+        mesh.userData.proxyGeometry.dispose();
       }
       const isMaterialArray = Array.isArray(mesh.material);
       if (isMaterialArray) {
@@ -4781,7 +4925,7 @@ export class TokyoStationMap {
           subChild.userData.initialCastShadow = subChild.castShadow;
         }
         const canCastShadow = Boolean(subChild.userData.initialCastShadow);
-        subChild.castShadow = canCastShadow && (isHighTier || isMediumTier);
+        subChild.castShadow = canCastShadow && isHighTier;
       }
 
       const hasNestedChildren = subChild.children.length > 0;
@@ -5018,11 +5162,124 @@ export class TokyoStationMap {
       }
     }
 
+    // 2b. PLATEAU 渋谷区実測3D建築物群（this.plateauTileMeshes）の多段階距離 LOD カリング
+    // 各タイル（宮益坂・道玄坂・センター街・駅東口・青山通り等）ごとに自車からの最短距離を個別に算定し、
+    // 近景（<= 135m）: LOD0（高精細メッシュ・LOD2写真テクスチャ・影有効）
+    // 中景（135m < dist <= 235m）: LOD1（中距離軽量化・3Dノイズバイパス・テクスチャMipmap・影OFF）
+    // 遠景（235m < dist <= 800m）: LOD2（低ポリゴン軽量プロキシ・単一軽量マテリアル・影OFF）
+    // 最遠方（> 800m）: Culled（完全非表示）
+    // に動的自動遷移させて遠距離の描画負荷やメモリ・シャドウパス消費を徹底抑制する。
+    if (this.glbShibuyaPlateauGroup !== null && this.plateauTileMeshes.length > 0) {
+      const isShibuyaLoaded = isShibuyaChunkLoaded;
+      for (let i = 0; i < this.plateauTileMeshes.length; i++) {
+        const tileMesh = this.plateauTileMeshes[i];
+        const isChunkNotLoaded = !isShibuyaLoaded;
+        if (isChunkNotLoaded) {
+          tileMesh.visible = false;
+          tileMesh.userData.appliedLodTier = "culled";
+          tileMesh.userData.isProxyActive = false;
+          if (tileMesh.userData.proxyMesh) {
+            tileMesh.userData.proxyMesh.visible = false;
+          }
+          culledByDistanceCount += 1;
+          continue;
+        }
+
+        const tileBounds =
+          (tileMesh.userData.cullingBounds as THREE.Box3) ?? this.getOrComputeBounds(tileMesh);
+        const dist = tileBounds.distanceToPoint(focusPosition);
+        const tileMaxDist = Math.min(maxDrawDistance * 2.2, 800);
+        const isTileCulled = dist > tileMaxDist;
+        if (isTileCulled) {
+          tileMesh.visible = false;
+          tileMesh.userData.appliedLodTier = "culled";
+          tileMesh.userData.isProxyActive = false;
+          if (tileMesh.userData.proxyMesh) {
+            tileMesh.userData.proxyMesh.visible = false;
+          }
+          culledByDistanceCount += 1;
+          continue;
+        }
+
+        tileMesh.visible = true;
+        visibleCount += 1;
+        const tileTier: "high" | "medium" | "low" =
+          dist <= 135 ? "high" : dist <= 235 ? "medium" : "low";
+        tileMesh.userData.appliedLodTier = tileTier;
+
+        this.ensurePlateauTileProxy(tileMesh);
+
+        if (tileTier === "high") {
+          lod0HighCount += 1;
+          tileMesh.castShadow = true;
+          if (
+            tileMesh.userData.detailedGeometry &&
+            tileMesh.geometry !== tileMesh.userData.detailedGeometry
+          ) {
+            tileMesh.geometry = tileMesh.userData.detailedGeometry;
+          }
+          if (
+            tileMesh.userData.detailedMaterial &&
+            tileMesh.material !== tileMesh.userData.detailedMaterial
+          ) {
+            tileMesh.material = tileMesh.userData.detailedMaterial;
+          }
+          tileMesh.userData.isProxyActive = false;
+          if (tileMesh.userData.proxyMesh) {
+            tileMesh.userData.proxyMesh.visible = false;
+          }
+        } else if (tileTier === "medium") {
+          lod1MediumCount += 1;
+          tileMesh.castShadow = false;
+          if (
+            tileMesh.userData.detailedGeometry &&
+            tileMesh.geometry !== tileMesh.userData.detailedGeometry
+          ) {
+            tileMesh.geometry = tileMesh.userData.detailedGeometry;
+          }
+          if (
+            tileMesh.userData.detailedMaterial &&
+            tileMesh.material !== tileMesh.userData.detailedMaterial
+          ) {
+            tileMesh.material = tileMesh.userData.detailedMaterial;
+          }
+          tileMesh.userData.isProxyActive = false;
+          if (tileMesh.userData.proxyMesh) {
+            tileMesh.userData.proxyMesh.visible = false;
+          }
+          simplifiedSubMeshCount += 1;
+        } else {
+          lod2LowCount += 1;
+          tileMesh.castShadow = false;
+          if (
+            tileMesh.userData.proxyGeometry &&
+            tileMesh.geometry !== tileMesh.userData.proxyGeometry
+          ) {
+            tileMesh.geometry = tileMesh.userData.proxyGeometry;
+          }
+          if (
+            tileMesh.userData.proxyMaterial &&
+            tileMesh.material !== tileMesh.userData.proxyMaterial
+          ) {
+            tileMesh.material = tileMesh.userData.proxyMaterial;
+          }
+          tileMesh.userData.isProxyActive = true;
+          if (tileMesh.userData.proxyMesh) {
+            tileMesh.userData.proxyMesh.visible = false;
+          }
+          simplifiedSubMeshCount += 4;
+        }
+      }
+    }
+
     // 3. シーングラフ直下の全オブジェクトの距離カリング & 階層的サブメッシュ LOD 制御
     const children = this.group.children;
     for (let i = 0; i < children.length; i++) {
       const child = children[i];
       if (processedTreeSlotGroups.has(child)) {
+        continue;
+      }
+      if (child === this.glbShibuyaPlateauGroup && this.plateauTileMeshes.length > 0) {
         continue;
       }
 

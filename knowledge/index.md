@@ -49,3 +49,4 @@ trust_signals:
 - [034-360-degree-convergence-review-and-visual-geometry-refinements.md](./034-360-degree-convergence-review-and-visual-geometry-refinements.md): 360度収束レビューに基づく渋谷ランドマーク幾何学・路面PBRライティング・HUDレイアウトの完全収束修正
 - [035-shibuya-street-view-photorealistic-building-textures.md](./035-shibuya-street-view-photorealistic-building-textures.md): Google マップ / ストリートビュー実写テクスチャ統合と渋谷リアル街路景観アーキテクチャ
 - [036-shibuya-plateau-dogenzaka-miyamasuzaka-photorealistic-modeling.md](./036-shibuya-plateau-dogenzaka-miyamasuzaka-photorealistic-modeling.md): Project PLATEAU 渋谷区実在都市データ統合とスクランブル交差点・道玄坂・宮益坂の実写フォトリアルモデリング
+- [037-plateau-lod2-textures-and-distance-lod-optimization.md](./037-plateau-lod2-textures-and-distance-lod-optimization.md): PLATEAU LOD2 写真実写テクスチャ適用と距離ベース多段階LOD（Level of Detail）による遠景軽量化

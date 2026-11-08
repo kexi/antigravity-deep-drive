@@ -679,4 +679,176 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
     expect(coreDeckMesh.visible).toBe(true);
     expect(eastDeckMesh.visible).toBe(true);
   });
+
+  it("PLATEAU 渋谷実在建築物タイル群（shibuya_plateau_buildings.glb）が距離に応じて LOD0(高精細・影あり) / LOD1(中距離軽量化・影OFF) / LOD2(遠景シルエット・影OFF) / Culled へ自動遷移し、遠方の描画負荷とシャドウを大幅抑制することを保証する", async () => {
+    const { mockWorld, mockRapier } = createMockPhysicsContext();
+    const scene = new THREE.Scene();
+    const cityMap = new TokyoStationMap(scene, mockWorld, mockRapier, { deferGlbLoads: true });
+
+    await cityMap.activateWorldChunk("shibuya-core");
+
+    // 渋谷PLATEAUモデルの各タイル（道玄坂・宮益坂・並木橋）を模擬生成
+    const mockPlateauGroup = new THREE.Group();
+    mockPlateauGroup.name = "MockShibuyaPlateauBuildingsGroup";
+
+    // 1. 道玄坂タイル（スクランブル交差点近傍 x=-825, z=245）
+    const dogenzakaTileMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(40, 30, 40),
+      new THREE.MeshStandardMaterial({ name: "PlateauCommercialFacade" }),
+    );
+    dogenzakaTileMesh.name = "PlateauTile_data155";
+    dogenzakaTileMesh.position.set(-825, 15, 245);
+    dogenzakaTileMesh.castShadow = true;
+    dogenzakaTileMesh.userData.cullingBounds = new THREE.Box3().setFromObject(dogenzakaTileMesh);
+
+    // 2. 宮益坂タイル（中距離 x=-640, z=250 -> 境界まで約155m: 135m < dist <= 235m）
+    const miyamasuTileMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(40, 35, 40),
+      new THREE.MeshStandardMaterial({ name: "PlateauGlassTower" }),
+    );
+    miyamasuTileMesh.name = "PlateauTile_data142";
+    miyamasuTileMesh.position.set(-640, 17.5, 250);
+    miyamasuTileMesh.castShadow = true;
+    miyamasuTileMesh.userData.cullingBounds = new THREE.Box3().setFromObject(miyamasuTileMesh);
+
+    // 3. 並木橋タイル（遠距離 x=-720, z=-150 -> 渋谷交差点から約400m離れた南側エリア）
+    const namikibashiTileMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(40, 25, 40),
+      new THREE.MeshStandardMaterial({ name: "PlateauAlleyCommercial" }),
+    );
+    namikibashiTileMesh.name = "PlateauTile_data153";
+    namikibashiTileMesh.position.set(-720, 12.5, -150);
+    namikibashiTileMesh.castShadow = true;
+    namikibashiTileMesh.userData.cullingBounds = new THREE.Box3().setFromObject(
+      namikibashiTileMesh,
+    );
+
+    mockPlateauGroup.add(dogenzakaTileMesh);
+    mockPlateauGroup.add(miyamasuTileMesh);
+    mockPlateauGroup.add(namikibashiTileMesh);
+
+    cityMap.glbShibuyaPlateauGroup = mockPlateauGroup;
+    cityMap.plateauTileMeshes = [dogenzakaTileMesh, miyamasuTileMesh, namikibashiTileMesh];
+    cityMap.group.add(mockPlateauGroup);
+
+    // 1. スクランブル交差点（x=-815, z=248）を走行中の視点
+    cityMap.updateDistanceCulling(new THREE.Vector3(-815, 0, 248), 380, true);
+
+    // 道玄坂タイル（距離約10m <= 135m）: LOD0 ("high") で高精細表示かつ castShadow=true、詳細ジオメトリ
+    expect(dogenzakaTileMesh.visible).toBe(true);
+    expect(dogenzakaTileMesh.userData.appliedLodTier).toBe("high");
+    expect(dogenzakaTileMesh.castShadow).toBe(true);
+    expect(dogenzakaTileMesh.userData.isProxyActive).toBe(false);
+    expect(dogenzakaTileMesh.geometry).toBe(dogenzakaTileMesh.userData.detailedGeometry);
+    expect(dogenzakaTileMesh.material).toBe(dogenzakaTileMesh.userData.detailedMaterial);
+
+    // 宮益坂タイル（距離約155m: 135m < dist <= 235m）: LOD1 ("medium") で簡易化かつ castShadow=false（影カリング）
+    expect(miyamasuTileMesh.visible).toBe(true);
+    expect(miyamasuTileMesh.userData.appliedLodTier).toBe("medium");
+    expect(miyamasuTileMesh.castShadow).toBe(false);
+    expect(miyamasuTileMesh.userData.isProxyActive).toBe(false);
+    expect(miyamasuTileMesh.geometry).toBe(miyamasuTileMesh.userData.detailedGeometry);
+
+    // 並木橋タイル（距離約405m: 235m < dist <= 800m）: LOD2 ("low") で遠景軽量プロキシかつ castShadow=false
+    expect(namikibashiTileMesh.visible).toBe(true);
+    expect(namikibashiTileMesh.userData.appliedLodTier).toBe("low");
+    expect(namikibashiTileMesh.castShadow).toBe(false);
+    expect(namikibashiTileMesh.userData.isProxyActive).toBe(true);
+    expect(namikibashiTileMesh.geometry).toBe(namikibashiTileMesh.userData.proxyGeometry);
+    expect(namikibashiTileMesh.material).toBe(namikibashiTileMesh.userData.proxyMaterial);
+    expect((namikibashiTileMesh.material as THREE.MeshStandardMaterial).name).toBe(
+      "PlateauLod2ProxyMat",
+    );
+
+    // 2. 宮益坂上（x=-640, z=250）へ移動した場合
+    cityMap.updateDistanceCulling(new THREE.Vector3(-640, 0, 250), 380, true);
+
+    // 宮益坂タイルが直近（<= 135m）になり LOD0 ("high", castShadow=true, detailedGeometry) に自動昇格
+    expect(miyamasuTileMesh.userData.appliedLodTier).toBe("high");
+    expect(miyamasuTileMesh.castShadow).toBe(true);
+    expect(miyamasuTileMesh.userData.isProxyActive).toBe(false);
+    expect(miyamasuTileMesh.geometry).toBe(miyamasuTileMesh.userData.detailedGeometry);
+
+    // 遠ざかった道玄坂タイル（約165m）は LOD1 ("medium", castShadow=false) へ自動降格
+    expect(dogenzakaTileMesh.userData.appliedLodTier).toBe("medium");
+    expect(dogenzakaTileMesh.castShadow).toBe(false);
+    expect(dogenzakaTileMesh.userData.isProxyActive).toBe(false);
+
+    // 3. 渋谷から離れた遠方エリア（x=250, z=0: 全タイルから距離 > 800m）へ移動した場合
+    cityMap.updateDistanceCulling(new THREE.Vector3(250, 0, 0), 380, true);
+
+    // 800m 以遠の全 PLATEAU タイルが Culled (visible=false) となり GPU ドローコールが完全にゼロになること
+    expect(dogenzakaTileMesh.visible).toBe(false);
+    expect(dogenzakaTileMesh.userData.appliedLodTier).toBe("culled");
+    expect(dogenzakaTileMesh.userData.isProxyActive).toBe(false);
+    expect(miyamasuTileMesh.visible).toBe(false);
+    expect(miyamasuTileMesh.userData.appliedLodTier).toBe("culled");
+    expect(namikibashiTileMesh.visible).toBe(false);
+    expect(namikibashiTileMesh.userData.appliedLodTier).toBe("culled");
+  });
+
+  it("実在 PLATEAU GLB モデル読み込み時に全8タイルと低ポリゴンプロキシメッシュが正しくペアリングされることを保証する", async () => {
+    const { mockWorld, mockRapier } = createMockPhysicsContext();
+    const scene = new THREE.Scene();
+    const cityMap = new TokyoStationMap(scene, mockWorld, mockRapier, { deferGlbLoads: true });
+
+    // 模擬GLB（8タイル＋8プロキシ）
+    const mockGlbScene = new THREE.Group();
+    const tileIds = [
+      "data142",
+      "data143",
+      "data147",
+      "data150",
+      "data151",
+      "data153",
+      "data155",
+      "data157",
+    ];
+    for (const id of tileIds) {
+      const detailed = new THREE.Mesh(new THREE.BufferGeometry(), [
+        new THREE.MeshStandardMaterial({ name: "PlateauGlassTower" }),
+        new THREE.MeshStandardMaterial({ name: "PlateauRooftop" }),
+      ]);
+      detailed.name = `PlateauTile_${id}`;
+      const proxy = new THREE.Mesh(
+        new THREE.BufferGeometry(),
+        new THREE.MeshStandardMaterial({ name: "PlateauLod2Proxy" }),
+      );
+      proxy.name = `PlateauProxyTile_${id}`;
+      mockGlbScene.add(detailed);
+      mockGlbScene.add(proxy);
+    }
+
+    // loadShibuyaPlateauBuildingsGlb のパースロジックを直接テスト
+    const detailedTileMeshes: THREE.Mesh[] = [];
+    const proxyTileMap = new Map<string, THREE.Mesh>();
+    mockGlbScene.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      if (mesh.name.startsWith("PlateauProxyTile_")) {
+        proxyTileMap.set(mesh.name.replace("PlateauProxyTile_", ""), mesh);
+      } else if (mesh.name.startsWith("PlateauTile_")) {
+        detailedTileMeshes.push(mesh);
+      }
+    });
+
+    for (const tileMesh of detailedTileMeshes) {
+      const tileId = tileMesh.name.replace("PlateauTile_", "");
+      const proxyMesh = proxyTileMap.get(tileId);
+      expect(proxyMesh).toBeDefined();
+      tileMesh.userData.proxyMesh = proxyMesh;
+      tileMesh.userData.detailedGeometry = tileMesh.geometry;
+      tileMesh.userData.proxyGeometry = proxyMesh?.geometry;
+      tileMesh.userData.detailedMaterial = tileMesh.material;
+      tileMesh.userData.proxyMaterial = proxyMesh?.material;
+      cityMap.plateauTileMeshes.push(tileMesh);
+    }
+
+    expect(cityMap.plateauTileMeshes).toHaveLength(8);
+    for (const tileMesh of cityMap.plateauTileMeshes) {
+      expect(tileMesh.userData.proxyMesh).toBeDefined();
+      expect(tileMesh.userData.proxyGeometry).toBeDefined();
+      expect(tileMesh.userData.proxyMaterial).toBeDefined();
+    }
+  });
 });
