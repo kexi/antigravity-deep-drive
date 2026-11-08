@@ -95,6 +95,7 @@ export class TokyoStationMap {
   public plateauBuildingGroups: THREE.Group[] = [];
   public glbStationGroup: THREE.Group | null = null;
   public glbShibuyaStreamGroup: THREE.Group | null = null;
+  public glbShibuyaPlateauGroup: THREE.Group | null = null;
   public glbTreeTemplate: THREE.Group | null = null;
   public readonly signSystem: RoadSignSystem;
 
@@ -151,6 +152,7 @@ export class TokyoStationMap {
   private readonly chunkTransitionAlphas = new Map<WorldChunkId, number>();
   private stationGlbLoadingPromise: Promise<void> | null = null;
   private shibuyaStreamGlbLoadingPromise: Promise<void> | null = null;
+  private shibuyaPlateauGlbLoadingPromise: Promise<void> | null = null;
   private treeTemplateLoadingPromise: Promise<void> | null = null;
 
   private registerCollider(col: RAPIER.Collider, isObstacle = true): void {
@@ -751,6 +753,7 @@ export class TokyoStationMap {
       { cz: -147.5, len: 83 }, // z = -189 .. -106（並木橋〜稲荷橋・渋谷三丁目街区）
       { cz: 0.0, len: 164 }, // z = -82 .. +82（渋谷ストリーム・サクラステージ・フクラス正面街区）
       { cz: 146.5, len: 75 }, // z = +109 .. +184（渋谷駅東口・ヒカリエ・スクランブルスクエア街区）
+      { cz: 221.5, len: 41 }, // z = +201 .. +242（宮下公園前〜宮益坂下交差点南）
     ]) {
       addRoadSegment(
         {
@@ -911,6 +914,54 @@ export class TokyoStationMap {
         addIntersectionPadAndMarkings(sx.x, sz.z, sx.width, sz.depth, sx.lanesX, sz.lanesZ, true);
       }
     }
+
+    // I-5b. 渋谷駅前東西連絡路（宮益坂下交差点西 x = -766 〜 スクランブル交差点東 x = -794、z = 248）
+    addRoadSegment(
+      {
+        name: "Shibuya-Station-Link-St",
+        lanesPerDirection: 2,
+        laneWidth: 3.5,
+        shoulderWidth: 1.2,
+        sidewalkWidth: 3.0,
+        curbHeight: 0.15,
+        length: 28,
+        hasYellowCenterLine: false,
+        hasWhiteDashedLines: true,
+        hasCrosswalk: false,
+        hasGuardrails: false,
+        hasManholes: false,
+        hasTrafficLights: false,
+        speedLimitSign: 40,
+      },
+      new THREE.Vector3(-780, 0.012, 248),
+      Math.PI / 2,
+    );
+
+    // 渋谷スクランブル交差点（x = -815, z = 248）および宮益坂下交差点（x = -750, z = 248）
+    addIntersectionPadAndMarkings(-815, 248, 42, 42, 2, 2, true);
+    addIntersectionPadAndMarkings(-750, 248, 32, 24, 3, 2, true);
+
+    // 渋谷スクランブル交差点 象徴の対角線X字型スクランブル横断歩道（斜め横断歩道）
+    const scrambleInterGroup = new THREE.Group();
+    scrambleInterGroup.name = "ShibuyaScrambleDiagonalCrosswalks";
+    scrambleInterGroup.userData.isRoadInfrastructure = true;
+    scrambleInterGroup.position.set(-815, 0.024, 248);
+    const diagonalStripeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    for (const dir of [1, -1]) {
+      const diagAngle = (dir * Math.PI) / 4;
+      const count = 28;
+      const stepDist = 1.1;
+      for (let i = -count / 2; i <= count / 2; i++) {
+        const offset = i * stepDist;
+        const stripeGeo = new THREE.PlaneGeometry(0.45, 3.8);
+        stripeGeo.rotateX(-Math.PI / 2);
+        stripeGeo.rotateY(diagAngle);
+        const stripeMesh = new THREE.Mesh(stripeGeo, diagonalStripeMat);
+        stripeMesh.position.set(offset * Math.cos(diagAngle), 0, offset * Math.sin(diagAngle));
+        scrambleInterGroup.add(stripeMesh);
+      }
+    }
+    this.group.add(scrambleInterGroup);
 
     // 永代通り×国道246号T字交差点（x = -268 × z = 95）フラットアスファルト接続パッド＆路面標示
     addIntersectionPadAndMarkings(-268, 95, 26, 26, 2, 2, true);
@@ -2245,9 +2296,10 @@ export class TokyoStationMap {
     // 5b. 渋谷実写ストリートビュー袖看板・大型屋外電子ビジョン・ビルボード群の構築
     this.buildShibuyaStreetViewSignsAndBillboards(world, rapier);
 
-    // 6. Blender 生成 `shibuya_stream.glb` の非同期ロードと 3D テクスチャシェーダー統合
+    // 6. Blender 生成 `shibuya_stream.glb` および `shibuya_plateau_buildings.glb` の非同期ロードと 3D テクスチャシェーダー統合
     if (!this.deferGlbLoads) {
       this.glbLoadPromises.push(this.loadGlbShibuyaStreamModel());
+      this.glbLoadPromises.push(this.loadGlbShibuyaPlateauModel());
     }
   }
 
@@ -3009,6 +3061,94 @@ export class TokyoStationMap {
       return;
     }
 
+    // 22. MAGNET by SHIBUYA109（旧109MEN'S）ガラスカーテンウォール＆渋谷駅前大型LEDビジョン実写ストリートビューテクスチャ
+    const isMagnetFacade = matName.includes("ShibuyaMagnetFacade");
+    if (isMagnetFacade) {
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("magnet");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.35;
+      const nightIntensity = 1.75;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.16;
+      stdMat.metalness = 0.38;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "curtain_glass");
+      return;
+    }
+
+    // 23. 渋谷マークシティ（イースト棟95.6m・ウエスト棟85m・空中回廊コンコース）アルミルーバー＆連窓実写ストリートビューテクスチャ
+    const isMarkCityFacade = matName.includes("ShibuyaMarkCityFacade");
+    if (isMarkCityFacade) {
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("markCity");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.12;
+      const nightIntensity = 1.35;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.22;
+      stdMat.metalness = 0.32;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "anodized_metal");
+      return;
+    }
+
+    // 24. 渋谷東映プラザ / ビックカメラ渋谷東口店（宮益坂下）大看板＆商業ファサード実写ストリートビューテクスチャ
+    const isToeiBicFacade = matName.includes("ShibuyaToeiBicFacade");
+    if (isToeiBicFacade) {
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("toeiBic");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.38;
+      const nightIntensity = 1.8;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.28;
+      stdMat.metalness = 0.2;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "retail_storefront");
+      return;
+    }
+
+    // 25. 道玄坂・宮益坂 沿道商業ビル（飲食店・ドラッグストア・雑居ビル）実写ストリートビューテクスチャ
+    const isDogenzakaCommercialFacade = matName.includes("ShibuyaDogenzakaCommercialFacade");
+    if (isDogenzakaCommercialFacade) {
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("dogenzakaCommercial");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.28;
+      const nightIntensity = 1.55;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.36;
+      stdMat.metalness = 0.18;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "retail_storefront");
+      return;
+    }
+
     this.applyArchitecture3DTexture(stdMat, "anodized_metal");
   }
 
@@ -3102,6 +3242,162 @@ export class TokyoStationMap {
     });
     this.shibuyaStreamGlbLoadingPromise = loadPromise;
     return loadPromise;
+  }
+
+  private loadGlbShibuyaPlateauModel(): Promise<void> {
+    const isBrowser = typeof window !== "undefined";
+    if (!isBrowser) {
+      return Promise.resolve();
+    }
+    const isAlreadyLoaded = this.glbShibuyaPlateauGroup !== null;
+    if (isAlreadyLoaded) {
+      return Promise.resolve();
+    }
+    const hasInflightPromise = this.shibuyaPlateauGlbLoadingPromise !== null;
+    if (hasInflightPromise && this.shibuyaPlateauGlbLoadingPromise) {
+      return this.shibuyaPlateauGlbLoadingPromise;
+    }
+
+    const config = assetManager.getModelConfig("shibuya_plateau_buildings");
+    const rawPath = config?.path ?? "/models/shibuya_plateau_buildings.glb";
+    const modelPath = assetManager.resolveAssetUrl(rawPath);
+    const loader = new GLTFLoader();
+
+    const loadPromise = new Promise<void>((resolve) => {
+      loader.load(
+        modelPath,
+        (gltf) => {
+          const glbModel = gltf.scene;
+          const hasLoadedScene = Boolean(glbModel);
+          if (!hasLoadedScene) {
+            this.shibuyaPlateauGlbLoadingPromise = null;
+            resolve();
+            return;
+          }
+
+          const offsetX = config?.offset[0] ?? 0.0;
+          const offsetY = config?.offset[1] ?? 0.0;
+          const offsetZ = config?.offset[2] ?? 0.0;
+          glbModel.position.set(offsetX, offsetY, offsetZ);
+          glbModel.userData.basePositionY = offsetY;
+          glbModel.userData.baseScaleY = 1;
+          glbModel.userData.isLargeStructure = true;
+          glbModel.userData.maxLodDrawDistance = 800;
+
+          glbModel.traverse((child) => {
+            const isMesh = (child as THREE.Mesh).isMesh;
+            if (!isMesh) {
+              return;
+            }
+            const mesh = child as THREE.Mesh;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            const isMaterialArray = Array.isArray(mesh.material);
+            if (isMaterialArray) {
+              const matList = mesh.material as THREE.Material[];
+              for (let i = 0; i < matList.length; i++) {
+                this.applyShibuyaPlateauGlbMaterial3DTexture(matList[i]);
+              }
+            } else {
+              this.applyShibuyaPlateauGlbMaterial3DTexture(mesh.material as THREE.Material);
+            }
+          });
+
+          this.glbShibuyaPlateauGroup = glbModel;
+          this.group.add(glbModel);
+          this.registerObjectInChunk(glbModel, "shibuya-core");
+
+          const isShibuyaCoreUnloaded = this.unloadedChunkIds.has("shibuya-core");
+          glbModel.visible = !isShibuyaCoreUnloaded;
+
+          const hasValidLastFocus = !Number.isNaN(this.lastCulledFocusPos.x);
+          if (hasValidLastFocus) {
+            const prevFocus = this.lastCulledFocusPos.clone();
+            this.updateDistanceCulling(prevFocus, 380, true);
+          }
+          this.shibuyaPlateauGlbLoadingPromise = null;
+          resolve();
+        },
+        undefined,
+        (error) => {
+          console.warn("Notice: Plateau Shibuya buildings GLB load skipped:", error);
+          this.shibuyaPlateauGlbLoadingPromise = null;
+          resolve();
+        },
+      );
+    });
+
+    this.shibuyaPlateauGlbLoadingPromise = loadPromise;
+    return loadPromise;
+  }
+
+  public applyShibuyaPlateauGlbMaterial3DTexture(mat: THREE.Material | null | undefined): void {
+    const isStandardMat = Boolean(
+      mat && (mat as THREE.MeshStandardMaterial).isMeshStandardMaterial,
+    );
+    if (!isStandardMat) {
+      return;
+    }
+    const stdMat = mat as THREE.MeshStandardMaterial;
+    const matName = stdMat.name || "";
+
+    if (matName.includes("PlateauGlassTower")) {
+      stdMat.roughness = 0.18;
+      stdMat.metalness = 0.45;
+      const dayIntensity = 0.05;
+      const nightIntensity = 1.25;
+      stdMat.emissive = new THREE.Color(0xa5f3fc);
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "curtain_glass");
+      return;
+    }
+
+    if (matName.includes("PlateauCommercialFacade")) {
+      stdMat.roughness = 0.35;
+      stdMat.metalness = 0.2;
+      const dayIntensity = 0.06;
+      const nightIntensity = 1.15;
+      stdMat.emissive = new THREE.Color(0xfde68a);
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "retail_storefront");
+      return;
+    }
+
+    if (matName.includes("PlateauAlleyCommercial")) {
+      stdMat.roughness = 0.45;
+      stdMat.metalness = 0.15;
+      const dayIntensity = 0.04;
+      const nightIntensity = 0.95;
+      stdMat.emissive = new THREE.Color(0xfef08a);
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "stone_punched");
+      return;
+    }
+
+    if (matName.includes("PlateauRooftop")) {
+      stdMat.roughness = 0.65;
+      stdMat.metalness = 0.08;
+      this.applyArchitecture3DTexture(stdMat, "white_granite");
+      return;
+    }
+
+    this.applyArchitecture3DTexture(stdMat, "anodized_metal");
   }
 
   private buildSurroundingSkyscrapers(world: RAPIER.World, rapier: typeof RAPIER): void {
@@ -4111,11 +4407,15 @@ export class TokyoStationMap {
     this.unloadedChunkIds.delete(chunkId);
 
     const loadTasks: Promise<void>[] = [];
-    const isShibuyaCore = chunkId === "shibuya-core";
+    const isShibuyaZone =
+      chunkId === "shibuya-core" || chunkId === "shibuya-north" || chunkId === "shibuya-south";
     const isMarunouchiCore = chunkId === "marunouchi-core";
 
-    if (isShibuyaCore && this.glbShibuyaStreamGroup === null) {
+    if (isShibuyaZone && this.glbShibuyaStreamGroup === null) {
       loadTasks.push(this.loadGlbShibuyaStreamModel());
+    }
+    if (isShibuyaZone && this.glbShibuyaPlateauGroup === null) {
+      loadTasks.push(this.loadGlbShibuyaPlateauModel());
     }
     if (isMarunouchiCore && this.glbStationGroup === null) {
       loadTasks.push(this.loadGlbStationModel());
@@ -4184,8 +4484,12 @@ export class TokyoStationMap {
       }
     }
 
-    const isShibuyaCore = chunkId === "shibuya-core";
-    if (isShibuyaCore && this.glbShibuyaStreamGroup) {
+    const hasRemainingShibuyaChunks =
+      !this.unloadedChunkIds.has("shibuya-core") ||
+      !this.unloadedChunkIds.has("shibuya-north") ||
+      !this.unloadedChunkIds.has("shibuya-south");
+
+    if (!hasRemainingShibuyaChunks && this.glbShibuyaStreamGroup) {
       this.disposeGlbHierarchy(this.glbShibuyaStreamGroup);
       this.group.remove(this.glbShibuyaStreamGroup);
       const list = this.chunkObjectsMap.get("shibuya-core");
@@ -4199,6 +4503,21 @@ export class TokyoStationMap {
       this.cullingBoundsCache.delete(this.glbShibuyaStreamGroup);
       this.glbShibuyaStreamGroup = null;
       this.setShibuyaGlbOverlappingProceduralVisible(true);
+    }
+
+    if (!hasRemainingShibuyaChunks && this.glbShibuyaPlateauGroup) {
+      this.disposeGlbHierarchy(this.glbShibuyaPlateauGroup);
+      this.group.remove(this.glbShibuyaPlateauGroup);
+      const list = this.chunkObjectsMap.get("shibuya-core");
+      if (list) {
+        const idx = list.indexOf(this.glbShibuyaPlateauGroup);
+        if (idx !== -1) {
+          list.splice(idx, 1);
+        }
+      }
+      this.objectToChunkId.delete(this.glbShibuyaPlateauGroup);
+      this.cullingBoundsCache.delete(this.glbShibuyaPlateauGroup);
+      this.glbShibuyaPlateauGroup = null;
     }
 
     // 該当チャンクの街路樹GLBクローンを解放
@@ -4276,6 +4595,7 @@ export class TokyoStationMap {
       return false;
     }
     return Boolean(
+      obj === this.glbShibuyaPlateauGroup ||
       obj.userData?.isLargeStructure ||
       obj.userData?.buildingId ||
       obj === this.proceduralStationGroup ||

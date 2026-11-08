@@ -225,9 +225,9 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     }
   });
 
-  it("ShibuyaTextureManager が全8種の実写ストリートビューテクスチャと各種マテリアル生成を正常に行うことを保証する", async () => {
+  it("ShibuyaTextureManager が全12種の実写ストリートビューテクスチャと各種マテリアル生成を正常に行うことを保証する", async () => {
     const textureIds = Object.keys(SHIBUYA_TEXTURE_CONFIGS) as ShibuyaTextureId[];
-    expect(textureIds).toHaveLength(8);
+    expect(textureIds).toHaveLength(12);
 
     for (const id of textureIds) {
       const tex = shibuyaTextureManager.getTexture(id);
@@ -299,6 +299,26 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
         expectedChannel: "retail_storefront",
         expectedTex: "commercialFacade",
       },
+      {
+        name: "ShibuyaMagnetFacade",
+        expectedChannel: "curtain_glass",
+        expectedTex: "magnet",
+      },
+      {
+        name: "ShibuyaMarkCityFacade",
+        expectedChannel: "anodized_metal",
+        expectedTex: "markCity",
+      },
+      {
+        name: "ShibuyaToeiBicFacade",
+        expectedChannel: "retail_storefront",
+        expectedTex: "toeiBic",
+      },
+      {
+        name: "ShibuyaDogenzakaCommercialFacade",
+        expectedChannel: "retail_storefront",
+        expectedTex: "dogenzakaCommercial",
+      },
     ];
 
     for (const item of glbMaterials) {
@@ -320,6 +340,25 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     cityMap.applyShibuyaStreamGlbMaterial3DTexture(jrSteelMat);
     expect(jrSteelMat.userData.arch3DVolumeChannel).toBe("anodized_metal");
     expect(jrSteelMat.map).toBeNull();
+
+    // PLATEAU 実在建物群向けマテリアル
+    const plateauTowerMat = new THREE.MeshStandardMaterial({ name: "PlateauGlassTower" });
+    cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauTowerMat);
+    expect(plateauTowerMat.userData.arch3DVolumeChannel).toBe("curtain_glass");
+
+    const plateauCommercialMat = new THREE.MeshStandardMaterial({
+      name: "PlateauCommercialFacade",
+    });
+    cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauCommercialMat);
+    expect(plateauCommercialMat.userData.arch3DVolumeChannel).toBe("retail_storefront");
+
+    const plateauAlleyMat = new THREE.MeshStandardMaterial({ name: "PlateauAlleyCommercial" });
+    cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauAlleyMat);
+    expect(plateauAlleyMat.userData.arch3DVolumeChannel).toBe("stone_punched");
+
+    const plateauRoofMat = new THREE.MeshStandardMaterial({ name: "PlateauRooftop" });
+    cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauRoofMat);
+    expect(plateauRoofMat.userData.arch3DVolumeChannel).toBe("white_granite");
   });
 
   it("渋谷エリアの路面店舗・袖看板群・交差点ビルボード群が生成され、夜間切り替え時に一括で発光輝度が連動することを保証する", async () => {

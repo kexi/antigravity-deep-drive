@@ -68,7 +68,18 @@ models:
       fukuras: "ShibuyaFukuras_Tower"
       miyashitaPark: "ShibuyaMiyashitaPark_Complex"
       qfront109: "ShibuyaQfront109_Complex"
+      magnet: "ShibuyaMagnet_Tower"
+      markCity: "ShibuyaMarkCity_Complex"
+      toeiBic: "ShibuyaToeiBic_Tower"
     fallbackColor: 0xe2e8f0
+
+  - id: "shibuya_plateau_buildings"
+    path: "/models/shibuya_plateau_buildings.glb"
+    scale: [1.0, 1.0, 1.0]
+    offset: [0.0, 0.0, 0.0]
+    subparts:
+      city: "ShibuyaPlateauCity"
+    fallbackColor: 0x334155
 
 textures3d:
   - id: "asphalt_3d"

@@ -8,7 +8,11 @@ export type ShibuyaTextureId =
   | "miyashitaPark"
   | "commercialFacade"
   | "billboards"
-  | "shutokoSign";
+  | "shutokoSign"
+  | "magnet"
+  | "markCity"
+  | "toeiBic"
+  | "dogenzakaCommercial";
 
 export interface ShibuyaTextureConfig {
   id: ShibuyaTextureId;
@@ -92,6 +96,42 @@ export const SHIBUYA_TEXTURE_CONFIGS: Record<ShibuyaTextureId, ShibuyaTextureCon
     metalness: 0.12,
     emissiveIntensityDay: 0.06,
     emissiveIntensityNight: 0.85,
+  },
+  magnet: {
+    id: "magnet",
+    url: "/textures/shibuya/shibuya_magnet.jpg",
+    repeat: [1, 1],
+    roughness: 0.15,
+    metalness: 0.25,
+    emissiveIntensityDay: 0.45,
+    emissiveIntensityNight: 1.85,
+  },
+  markCity: {
+    id: "markCity",
+    url: "/textures/shibuya/shibuya_mark_city.jpg",
+    repeat: [1, 2],
+    roughness: 0.32,
+    metalness: 0.4,
+    emissiveIntensityDay: 0.12,
+    emissiveIntensityNight: 1.15,
+  },
+  toeiBic: {
+    id: "toeiBic",
+    url: "/textures/shibuya/shibuya_toei_bic.jpg",
+    repeat: [1, 1],
+    roughness: 0.22,
+    metalness: 0.18,
+    emissiveIntensityDay: 0.35,
+    emissiveIntensityNight: 1.65,
+  },
+  dogenzakaCommercial: {
+    id: "dogenzakaCommercial",
+    url: "/textures/shibuya/shibuya_dogenzaka_commercial.jpg",
+    repeat: [1, 1],
+    roughness: 0.36,
+    metalness: 0.18,
+    emissiveIntensityDay: 0.28,
+    emissiveIntensityNight: 1.55,
   },
 };
 

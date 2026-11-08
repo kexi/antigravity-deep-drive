@@ -164,7 +164,7 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     centerZ: -15,
     bounds: { minX: -920, maxX: -610, minZ: -115, maxZ: 115 },
     estimatedMemoryMb: 34,
-    associatedGlbModelIds: ["shibuya_stream", "street_tree"],
+    associatedGlbModelIds: ["shibuya_stream", "shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: true,
   },
   {
@@ -190,7 +190,7 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     centerZ: 175,
     bounds: { minX: -920, maxX: -610, minZ: 115, maxZ: 320 },
     estimatedMemoryMb: 22,
-    associatedGlbModelIds: ["street_tree"],
+    associatedGlbModelIds: ["shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: false,
   },
   {

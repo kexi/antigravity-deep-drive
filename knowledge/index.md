@@ -48,3 +48,4 @@ trust_signals:
 - [033-shibuya-shutoko-landmarks-plateau.md](./033-shibuya-shutoko-landmarks-plateau.md): 渋谷区 Project PLATEAU (13113) 都市データ拡充と首都高速3号渋谷線高架・スクランブルスクエア・ヒカリエ 3D 再現
 - [034-360-degree-convergence-review-and-visual-geometry-refinements.md](./034-360-degree-convergence-review-and-visual-geometry-refinements.md): 360度収束レビューに基づく渋谷ランドマーク幾何学・路面PBRライティング・HUDレイアウトの完全収束修正
 - [035-shibuya-street-view-photorealistic-building-textures.md](./035-shibuya-street-view-photorealistic-building-textures.md): Google マップ / ストリートビュー実写テクスチャ統合と渋谷リアル街路景観アーキテクチャ
+- [036-shibuya-plateau-dogenzaka-miyamasuzaka-photorealistic-modeling.md](./036-shibuya-plateau-dogenzaka-miyamasuzaka-photorealistic-modeling.md): Project PLATEAU 渋谷区実在都市データ統合とスクランブル交差点・道玄坂・宮益坂の実写フォトリアルモデリング

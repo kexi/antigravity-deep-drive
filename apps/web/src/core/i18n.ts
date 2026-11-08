@@ -775,6 +775,22 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
     en: "Shutoko Expwy Route 3 Shibuya Line (Route 246 Viaduct)",
     zh: "首都高速3号涩谷线 (国道246号・涩谷高架桥)",
   },
+  "渋谷スクランブル交差点 (ハチ公前・QFRONT・109前交差点)": {
+    en: "Shibuya Scramble Crossing (Hachiko / QFRONT / 109)",
+    zh: "涩谷全向十字路口 (八公前・QFRONT・109前)",
+  },
+  "道玄坂 (都道413号・SHIBUYA109〜道玄坂上)": {
+    en: "Dogenzaka (Pref. Rte 413 / SHIBUYA109 to Dogenzaka-ue)",
+    zh: "道玄坂 (东京都道413号・SHIBUYA109〜道玄坂上)",
+  },
+  "宮益坂 (都道413号・渋谷駅東口〜宮益坂上・青山通り)": {
+    en: "Miyamasuzaka (Pref. Rte 413 / Shibuya East to Aoyama-dori)",
+    zh: "宫益坂 (东京都道413号・涩谷站东口〜宫益坂上・青山通)",
+  },
+  "文化村通り (渋谷109〜Bunkamura・松濤方面)": {
+    en: "Bunkamura-dori Ave. (SHIBUYA109 to Bunkamura / Shoto)",
+    zh: "文化村通 (涩谷109〜Bunkamura・松涛方向)",
+  },
 };
 
 /**
@@ -784,6 +800,7 @@ const ROAD_CATEGORY_TRANSLATIONS: Readonly<Record<string, { en: string; zh: stri
   高速自動車国道等: { en: "Expressway", zh: "都市高速道路" },
   国道: { en: "National Hwy", zh: "国道" },
   都道府県道: { en: "Prefectural Rd", zh: "都道" },
+  主要地方道等: { en: "Major Regional Rd", zh: "主要地方道" },
   市区町村道等: { en: "Municipal Rd", zh: "市政区道" },
 };
 

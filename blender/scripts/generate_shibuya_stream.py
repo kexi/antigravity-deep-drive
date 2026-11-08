@@ -287,6 +287,44 @@ def setup_materials() -> dict[str, bpy.types.Material]:
             roughness=0.45,
             metallic=0.75,
         ),
+        # 23: MAGNET by SHIBUYA109 巨大LEDビジョン「渋谷駅前ビジョン」＆ファサード実写ストリートビューテクスチャ
+        "ShibuyaMagnetFacade": create_material(
+            "ShibuyaMagnetFacade",
+            base_color=(0.20, 0.30, 0.45, 1.0),
+            roughness=0.15,
+            metallic=0.25,
+            emission_color=(0.20, 0.30, 0.45, 1.0),
+            emission_strength=0.40,
+            image_path="apps/web/public/textures/shibuya/shibuya_magnet.jpg",
+        ),
+        # 24: 渋谷マークシティ アルミルーバー＆スリット連窓実写ストリートビューテクスチャ
+        "ShibuyaMarkCityFacade": create_material(
+            "ShibuyaMarkCityFacade",
+            base_color=(0.55, 0.58, 0.62, 1.0),
+            roughness=0.32,
+            metallic=0.40,
+            image_path="apps/web/public/textures/shibuya/shibuya_mark_city.jpg",
+        ),
+        # 25: 渋谷東映プラザ / ビックカメラ渋谷東口店 赤白大サイン＆ファサード実写ストリートビューテクスチャ
+        "ShibuyaToeiBicFacade": create_material(
+            "ShibuyaToeiBicFacade",
+            base_color=(0.85, 0.15, 0.15, 1.0),
+            roughness=0.22,
+            metallic=0.18,
+            emission_color=(0.85, 0.15, 0.15, 1.0),
+            emission_strength=0.35,
+            image_path="apps/web/public/textures/shibuya/shibuya_toei_bic.jpg",
+        ),
+        # 26: 道玄坂・宮益坂 沿道商業ビル（飲食店・カラオケ・コンビニ・多層看板）実写ストリートビューテクスチャ
+        "ShibuyaDogenzakaCommercialFacade": create_material(
+            "ShibuyaDogenzakaCommercialFacade",
+            base_color=(0.50, 0.46, 0.42, 1.0),
+            roughness=0.36,
+            metallic=0.18,
+            emission_color=(0.50, 0.46, 0.42, 1.0),
+            emission_strength=0.25,
+            image_path="apps/web/public/textures/shibuya/shibuya_dogenzaka_commercial.jpg",
+        ),
     }
     return mats
 
@@ -696,6 +734,10 @@ def assign_materials_to_object(obj: bpy.types.Object, materials: dict[str, bpy.t
         "ShibuyaCrossingBillboard",  # 20
         "HeliportGreenPad",  # 21
         "JRGreenSteel",  # 22
+        "ShibuyaMagnetFacade",  # 23
+        "ShibuyaMarkCityFacade",  # 24
+        "ShibuyaToeiBicFacade",  # 25
+        "ShibuyaDogenzakaCommercialFacade",  # 26
     ]
     for k in ordered_keys:
         obj.data.materials.append(materials[k])
@@ -3202,6 +3244,368 @@ def build_shibuya_qfront_109_complex(
     return obj
 
 
+def build_shibuya_magnet_and_station_front(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    MAGNET by SHIBUYA109 & 渋谷駅前ビル（スクランブル交差点北東〜ハチ公前広場正対ランドマーク）
+    Three.js ワールド座標 (x=-782.0, z=275.0) -> Blender 座標 (bx=290.0, by=-87.0)
+    1. 10階建て商業タワー（高さ 42.0m）:
+       - 渋谷駅前東西連絡路・スクランブル交差点北側歩道に正対する南面・西面ファサード
+       - 壁面を覆う巨大LEDスクリーン「渋谷駅前ビジョン」（実写 MAGNET テクスチャ）
+       - 1F〜3F ガラス張り路面店舗・エントランス（ウォーム照明）
+       - 8F〜屋上展望台「MAG's PARK」（スクランブル交差点見下ろし展望デッキ）
+    """
+    mesh = bpy.data.meshes.new("ShibuyaMagnetMesh")
+    bm = bmesh.new()
+
+    cx = 290.0  # worldZ = 275.0（南側壁面 z = 262.0 で駅前東西連絡路 z = 248.0 車道を回避）
+    cy = -87.0  # worldX = -782.0（ハチ公前・スクランブル交差点北東街区）
+    w_x = 26.0  # worldZ 方向奥行き
+    d_y = 28.0  # worldX 方向間口幅
+    h_z = 42.0
+
+    # 1. メインビルボリューム
+    add_box(
+        bm,
+        center=Vector((cx, cy, h_z * 0.5)),
+        size=Vector((w_x, d_y, h_z)),
+        mat_idx=0,  # StreamWhitePanel
+    )
+    # ガラスカーテンウォールレイヤー
+    add_box(
+        bm,
+        center=Vector((cx - 0.3, cy - 0.3, h_z * 0.5 + 4.0)),
+        size=Vector((w_x - 1.5, d_y - 1.5, h_z - 8.0)),
+        mat_idx=1,  # StreamCurtainGlass
+    )
+    # 1F〜3F 路面店舗ショーウィンドウ（ウォームインテリア）
+    # 南面（駅前連絡路向き）
+    add_box(
+        bm,
+        center=Vector((cx - w_x * 0.5 - 0.2, cy, 6.0)),
+        size=Vector((0.5, d_y - 4.0, 11.5)),
+        mat_idx=6,  # WarmPlazaGlow
+    )
+    # 西面（スクランブル交差点向き）
+    add_box(
+        bm,
+        center=Vector((cx, cy - d_y * 0.5 - 0.2, 6.0)),
+        size=Vector((w_x - 4.0, 0.5, 11.5)),
+        mat_idx=6,  # WarmPlazaGlow
+    )
+    # 2. 巨大屋外LEDビジョン「渋谷駅前ビジョン」
+    # 南面（ハチ公前・駅前連絡路正対: Z = 16.0m .. 36.0m）
+    add_box(
+        bm,
+        center=Vector((cx - w_x * 0.5 - 0.35, cy, 26.0)),
+        size=Vector((0.6, d_y - 4.0, 18.0)),
+        mat_idx=23,  # ShibuyaMagnetFacade
+    )
+    # 西面（スクランブル交差点・QFRONT正対: Z = 16.0m .. 36.0m）
+    add_box(
+        bm,
+        center=Vector((cx, cy - d_y * 0.5 - 0.35, 26.0)),
+        size=Vector((w_x - 4.0, 0.6, 18.0)),
+        mat_idx=23,  # ShibuyaMagnetFacade
+    )
+    # スクリーン周囲のダークスチールトリムフレーム
+    add_box(
+        bm,
+        center=Vector((cx - w_x * 0.5 - 0.2, cy, 26.0)),
+        size=Vector((0.5, d_y - 2.4, 19.6)),
+        mat_idx=2,  # StreamDarkVoidSteel
+    )
+    add_box(
+        bm,
+        center=Vector((cx, cy - d_y * 0.5 - 0.2, 26.0)),
+        size=Vector((w_x - 2.4, 0.5, 19.6)),
+        mat_idx=2,  # StreamDarkVoidSteel
+    )
+    # 屋上 MAG's PARK 展望デッキ（Z = 42.0m）
+    add_box(
+        bm,
+        center=Vector((cx, cy, 42.6)),
+        size=Vector((w_x - 1.5, d_y - 1.5, 1.2)),
+        mat_idx=3,  # StreamGalvanizedFrame
+    )
+    # 展望ガラスフェンス（南西見下ろし角）
+    add_box(
+        bm,
+        center=Vector((cx - w_x * 0.5 + 1.0, cy, 43.5)),
+        size=Vector((0.3, d_y - 2.0, 1.6)),
+        mat_idx=1,  # StreamCurtainGlass
+    )
+    add_box(
+        bm,
+        center=Vector((cx, cy - d_y * 0.5 + 1.0, 43.5)),
+        size=Vector((w_x - 2.0, 0.3, 1.6)),
+        mat_idx=1,  # StreamCurtainGlass
+    )
+    # 屋上パーゴラ＆ラウンジ構造物
+    add_box(
+        bm,
+        center=Vector((cx + 5.0, cy + 4.0, 45.0)),
+        size=Vector((10.0, 10.0, 4.0)),
+        mat_idx=2,  # StreamDarkVoidSteel
+    )
+    # 航空障害灯
+    add_cylinder_z(
+        bm,
+        center=Vector((cx - w_x * 0.45, cy - d_y * 0.45, 47.5)),
+        radius=0.35,
+        height=1.0,
+        segments=12,
+        mat_idx=7,  # BeaconRed
+    )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaMagnet_Tower", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_shibuya_mark_city_complex(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    渋谷マークシティ（道玄坂北側・京王井の頭線渋谷駅直結 巨大複合ランドマーク）
+    Three.js ワールド座標 (x=-910.0 .. -845.0, z=145.0 .. 220.0) -> Blender 座標 (bx=160.0 .. 235.0, by=-215.0 .. -150.0)
+    1. イースト棟（オフィス棟、地上25階・実寸高 95.6m）:
+       - 水平メタリックシルバーアルミルーバー＆スリット連窓（実写 Mark City テクスチャ）
+    2. ウエスト棟（渋谷エクセルホテル東急、地上23階・実寸高 85.0m）:
+       - 段状ホテル客室ボリューム
+    3. 連絡空中回廊＆井の頭線駅コンコース:
+       - 玉川通り・道玄坂頭上を跨ぎ渋谷駅・スクランブル交差点へ接続する空中ガラス回廊（桁下クリアランス 7.5m）
+    """
+    mesh = bpy.data.meshes.new("ShibuyaMarkCityMesh")
+    bm = bmesh.new()
+
+    # 1. イースト棟（オフィス棟: bx = 175.0, by = -168.0, 高 95.6m）
+    e_cx = 175.0
+    e_cy = -168.0
+    e_w = 34.0
+    e_d = 30.0
+    e_h = 95.6
+
+    add_box(
+        bm,
+        center=Vector((e_cx, e_cy, e_h * 0.5)),
+        size=Vector((e_w, e_d, e_h)),
+        mat_idx=24,  # ShibuyaMarkCityFacade
+    )
+    # 低層ポディウム（1F〜5F コンコース基壇）
+    add_box(
+        bm,
+        center=Vector((e_cx, e_cy + 4.0, 12.0)),
+        size=Vector((e_w + 4.0, e_d + 6.0, 24.0)),
+        mat_idx=0,  # StreamWhitePanel
+    )
+    # スリット窓ストライプ
+    for floor_z in range(28, int(e_h) - 8, 8):
+        add_box(
+            bm,
+            center=Vector((e_cx, e_cy - e_d * 0.5 - 0.2, float(floor_z))),
+            size=Vector((e_w - 4.0, 0.4, 2.2)),
+            mat_idx=1,  # StreamCurtainGlass
+        )
+    # イースト棟屋上パラペット＆設備塔
+    add_box(
+        bm,
+        center=Vector((e_cx, e_cy, e_h + 3.0)),
+        size=Vector((e_w * 0.6, e_d * 0.6, 6.0)),
+        mat_idx=2,  # StreamDarkVoidSteel
+    )
+    add_cylinder_z(
+        bm,
+        center=Vector((e_cx, e_cy, e_h + 6.5)),
+        radius=0.45,
+        height=1.2,
+        segments=12,
+        mat_idx=7,  # BeaconRed
+    )
+
+    # 2. ウエスト棟（渋谷エクセルホテル東急: bx = 215.0, by = -198.0, 高 85.0m）
+    w_cx = 215.0
+    w_cy = -198.0
+    w_w = 38.0
+    w_d = 32.0
+    w_h = 85.0
+
+    add_box(
+        bm,
+        center=Vector((w_cx, w_cy, w_h * 0.5)),
+        size=Vector((w_w, w_d, w_h)),
+        mat_idx=24,  # ShibuyaMarkCityFacade
+    )
+    # ホテル基壇部
+    add_box(
+        bm,
+        center=Vector((w_cx, w_cy + 3.0, 14.0)),
+        size=Vector((w_w + 3.0, w_d + 5.0, 28.0)),
+        mat_idx=0,  # StreamWhitePanel
+    )
+    # 客室リボン連窓
+    for floor_z in range(32, int(w_h) - 6, 7):
+        add_box(
+            bm,
+            center=Vector((w_cx, w_cy - w_d * 0.5 - 0.2, float(floor_z))),
+            size=Vector((w_w - 4.0, 0.4, 2.0)),
+            mat_idx=1,  # StreamCurtainGlass
+        )
+    # ウエスト棟屋上
+    add_box(
+        bm,
+        center=Vector((w_cx, w_cy, w_h + 2.5)),
+        size=Vector((w_w * 0.5, w_d * 0.5, 5.0)),
+        mat_idx=2,  # StreamDarkVoidSteel
+    )
+    add_cylinder_z(
+        bm,
+        center=Vector((w_cx, w_cy, w_h + 5.5)),
+        radius=0.45,
+        height=1.2,
+        segments=12,
+        mat_idx=7,  # BeaconRed
+    )
+
+    # 3. 連絡空中回廊＆駅コンコース構造（イースト棟〜ウエスト棟〜渋谷駅接続）
+    # 桁下クリアランス Z = 8.5m
+    bridge_len_x = 45.0
+    bridge_cx = (e_cx + w_cx) * 0.5
+    bridge_cy = (e_cy + w_cy) * 0.5 + 10.0
+    add_box(
+        bm,
+        center=Vector((bridge_cx, bridge_cy, 17.0)),
+        size=Vector((bridge_len_x, 16.0, 17.0)),
+        mat_idx=24,  # ShibuyaMarkCityFacade
+    )
+    # 回廊ガラス張り面
+    add_box(
+        bm,
+        center=Vector((bridge_cx, bridge_cy - 8.1, 17.0)),
+        size=Vector((bridge_len_x - 4.0, 0.4, 12.0)),
+        mat_idx=1,  # StreamCurtainGlass
+    )
+    # 回廊鉄骨下部トラス＆ラーメン橋脚
+    for pier_x in [e_cx + 8.0, w_cx - 8.0]:
+        add_box(
+            bm,
+            center=Vector((pier_x, bridge_cy, 4.25)),
+            size=Vector((3.0, 12.0, 8.5)),
+            mat_idx=8,  # ShutokoConcretePier
+        )
+
+    # 4. 道玄坂沿道ショーウィンドウ（実写商業ファサード＆暖色店舗）
+    add_box(
+        bm,
+        center=Vector((e_cx, e_cy - e_d * 0.5 - 1.2, 4.0)),
+        size=Vector((e_w, 2.0, 7.8)),
+        mat_idx=26,  # ShibuyaDogenzakaCommercialFacade
+    )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaMarkCity_Complex", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_shibuya_toei_plaza_bic_camera(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    渋谷東映プラザ / ビックカメラ渋谷東口店（宮益坂下交差点北東角 ランドマーク）
+    Three.js ワールド座標 (x=-723.0, z=275.0) -> Blender 座標 (bx=290.0, by=-28.0)
+    1. 地上12階建て複合商業ビル（高さ 50.0m）:
+       - 宮益坂北側歩道・明治通り東側歩道に正対するファサード
+       - 宮益坂・明治通り両面に掲げられた巨大赤白「BIC CAMERA / ビックカメラ」タテ型・ヨコ型サイン看板
+       - 渋谷TOEI 映画館サイン＆エントランス
+       - 1F〜2F 家電量販店ショーウィンドウ
+    """
+    mesh = bpy.data.meshes.new("ShibuyaToeiBicMesh")
+    bm = bmesh.new()
+
+    cx = 290.0  # worldZ = 275.0（南側壁面 z = 262.0 で宮益坂車道 z = 248.0 を回避）
+    cy = -28.0  # worldX = -723.0（西側壁面 x = -736.0 で明治通り車道 x = -750.0 を回避）
+    w_x = 26.0
+    d_y = 26.0
+    h_z = 50.0
+
+    # 1. ビル本体
+    add_box(
+        bm,
+        center=Vector((cx, cy, h_z * 0.5)),
+        size=Vector((w_x, d_y, h_z)),
+        mat_idx=0,  # StreamWhitePanel
+    )
+    # ガラスカーテンウォール窓面
+    add_box(
+        bm,
+        center=Vector((cx, cy, h_z * 0.5 + 4.0)),
+        size=Vector((w_x + 0.2, d_y - 2.0, h_z - 10.0)),
+        mat_idx=1,  # StreamCurtainGlass
+    )
+    # 2. 南面（宮益坂面）の巨大赤白ビックカメラファサード看板（Z = 12.0m .. 46.0m）
+    add_box(
+        bm,
+        center=Vector((cx - w_x * 0.5 - 0.35, cy, 29.0)),
+        size=Vector((0.6, d_y - 2.0, 34.0)),
+        mat_idx=25,  # ShibuyaToeiBicFacade
+    )
+    # 西面（明治通り面）のビックカメラ縦型サイン看板
+    add_box(
+        bm,
+        center=Vector((cx, cy - d_y * 0.5 - 0.35, 30.0)),
+        size=Vector((w_x - 4.0, 0.6, 32.0)),
+        mat_idx=25,  # ShibuyaToeiBicFacade
+    )
+    # 3. 1F〜2F 路面店舗エントランス＆ショーウィンドウ（ウォーム照明）
+    add_box(
+        bm,
+        center=Vector((cx - w_x * 0.5 - 0.2, cy - 2.0, 5.0)),
+        size=Vector((0.5, d_y - 4.0, 9.5)),
+        mat_idx=6,  # WarmPlazaGlow
+    )
+    add_box(
+        bm,
+        center=Vector((cx - 2.0, cy - d_y * 0.5 - 0.2, 5.0)),
+        size=Vector((w_x - 4.0, 0.5, 9.5)),
+        mat_idx=6,  # WarmPlazaGlow
+    )
+    # 4. 屋上設備パラペット＆航空障害灯
+    add_box(
+        bm,
+        center=Vector((cx, cy, h_z + 2.0)),
+        size=Vector((w_x * 0.5, d_y * 0.5, 4.0)),
+        mat_idx=2,  # StreamDarkVoidSteel
+    )
+    add_cylinder_z(
+        bm,
+        center=Vector((cx - w_x * 0.4, cy - d_y * 0.4, h_z + 4.5)),
+        radius=0.35,
+        height=1.0,
+        segments=12,
+        mat_idx=7,  # BeaconRed
+    )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaToeiBic_Tower", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
 def generate_shibuya_stream():
     """渋谷ストリームおよび渋谷駅周辺8大ランドマーク・首都高3号渋谷線高架橋の3Dモデル全体を生成し GLB としてエクスポートする"""
     clean_scene()
@@ -3247,6 +3651,15 @@ def generate_shibuya_stream():
 
     qfront_109 = build_shibuya_qfront_109_complex(materials)
     qfront_109.parent = root
+
+    magnet = build_shibuya_magnet_and_station_front(materials)
+    magnet.parent = root
+
+    mark_city = build_shibuya_mark_city_complex(materials)
+    mark_city.parent = root
+
+    toei_bic = build_shibuya_toei_plaza_bic_camera(materials)
+    toei_bic.parent = root
 
     print("Preserving procedural and cylindrical UV coordinates for all mesh objects...")
     for m_obj in bpy.data.objects:
@@ -3379,6 +3792,24 @@ def render_360_review(review_dir: str):
             Vector((200.0, -65.0, 34.0)),
             Vector((263.0, 0.0, 26.0)),
             26.0,
+        ),
+        (
+            "16_driver_eye_scramble_crossing_and_magnet",
+            Vector((263.0, -120.0, 3.0)),
+            Vector((290.0, -87.0, 24.0)),
+            24.0,
+        ),
+        (
+            "17_driver_eye_dogenzaka_mark_city",
+            Vector((255.0, -150.0, 3.5)),
+            Vector((195.0, -180.0, 35.0)),
+            24.0,
+        ),
+        (
+            "18_driver_eye_miyamasuzaka_toei_bic",
+            Vector((263.0, -55.0, 3.0)),
+            Vector((290.0, -28.0, 26.0)),
+            24.0,
         ),
     ]
 
