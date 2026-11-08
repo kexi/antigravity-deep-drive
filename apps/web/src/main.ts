@@ -46,6 +46,7 @@ import { DepthFogPass } from "./shaders/depthFog";
 import { LensFlarePass } from "./shaders/lensFlare";
 import { assetManager } from "./assets/assetManager";
 import { AssetManagerUI, parseAssetManagerOption } from "./assets/assetManagerUI";
+import { shibuyaTextureManager } from "./textures/shibuyaTextureManager";
 import {
   findNearestGsiRoad,
   findNearestPlateauBuilding,
@@ -1271,7 +1272,12 @@ async function bootstrap() {
       async (span) => {
         // 非同期 GLB アセット（車両、東京駅丸の内駅舎、渋谷ストリーム、街路樹）および
         // ロード完了コールバック内で付与される 3D プロシージャル onBeforeCompile シェーダーの構築完了を待つ
-        await Promise.all([cityMap.waitForModelsLoaded(), carModel.waitForModelsLoaded()]);
+        // さらに渋谷ストリートビュー実写テクスチャ群の事前プリロードも完了させる
+        await Promise.all([
+          cityMap.waitForModelsLoaded(),
+          carModel.waitForModelsLoaded(),
+          shibuyaTextureManager.preloadAll(),
+        ]);
 
         const report = await prebuildSceneShaders({
           renderer,

@@ -55,13 +55,16 @@ def create_material(
     emission_color: tuple | None = None,
     emission_strength: float = 0.0,
     coat_weight: float = 0.0,
+    image_path: str | None = None,
 ) -> bpy.types.Material:
-    """Blender 5.0+ Principled BSDF マテリアルを作成する"""
+    """Blender 5.0+ Principled BSDF マテリアルを作成する（実写テクスチャ画像パス指定対応）"""
     mat = bpy.data.materials.new(name=name)
     has_node_tree = mat.node_tree is not None
     if not has_node_tree:
         mat.use_nodes = True
-    bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    bsdf = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
     if bsdf:
         bsdf.inputs["Base Color"].default_value = base_color
         bsdf.inputs["Roughness"].default_value = roughness
@@ -71,11 +74,23 @@ def create_material(
         if emission_color is not None and "Emission Color" in bsdf.inputs:
             bsdf.inputs["Emission Color"].default_value = emission_color
             bsdf.inputs["Emission Strength"].default_value = emission_strength
+
+        if image_path:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+            full_img_path = os.path.join(project_root, image_path.lstrip("/"))
+            if os.path.exists(full_img_path):
+                tex_node = nodes.new(type="ShaderNodeTexImage")
+                img = bpy.data.images.load(full_img_path)
+                tex_node.image = img
+                links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
+                if emission_strength > 0.0 and "Emission Color" in bsdf.inputs:
+                    links.new(tex_node.outputs["Color"], bsdf.inputs["Emission Color"])
     return mat
 
 
 def setup_materials() -> dict[str, bpy.types.Material]:
-    """実写の渋谷ストリーム（Shibuya Stream）に基づく PBR マテリアル群を構築する"""
+    """実写の渋谷ストリーム（Shibuya Stream）および実写ストリートビューに基づく PBR マテリアル群を構築する"""
     mats = {
         # 0: 白アルミカーテンウォールパネル（渋谷ストリーム象徴の白い縦横ランダムフィン）
         "StreamWhitePanel": create_material(
@@ -148,14 +163,15 @@ def setup_materials() -> dict[str, bpy.types.Material]:
             roughness=0.76,
             metallic=0.08,
         ),
-        # 9: 首都高速道路 緑案内標識ボード（[3] 首都高速3号渋谷線 / 渋谷・用賀・東名 / 谷町JCT・都心環状）
+        # 9: 首都高速道路 緑案内標識ボード（実写ストリートビュー標識テクスチャ）
         "ShutokoHighwayGreenSign": create_material(
             "ShutokoHighwayGreenSign",
             base_color=(0.04, 0.42, 0.24, 1.0),
             roughness=0.35,
             metallic=0.10,
             emission_color=(0.05, 0.48, 0.28, 1.0),
-            emission_strength=0.05,
+            emission_strength=0.08,
+            image_path="apps/web/public/textures/shibuya/shibuya_shutoko_sign.jpg",
         ),
         # 10: 渋谷スクランブルスクエア 屋上展望施設「SHIBUYA SKY」スカイエッジ発光ガラス＆ヘリポートライン
         "ShibuyaSkyEdgeGlow": create_material(
@@ -193,19 +209,116 @@ def setup_materials() -> dict[str, bpy.types.Material]:
             emission_color=(1.0, 0.16, 0.45, 1.0),
             emission_strength=0.35,
         ),
+        # 14: QFRONT 巨大湾曲LEDビジョン「Q'S EYE」＆TSUTAYA/スターバックス実写ストリートビューテクスチャ
+        "ShibuyaQfrontMedia": create_material(
+            "ShibuyaQfrontMedia",
+            base_color=(0.20, 0.45, 0.70, 1.0),
+            roughness=0.14,
+            metallic=0.25,
+            emission_color=(0.20, 0.45, 0.70, 1.0),
+            emission_strength=0.35,
+            image_path="apps/web/public/textures/shibuya/shibuya_qfront.jpg",
+        ),
+        # 15: SHIBUYA109 円筒クラウン「109」ロゴ＆ファサード実写ストリートビューテクスチャ
+        "Shibuya109Crown": create_material(
+            "Shibuya109Crown",
+            base_color=(0.95, 0.22, 0.45, 1.0),
+            roughness=0.18,
+            metallic=0.28,
+            emission_color=(0.95, 0.22, 0.45, 1.0),
+            emission_strength=0.30,
+            image_path="apps/web/public/textures/shibuya/shibuya_109.jpg",
+        ),
+        # 16: 渋谷スクランブルスクエア 東棟超高層ファサード実写ストリートビューテクスチャ
+        "ShibuyaScrambleSquareFacade": create_material(
+            "ShibuyaScrambleSquareFacade",
+            base_color=(0.25, 0.38, 0.52, 1.0),
+            roughness=0.12,
+            metallic=0.45,
+            image_path="apps/web/public/textures/shibuya/shibuya_scramble_square.jpg",
+        ),
+        # 17: 渋谷ストリーム 水流（Stream）千鳥ルーバーファサード実写ストリートビューテクスチャ
+        "ShibuyaStreamFacade": create_material(
+            "ShibuyaStreamFacade",
+            base_color=(0.30, 0.48, 0.62, 1.0),
+            roughness=0.22,
+            metallic=0.32,
+            image_path="apps/web/public/textures/shibuya/shibuya_stream.jpg",
+        ),
+        # 18: MIYASHITA PARK 商業ファサード＆渋谷横丁実写ストリートビューテクスチャ
+        "ShibuyaMiyashitaParkFacade": create_material(
+            "ShibuyaMiyashitaParkFacade",
+            base_color=(0.35, 0.52, 0.38, 1.0),
+            roughness=0.30,
+            metallic=0.20,
+            image_path="apps/web/public/textures/shibuya/shibuya_miyashita_park.jpg",
+        ),
+        # 19: 明治通り・国道246号 沿道商業ビル（コンビニ・ドラッグストア・飲食店）実写ストリートビューテクスチャ
+        "ShibuyaCommercialFacade": create_material(
+            "ShibuyaCommercialFacade",
+            base_color=(0.48, 0.45, 0.42, 1.0),
+            roughness=0.36,
+            metallic=0.15,
+            image_path="apps/web/public/textures/shibuya/shibuya_commercial_facade.jpg",
+        ),
+        # 20: 渋谷スクランブル交差点 屋外大型LEDビジョン＆ビルボード実写ストリートビューテクスチャ
+        "ShibuyaCrossingBillboard": create_material(
+            "ShibuyaCrossingBillboard",
+            base_color=(0.15, 0.22, 0.38, 1.0),
+            roughness=0.12,
+            metallic=0.20,
+            emission_color=(0.15, 0.22, 0.38, 1.0),
+            emission_strength=0.45,
+            image_path="apps/web/public/textures/shibuya/shibuya_billboards.jpg",
+        ),
+        # 21: 渋谷スクランブルスクエア 屋上ヘリポート着陸帯（緑色着陸パッド、道路案内標識ではない）
+        "HeliportGreenPad": create_material(
+            "HeliportGreenPad",
+            base_color=(0.04, 0.45, 0.25, 1.0),
+            roughness=0.55,
+            metallic=0.08,
+            emission_color=(0.04, 0.45, 0.25, 1.0),
+            emission_strength=0.04,
+        ),
+        # 22: JR山手線・埼京線 跨道グリーンスチールトラス鉄道橋
+        "JRGreenSteel": create_material(
+            "JRGreenSteel",
+            base_color=(0.06, 0.38, 0.20, 1.0),
+            roughness=0.45,
+            metallic=0.75,
+        ),
     }
     return mats
 
 
 def add_box(bm: bmesh.types.BMesh, center: Vector, size: Vector, mat_idx: int = 0):
-    """指定中心・サイズの直方体を bmesh に追加する"""
+    """指定中心・サイズの直方体を bmesh に追加する（自動平面UV展開付き）"""
     res = bmesh.ops.create_cube(bm, size=1.0)
     verts = res["verts"]
     bmesh.ops.scale(bm, vec=size, verts=verts)
     bmesh.ops.translate(bm, vec=center, verts=verts)
+    uv_layer = bm.loops.layers.uv.verify()
+    created_faces = set()
     for v in verts:
         for f in v.link_faces:
-            f.material_index = mat_idx
+            if f not in created_faces:
+                created_faces.add(f)
+                f.material_index = mat_idx
+                ax, ay, az = abs(f.normal.x), abs(f.normal.y), abs(f.normal.z)
+                if ax >= ay and ax >= az:
+                    coords = [(loop, loop.vert.co.y, loop.vert.co.z) for loop in f.loops]
+                elif ay >= ax and ay >= az:
+                    coords = [(loop, loop.vert.co.x, loop.vert.co.z) for loop in f.loops]
+                else:
+                    coords = [(loop, loop.vert.co.x, loop.vert.co.y) for loop in f.loops]
+                min_u = min(c[1] for c in coords)
+                max_u = max(c[1] for c in coords)
+                min_v = min(c[2] for c in coords)
+                max_v = max(c[2] for c in coords)
+                ru = max_u - min_u if (max_u - min_u) > 1e-5 else 1.0
+                rv = max_v - min_v if (max_v - min_v) > 1e-5 else 1.0
+                for loop, u_raw, v_raw in coords:
+                    loop[uv_layer].uv = Vector(((u_raw - min_u) / ru, (v_raw - min_v) / rv))
 
 
 def add_oriented_box(
@@ -218,7 +331,7 @@ def add_oriented_box(
     size_z: float,
     mat_idx: int = 0,
 ):
-    """接線・法線・Z軸方向に整列した直方体を bmesh に追加する"""
+    """接線・法線・Z軸方向に整列した直方体を bmesh に追加する（自動UV展開付き）"""
     t = tangent_dir.normalized()
     n = normal_dir.normalized()
     up = Vector((0.0, 0.0, 1.0))
@@ -246,9 +359,14 @@ def add_oriented_box(
         (1, 2, 6, 5),
         (3, 0, 4, 7),
     ]
+    uv_layer = bm.loops.layers.uv.verify()
     for q in quads:
         f = bm.faces.new([v[q[0]], v[q[1]], v[q[2]], v[q[3]]])
         f.material_index = mat_idx
+        f.loops[0][uv_layer].uv = Vector((0.0, 0.0))
+        f.loops[1][uv_layer].uv = Vector((1.0, 0.0))
+        f.loops[2][uv_layer].uv = Vector((1.0, 1.0))
+        f.loops[3][uv_layer].uv = Vector((0.0, 1.0))
 
 
 def add_cylindrical_panel_z(
@@ -286,27 +404,54 @@ def add_cylindrical_panel_z(
         p_out_bot.append(bm.verts.new(c_out - Vector((0.0, 0.0, hz))))
         p_out_top.append(bm.verts.new(c_out + Vector((0.0, 0.0, hz))))
 
+    uv_layer = bm.loops.layers.uv.verify()
     for i in range(segments):
         ni = i + 1
+        u0 = i / segments
+        u1 = (i + 1) / segments
         # 外周面
         f_out = bm.faces.new([p_out_bot[i], p_out_bot[ni], p_out_top[ni], p_out_top[i]])
         f_out.material_index = mat_idx
+        f_out.loops[0][uv_layer].uv = Vector((u0, 0.0))
+        f_out.loops[1][uv_layer].uv = Vector((u1, 0.0))
+        f_out.loops[2][uv_layer].uv = Vector((u1, 1.0))
+        f_out.loops[3][uv_layer].uv = Vector((u0, 1.0))
         # 内周面
         f_in = bm.faces.new([p_in_bot[ni], p_in_bot[i], p_in_top[i], p_in_top[ni]])
         f_in.material_index = mat_idx
+        f_in.loops[0][uv_layer].uv = Vector((u1, 0.0))
+        f_in.loops[1][uv_layer].uv = Vector((u0, 0.0))
+        f_in.loops[2][uv_layer].uv = Vector((u0, 1.0))
+        f_in.loops[3][uv_layer].uv = Vector((u1, 1.0))
         # 底面
         f_bot = bm.faces.new([p_in_bot[i], p_in_bot[ni], p_out_bot[ni], p_out_bot[i]])
         f_bot.material_index = mat_idx
+        f_bot.loops[0][uv_layer].uv = Vector((0.0, 0.0))
+        f_bot.loops[1][uv_layer].uv = Vector((1.0, 0.0))
+        f_bot.loops[2][uv_layer].uv = Vector((1.0, 1.0))
+        f_bot.loops[3][uv_layer].uv = Vector((0.0, 1.0))
         # 天面
         f_top = bm.faces.new([p_in_top[ni], p_in_top[i], p_out_top[i], p_out_top[ni]])
         f_top.material_index = mat_idx
+        f_top.loops[0][uv_layer].uv = Vector((0.0, 0.0))
+        f_top.loops[1][uv_layer].uv = Vector((1.0, 0.0))
+        f_top.loops[2][uv_layer].uv = Vector((1.0, 1.0))
+        f_top.loops[3][uv_layer].uv = Vector((0.0, 1.0))
 
     # 左側小口 (i = 0)
     f_left = bm.faces.new([p_in_bot[0], p_out_bot[0], p_out_top[0], p_in_top[0]])
     f_left.material_index = mat_idx
+    f_left.loops[0][uv_layer].uv = Vector((0.0, 0.0))
+    f_left.loops[1][uv_layer].uv = Vector((1.0, 0.0))
+    f_left.loops[2][uv_layer].uv = Vector((1.0, 1.0))
+    f_left.loops[3][uv_layer].uv = Vector((0.0, 1.0))
     # 右側小口 (i = segments)
     f_right = bm.faces.new([p_out_bot[-1], p_in_bot[-1], p_in_top[-1], p_out_top[-1]])
     f_right.material_index = mat_idx
+    f_right.loops[0][uv_layer].uv = Vector((0.0, 0.0))
+    f_right.loops[1][uv_layer].uv = Vector((1.0, 0.0))
+    f_right.loops[2][uv_layer].uv = Vector((1.0, 1.0))
+    f_right.loops[3][uv_layer].uv = Vector((0.0, 1.0))
 
 
 def add_cylinder_z(
@@ -318,7 +463,7 @@ def add_cylinder_z(
     mat_idx: int = 0,
     smooth: bool = True,
 ):
-    """Z軸方向の円柱を bmesh に追加する"""
+    """Z軸方向の円柱を bmesh に追加する（自動円筒UV展開付き）"""
     bot_verts = []
     top_verts = []
     hz = height * 0.5
@@ -329,16 +474,32 @@ def add_cylinder_z(
         bot_verts.append(bm.verts.new(center + Vector((dx, dy, -hz))))
         top_verts.append(bm.verts.new(center + Vector((dx, dy, hz))))
 
+    uv_layer = bm.loops.layers.uv.verify()
     for i in range(segments):
         ni = (i + 1) % segments
         f = bm.faces.new([bot_verts[i], bot_verts[ni], top_verts[ni], top_verts[i]])
         f.material_index = mat_idx
         f.smooth = smooth
+        u0 = i / segments
+        u1 = (i + 1) / segments
+        f.loops[0][uv_layer].uv = Vector((u0, 0.0))
+        f.loops[1][uv_layer].uv = Vector((u1, 0.0))
+        f.loops[2][uv_layer].uv = Vector((u1, 1.0))
+        f.loops[3][uv_layer].uv = Vector((u0, 1.0))
 
     f_bot = bm.faces.new(list(reversed(bot_verts)))
     f_bot.material_index = mat_idx
+    for loop in f_bot.loops:
+        dx = (loop.vert.co.x - center.x) / (radius * 2.0) + 0.5
+        dy = (loop.vert.co.y - center.y) / (radius * 2.0) + 0.5
+        loop[uv_layer].uv = Vector((dx, dy))
+
     f_top = bm.faces.new(top_verts)
     f_top.material_index = mat_idx
+    for loop in f_top.loops:
+        dx = (loop.vert.co.x - center.x) / (radius * 2.0) + 0.5
+        dy = (loop.vert.co.y - center.y) / (radius * 2.0) + 0.5
+        loop[uv_layer].uv = Vector((dx, dy))
 
 
 def add_extruded_arc_ring(
@@ -526,6 +687,15 @@ def assign_materials_to_object(obj: bpy.types.Object, materials: dict[str, bpy.t
         "HikarieGoldOrb",  # 11
         "SakuraStagePinkGlow",  # 12
         "ShibuyaQfront109Accent",  # 13
+        "ShibuyaQfrontMedia",  # 14
+        "Shibuya109Crown",  # 15
+        "ShibuyaScrambleSquareFacade",  # 16
+        "ShibuyaStreamFacade",  # 17
+        "ShibuyaMiyashitaParkFacade",  # 18
+        "ShibuyaCommercialFacade",  # 19
+        "ShibuyaCrossingBillboard",  # 20
+        "HeliportGreenPad",  # 21
+        "JRGreenSteel",  # 22
     ]
     for k in ordered_keys:
         obj.data.materials.append(materials[k])
@@ -547,12 +717,12 @@ def build_high_rise_tower(materials: dict[str, bpy.types.Material]) -> bpy.types
     z_crown_top = 180.0
     glass_h = z_glass_top - z_start
 
-    # 1. メインガラスカーテンウォールコア (Z=66m..168m)
+    # 1. メインガラスカーテンウォールコア（Z=66m..168m: 実写ストリームテクスチャ）
     add_box(
         bm,
         center=Vector((0.0, 0.0, z_start + glass_h * 0.5)),
         size=Vector((tower_w, tower_d, glass_h)),
-        mat_idx=1,
+        mat_idx=17,
     )
 
     # 2. 各階（14F〜35F：22フロア × 階高 4.63m）の水平スパンドレル帯＆発光オフィス窓バンド
@@ -1531,11 +1701,12 @@ def build_shibuya_scramble_square_tower(
     z_tower_bot = 48.0
     z_tower_top = 214.0
     tower_h = z_tower_top - z_tower_bot
+    # メイン高層オフィスタワーコア（実写スクランブルスクエア超高層ファサードテクスチャ）
     add_box(
         bm,
         center=Vector((cx, cy, z_tower_bot + tower_h * 0.5)),
         size=Vector((tw_x, td_y, tower_h)),
-        mat_idx=1,
+        mat_idx=16,
     )
 
     # スクランブルスクエア固有の多層水平アルミフィン＆ウォームオフィス照明帯（28段）
@@ -1641,7 +1812,7 @@ def build_shibuya_scramble_square_tower(
         bm,
         center=Vector((cx, cy, 229.25)),
         size=Vector((18.0, 18.0, 0.45)),
-        mat_idx=9,
+        mat_idx=21,
     )
     for hx_off in [-3.2, 3.2]:
         add_box(
@@ -2013,7 +2184,7 @@ def build_shibuya_pedestrian_deck_and_rail_overpass(
                 bm,
                 center=Vector((bridge_bx, jr_by + side_y, 11.2)),
                 size=Vector((bridge_span, 0.75, 3.8)),
-                mat_idx=9,
+                mat_idx=22,
             )
             # トラス斜材ポスト
             num_posts = 8
@@ -2529,19 +2700,19 @@ def build_shibuya_miyashita_park_complex(
     d_y = 42.0
     park_deck_z = 16.5
 
-    # 1. 1F〜3F 商業施設「RAYARD MIYASHITA PARK」基壇
+    # 1. 1F〜3F 商業施設「RAYARD MIYASHITA PARK」基壇（実写ミヤシタパーク＆渋谷横丁ファサード）
     add_box(
         bm,
         center=Vector((cx, cy, park_deck_z * 0.5)),
         size=Vector((w_x, d_y, park_deck_z)),
-        mat_idx=2,
+        mat_idx=18,
     )
     # 1F「渋谷横丁」暖色飲食街アーケード（明治通り側 `by = -21.0` に連なる賑わい発光帯）
     add_box(
         bm,
         center=Vector((cx - 4.0, cy - d_y * 0.5 - 0.25, 3.6)),
         size=Vector((w_x - 6.0, 1.2, 5.2)),
-        mat_idx=6,
+        mat_idx=18,
     )
     # 渋谷横丁の赤・アンバー提灯ランタン列
     for yoko_i in range(14):
@@ -2738,11 +2909,12 @@ def build_shibuya_qfront_109_complex(
     # 2. QFRONT（南東〜東側 `bx = 252.0, by = -104.5`: 明治通り・スクランブル交差点に面する曲面メディアビル）
     qfront_cx = cx - 9.0
     qfront_cy = cy + 12.5
+    # QFRONT ファサード本体（実写 QFRONT テクスチャ）
     add_box(
         bm,
         center=Vector((qfront_cx + 4.0, qfront_cy, 23.0)),
         size=Vector((24.0, 18.0, 46.0)),
-        mat_idx=1,
+        mat_idx=14,
     )
     # スクランブル交差点側（南東角 `bx = 244.5, by = -101.5`）の曲面ガラス＆大型湾曲LEDビジョン「Q'S EYE」
     q_corner_x = cx - 16.5
@@ -2753,7 +2925,7 @@ def build_shibuya_qfront_109_complex(
         radius=9.2,
         height=47.5,
         segments=24,
-        mat_idx=1,
+        mat_idx=14,
     )
     # 2F〜3F スターバックス展望ガラスバンド（Z = 5.5m .. 12.5m）
     add_cylinder_z(
@@ -2764,14 +2936,14 @@ def build_shibuya_qfront_109_complex(
         segments=24,
         mat_idx=6,
     )
-    # 大型湾曲LEDビジョン「Q'S EYE」（Z = 14.5m .. 39.5m: シアンブルー発光＋白/マゼンタフレーム）
+    # 大型湾曲LEDビジョン「Q'S EYE」（Z = 14.5m .. 39.5m: 実写 QFRONT Q'S EYE メディアテクスチャ）
     add_cylinder_z(
         bm,
         center=Vector((q_corner_x, q_corner_y, 27.0)),
         radius=9.65,
         height=24.0,
         segments=24,
-        mat_idx=10,
+        mat_idx=14,
     )
     for border_z in [14.6, 27.0, 39.4]:
         add_cylinder_z(
@@ -2788,7 +2960,7 @@ def build_shibuya_qfront_109_complex(
         radius=9.76,
         height=3.8,
         segments=24,
-        mat_idx=13,
+        mat_idx=14,
     )
 
     # 3. SHIBUYA109（南西角〜道玄坂分岐先端 `bx = 247.5, by = -131.0`: 南側のスクランブル交差点からも全景が見える円筒シリンダータワー）
@@ -2849,14 +3021,14 @@ def build_shibuya_qfront_109_complex(
         mat_idx=13,
     )
 
-    # シリンダー頂部（Z = 65.0m .. 82.0m）のメタリックシルバーパネル＆象徴的なマゼンタレッド発光クラウンバンド
+    # シリンダー頂部（Z = 65.0m .. 82.0m）のメタリックシルバーパネル＆象徴的なマゼンタレッド発光クラウンバンド（実写109クラウンテクスチャ）
     add_cylinder_z(
         bm,
         center=Vector((cyl_cx, cyl_cy, 73.5)),
         radius=cyl_r + 0.38,
         height=16.5,
         segments=28,
-        mat_idx=3,
+        mat_idx=15,
     )
     for pink_z in [67.8, 79.2]:
         add_cylinder_z(
@@ -2873,7 +3045,7 @@ def build_shibuya_qfront_109_complex(
     logo_dir = Vector((-0.54, 0.84, 0.0)).normalized()
     theta_center = math.atan2(logo_dir.y, logo_dir.x)
 
-    # シリンダー曲面外側に美しく浮き彫りされた白アルミバッキングプレート（Z-fighting・埋没ゼロ）
+    # シリンダー曲面外側に美しく浮き彫りされた白アルミバッキングプレート（Z-fighting・埋没ゼロ、3Dエンブレムの台座）
     add_cylindrical_panel_z(
         bm,
         center=Vector((cyl_cx, cyl_cy, 73.5)),
@@ -3006,6 +3178,20 @@ def build_shibuya_qfront_109_complex(
             mat_idx=7,
         )
 
+    # 4. スクランブル交差点周辺の大型屋外LEDビジョン＆ビルボード（実写交差点ビルボードテクスチャ）
+    add_box(
+        bm,
+        center=Vector((cx - 24.0, cy + 24.0, 26.0)),
+        size=Vector((1.2, 18.0, 22.0)),
+        mat_idx=20,
+    )
+    add_box(
+        bm,
+        center=Vector((cx - 12.0, cy + 30.0, 30.0)),
+        size=Vector((20.0, 1.2, 18.0)),
+        mat_idx=20,
+    )
+
     bm.normal_update()
     bm.to_mesh(mesh)
     bm.free()
@@ -3061,6 +3247,11 @@ def generate_shibuya_stream():
 
     qfront_109 = build_shibuya_qfront_109_complex(materials)
     qfront_109.parent = root
+
+    print("Preserving procedural and cylindrical UV coordinates for all mesh objects...")
+    for m_obj in bpy.data.objects:
+        if m_obj.type == "MESH" and m_obj.data.uv_layers:
+            m_obj.data.uv_layers.active_index = 0
 
     print("High-precision Shibuya Station District & Shutoko Viaduct modeling complete! Hierarchy:")
     for obj in bpy.data.objects:

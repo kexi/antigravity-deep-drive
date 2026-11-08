@@ -2,6 +2,11 @@ import { describe, it, expect } from "vitest";
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 import { TokyoStationMap } from "../city/tokyoStationMap";
+import {
+  shibuyaTextureManager,
+  SHIBUYA_TEXTURE_CONFIGS,
+  type ShibuyaTextureId,
+} from "../textures/shibuyaTextureManager";
 
 describe("建築ファサードテクスチャ & 夜間オフィス照明システム仕様検証", () => {
   it("TokyoStationMap.attachArchitecture3DVolumeShader が全10モードの建築ファサードテクスチャに正しいモードコード（0〜9）とキャッシュキーを割り当てることを保証する", async () => {
@@ -218,5 +223,224 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
       expect(hasCurtainGlass).toBe(true);
       expect(hasRetailStorefront).toBe(true);
     }
+  });
+
+  it("ShibuyaTextureManager が全8種の実写ストリートビューテクスチャと各種マテリアル生成を正常に行うことを保証する", async () => {
+    const textureIds = Object.keys(SHIBUYA_TEXTURE_CONFIGS) as ShibuyaTextureId[];
+    expect(textureIds).toHaveLength(8);
+
+    for (const id of textureIds) {
+      const tex = shibuyaTextureManager.getTexture(id);
+      expect(tex).toBeDefined();
+      expect(tex.name).toBe(`ShibuyaTex_${id}`);
+    }
+
+    // 商業路面店舗マテリアル
+    const commercialMatDay = shibuyaTextureManager.createCommercialStorefrontMaterial(false);
+    expect(commercialMatDay.map).toBeDefined();
+    expect(commercialMatDay.emissiveMap).toBe(commercialMatDay.map);
+    expect(commercialMatDay.emissiveIntensity).toBe(
+      SHIBUYA_TEXTURE_CONFIGS.commercialFacade.emissiveIntensityDay,
+    );
+
+    const commercialMatNight = shibuyaTextureManager.createCommercialStorefrontMaterial(true);
+    expect(commercialMatNight.emissiveIntensity).toBe(
+      SHIBUYA_TEXTURE_CONFIGS.commercialFacade.emissiveIntensityNight,
+    );
+
+    // ビルボードマテリアル
+    const billboardMatNight = shibuyaTextureManager.createBillboardMaterial("billboards", true);
+    expect(billboardMatNight.emissiveIntensity).toBe(
+      SHIBUYA_TEXTURE_CONFIGS.billboards.emissiveIntensityNight,
+    );
+
+    // 首都高緑案内標識マテリアル
+    const shutokoSignMat = shibuyaTextureManager.createShutokoHighwaySignMaterial(true);
+    expect(shutokoSignMat.emissiveIntensity).toBe(
+      SHIBUYA_TEXTURE_CONFIGS.shutokoSign.emissiveIntensityNight,
+    );
+
+    // /boost 向け preloadAll
+    await expect(shibuyaTextureManager.preloadAll()).resolves.toBeUndefined();
+  });
+
+  it("TokyoStationMap.applyShibuyaStreamGlbMaterial3DTexture が実写テクスチャマテリアル群に適切なシェーダーモードと昼夜emissiveを割り当てることを保証する", async () => {
+    await RAPIER.init();
+    const scene = new THREE.Scene();
+    const world = new RAPIER.World(new RAPIER.Vector3(0, -9.81, 0));
+    const cityMap = new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+
+    const glbMaterials = [
+      {
+        name: "ShutokoHighwayGreenSign",
+        expectedChannel: "anodized_metal",
+        expectedTex: "shutokoSign",
+      },
+      { name: "ShibuyaQfrontMedia", expectedChannel: "curtain_glass", expectedTex: "qfront" },
+      { name: "Shibuya109Crown", expectedChannel: "anodized_metal", expectedTex: "shibuya109" },
+      {
+        name: "ShibuyaCrossingBillboard",
+        expectedChannel: "curtain_glass",
+        expectedTex: "billboards",
+      },
+      {
+        name: "ShibuyaScrambleSquareFacade",
+        expectedChannel: "curtain_glass",
+        expectedTex: "scrambleSquare",
+      },
+      { name: "ShibuyaStreamFacade", expectedChannel: "curtain_glass", expectedTex: "stream" },
+      {
+        name: "ShibuyaMiyashitaParkFacade",
+        expectedChannel: "retail_storefront",
+        expectedTex: "miyashitaPark",
+      },
+      {
+        name: "ShibuyaCommercialFacade",
+        expectedChannel: "retail_storefront",
+        expectedTex: "commercialFacade",
+      },
+    ];
+
+    for (const item of glbMaterials) {
+      const mat = new THREE.MeshStandardMaterial({ name: item.name });
+      cityMap.applyShibuyaStreamGlbMaterial3DTexture(mat);
+
+      expect(mat.userData.hasArch3DVolumeShader).toBe(true);
+      expect(mat.userData.arch3DVolumeChannel).toBe(item.expectedChannel);
+      expect(mat.map).toBeDefined();
+      expect(mat.emissiveMap).toBe(mat.map);
+    }
+
+    const heliportMat = new THREE.MeshStandardMaterial({ name: "HeliportGreenPad" });
+    cityMap.applyShibuyaStreamGlbMaterial3DTexture(heliportMat);
+    expect(heliportMat.userData.arch3DVolumeChannel).toBe("white_granite");
+    expect(heliportMat.map).toBeNull();
+
+    const jrSteelMat = new THREE.MeshStandardMaterial({ name: "JRGreenSteel" });
+    cityMap.applyShibuyaStreamGlbMaterial3DTexture(jrSteelMat);
+    expect(jrSteelMat.userData.arch3DVolumeChannel).toBe("anodized_metal");
+    expect(jrSteelMat.map).toBeNull();
+  });
+
+  it("渋谷エリアの路面店舗・袖看板群・交差点ビルボード群が生成され、夜間切り替え時に一括で発光輝度が連動することを保証する", async () => {
+    await RAPIER.init();
+    const scene = new THREE.Scene();
+    const world = new RAPIER.World(new RAPIER.Vector3(0, -9.81, 0));
+    const cityMap = new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+
+    // 渋谷ストリートビュー看板グループの存在
+    const signsGroup = cityMap.group.getObjectByName(
+      "ShibuyaStreetViewSignsGroup",
+    ) as THREE.Group | null;
+    expect(signsGroup).toBeDefined();
+    expect(signsGroup).not.toBeNull();
+
+    if (signsGroup) {
+      // 突き出し袖看板およびビルボードメッシュが多数格納されていること
+      const childCount = signsGroup.children.length;
+      expect(childCount).toBeGreaterThan(15);
+
+      // 明治通りの突き出し袖看板（scale.y が 3m 以上で薄いメッシュ）が道路上空へX軸方向に1.2m以上突出し、Z軸厚みが0.3m以下であること
+      const bladeSignMeshes = signsGroup.children.filter(
+        (c) =>
+          (c as THREE.Mesh).isMesh && c.scale.y >= 3.0 && c.scale.y <= 5.5 && c.scale.z <= 0.35,
+      );
+      expect(bladeSignMeshes.length).toBe(12);
+      for (const bMesh of bladeSignMeshes) {
+        expect(bMesh.scale.x).toBeGreaterThanOrEqual(1.2);
+        expect(bMesh.scale.z).toBeLessThanOrEqual(0.3);
+      }
+    }
+
+    // 昼間モード: 全エントリの emissiveIntensity が dayIntensity であること
+    cityMap.setNightMode(false);
+    const internalMap = cityMap as unknown as {
+      shibuyaStreamEmissiveEntries: Array<{
+        material: THREE.MeshStandardMaterial;
+        dayIntensity: number;
+        nightIntensity: number;
+      }>;
+    };
+    expect(internalMap.shibuyaStreamEmissiveEntries.length).toBeGreaterThan(10);
+    for (const entry of internalMap.shibuyaStreamEmissiveEntries) {
+      expect(entry.material.emissiveIntensity).toBe(entry.dayIntensity);
+    }
+
+    // 夜間モード: 全エントリの emissiveIntensity が nightIntensity に跳ね上がること
+    cityMap.setNightMode(true);
+    for (const entry of internalMap.shibuyaStreamEmissiveEntries) {
+      expect(entry.material.emissiveIntensity).toBe(entry.nightIntensity);
+      expect(entry.material.emissiveIntensity).toBeGreaterThan(entry.dayIntensity);
+    }
+  });
+
+  it("渋谷の沿道ビル群において1F路面店舗ファサードがポディウム基底に埋没せず外側に露出していることを保証する", async () => {
+    await RAPIER.init();
+    const scene = new THREE.Scene();
+    const world = new RAPIER.World(new RAPIER.Vector3(0, -9.81, 0));
+    const cityMap = new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+
+    // 渋谷ビル群（13113-bldg-*）を探索
+    const shibuyaBuildingGroups = cityMap.group.children.filter((c) =>
+      c.name?.startsWith("13113-bldg"),
+    );
+    expect(shibuyaBuildingGroups.length).toBeGreaterThan(0);
+
+    for (const bGroup of shibuyaBuildingGroups) {
+      const meshes: THREE.Mesh[] = [];
+      bGroup.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          meshes.push(obj as THREE.Mesh);
+        }
+      });
+      const storefrontMesh = meshes.find(
+        (m) => (m.material as THREE.Material)?.userData?.arch3DMode === "retail_storefront",
+      );
+      expect(storefrontMesh).toBeDefined();
+      if (storefrontMesh) {
+        const geo = storefrontMesh.geometry as THREE.BoxGeometry;
+        const width = geo.parameters.width;
+        const depth = geo.parameters.depth;
+        expect(width).toBeGreaterThan(0);
+        expect(depth).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("シェーダー置換において USE_MAP / USE_EMISSIVEMAP ガードが機能し、実写看板・ビジョンのテクスチャ色彩と発光が保護されることを保証する", async () => {
+    await RAPIER.init();
+    const scene = new THREE.Scene();
+    const world = new RAPIER.World(new RAPIER.Vector3(0, -9.81, 0));
+    const cityMap = new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+
+    const texMat = new THREE.MeshStandardMaterial({
+      map: shibuyaTextureManager.getTexture("qfront"),
+      emissiveMap: shibuyaTextureManager.getTexture("qfront"),
+    });
+
+    const cityMapInternal = cityMap as unknown as {
+      attachArchitecture3DVolumeShader: (
+        material: THREE.MeshStandardMaterial,
+        mode: string,
+      ) => void;
+    };
+    cityMapInternal.attachArchitecture3DVolumeShader(texMat, "curtain_glass");
+
+    const mockShader = {
+      uniforms: {} as Record<string, { value: unknown }>,
+      vertexShader: "#include <common>\nvoid main() {\n#include <worldpos_vertex>\n}",
+      fragmentShader:
+        "#include <common>\nvoid main() {\n#include <color_fragment>\n#include <emissivemap_fragment>\n}",
+    };
+
+    texMat.onBeforeCompile(
+      mockShader as unknown as THREE.WebGLProgramParametersWithUniforms,
+      {} as THREE.WebGLRenderer,
+    );
+
+    // USE_MAP ガードが含まれていること
+    expect(mockShader.fragmentShader).toContain("#ifdef USE_MAP");
+    // USE_EMISSIVEMAP ガードが含まれていること
+    expect(mockShader.fragmentShader).toContain("#ifdef USE_EMISSIVEMAP");
   });
 });

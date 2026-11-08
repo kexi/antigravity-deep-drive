@@ -19,6 +19,7 @@ import {
 } from "../shaders/treeShader";
 import { WaterSurfaceMaterial } from "../shaders/waterShader";
 import { Procedural3DTextureGenerator } from "../textures/procedural3DTexture";
+import { shibuyaTextureManager } from "../textures/shibuyaTextureManager";
 import { assetManager } from "../assets/assetManager";
 import {
   getOpenDataCurvedRoadCorridors,
@@ -1086,6 +1087,12 @@ export class TokyoStationMap {
         float dWallU = max(fwidth(facadeU) * 1.5, 0.002);
         float dWallV = max(fwidth(facadeV) * 1.5, 0.002);
 
+        #ifdef USE_MAP
+        // 実写テクスチャ（Google マップ / ストリートビュー写真、看板、電子ビジョン、道路標識等）が存在する場合は、
+        // プロシージャル色帯での上書きを行わず、テクスチャ本来の高解像度な実写色彩を100%保持。
+        // 3Dボリュームノイズによる微細な結晶・風化ディテールのみを微量（5-8%）に乗算ブレンドする。
+        diffuseColor.rgb *= mix(0.93, 1.05, archVolMacro.r * 0.65 + archVolMicro.r * 0.35);
+        #else
         if (uArchSurfaceMode == 0) {
           // 赤レンガ・テラコッタ（東京駅丸の内駅舎・東京海上日動ビルなど）
           float clayGrain = mix(archVolMacro.r, archVolMicro.r, 0.45);
@@ -1232,12 +1239,17 @@ export class TokyoStationMap {
             diffuseColor.rgb *= 1.08;
           }
         }
+        #endif
         `,
       );
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <emissivemap_fragment>",
         /* glsl */ `
         #include <emissivemap_fragment>
+        #ifdef USE_EMISSIVEMAP
+        // 看板・LEDビジョン・道路標識等の実写 emissiveMap がある場合は、テクスチャ本来の発光色彩と
+        // マテリアル側の emissiveIntensity 設定を尊重する
+        #else
         if (uNightModeFactor > 0.01 && isFacadeWall && archViewDist < 360.0) {
           bool hasWindows = (uArchSurfaceMode == 4 || uArchSurfaceMode == 7 || uArchSurfaceMode == 8 || uArchSurfaceMode == 9);
           if (hasWindows) {
@@ -1278,6 +1290,7 @@ export class TokyoStationMap {
             }
           }
         }
+        #endif
         `,
       );
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -1883,7 +1896,10 @@ export class TokyoStationMap {
       const towerHeight = Math.max(12, b.h - podiumHeight - crownHeight);
 
       // 1. 低層ポディウム（商業・エントランス基壇部）
-      const baseGeo = new THREE.BoxGeometry(b.w, podiumHeight, b.d);
+      const storefrontHeight = Math.min(7.5, podiumHeight * 0.48);
+      const upperPodiumHeight = Math.max(1.0, podiumHeight - storefrontHeight);
+
+      const baseGeo = new THREE.BoxGeometry(b.w, upperPodiumHeight, b.d);
       const baseMat = new THREE.MeshStandardMaterial({
         color: b.podiumColor,
         roughness: 0.52,
@@ -1891,26 +1907,31 @@ export class TokyoStationMap {
       });
       this.applyArchitecture3DTexture(baseMat, "white_granite");
       const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-      baseMesh.position.y = -b.h / 2 + podiumHeight / 2;
+      baseMesh.position.y = -b.h / 2 + storefrontHeight + upperPodiumHeight / 2;
       baseMesh.castShadow = true;
       baseMesh.receiveShadow = true;
       bGroup.add(baseMesh);
 
-      // 1b. 低層1F〜2F 渋谷商業街区の路面ショーウィンドウ・ロビーガラス（retail_storefront プロシージャルテクスチャ）
-      const storefrontGeo = new THREE.BoxGeometry(
-        b.w * 0.98,
-        Math.min(7.0, podiumHeight * 0.45),
-        b.d * 0.98,
-      );
+      // 1b. 低層1F〜2F 渋谷商業街区の路面ショーウィンドウ・店舗ファサード（ストリートビュー実写テクスチャ）
+      const storefrontGeo = new THREE.BoxGeometry(b.w * 1.008, storefrontHeight, b.d * 1.008);
+      const storefrontTex = shibuyaTextureManager.getTexture("commercialFacade");
       const lobbyGlassMat = new THREE.MeshStandardMaterial({
-        color: b.warmInterior,
-        emissive: b.warmInterior,
-        emissiveIntensity: 0.42,
-        roughness: 0.18,
+        map: storefrontTex,
+        color: 0xffffff,
+        emissive: new THREE.Color(0xffffff),
+        emissiveMap: storefrontTex,
+        emissiveIntensity: this.isNightActive ? 0.95 : 0.18,
+        roughness: 0.22,
+        metalness: 0.15,
+      });
+      this.shibuyaStreamEmissiveEntries.push({
+        material: lobbyGlassMat,
+        dayIntensity: 0.18,
+        nightIntensity: 0.95,
       });
       this.applyArchitecture3DTexture(lobbyGlassMat, "retail_storefront");
       const storefrontMesh = new THREE.Mesh(storefrontGeo, lobbyGlassMat);
-      storefrontMesh.position.y = -b.h / 2 + Math.min(3.6, podiumHeight * 0.25);
+      storefrontMesh.position.y = -b.h / 2 + storefrontHeight / 2;
       storefrontMesh.userData.lodDetailTier = "high";
       bGroup.add(storefrontMesh);
 
@@ -1977,7 +1998,18 @@ export class TokyoStationMap {
 
       // ランドマーク固有のプロシージャル造形（LOD1/LOD2 フォールバックおよび専用ディテール）
       if (isScrambleSquare) {
-        // 渋谷スクランブルスクエア 東棟: 屋上展望施設「SHIBUYA SKY」スカイエッジ発光ガラス回廊＆ヘリポート＋斜め白ルーバーフィン
+        // 渋谷スクランブルスクエア 東棟: 屋上展望施設「SHIBUYA SKY」スカイエッジ発光ガラス回廊＆ヘリポート＋実写タワーテクスチャ
+        const scrambleTex = shibuyaTextureManager.getTexture("scrambleSquare");
+        towerMat.map = scrambleTex;
+        towerMat.emissive = new THREE.Color(0xffffff);
+        towerMat.emissiveMap = scrambleTex;
+        towerMat.emissiveIntensity = this.isNightActive ? 1.25 : 0.1;
+        this.shibuyaStreamEmissiveEntries.push({
+          material: towerMat,
+          dayIntensity: 0.1,
+          nightIntensity: 1.25,
+        });
+
         const skyEdgeMat = new THREE.MeshStandardMaterial({
           color: 0x7dd3fc,
           emissive: 0x38bdf8,
@@ -2091,7 +2123,29 @@ export class TokyoStationMap {
           bGroup.add(pleatMesh);
         }
       } else if (isMiyashitaPark) {
-        // MIYASHITA PARK (宮下公園): 3F 屋上公園の象徴的な白アーチキャノピー＆屋上芝生パーク
+        // MIYASHITA PARK (宮下公園): 3F 屋上公園の象徴的な白アーチキャノピー＆屋上芝生パーク＋低層商業ファサード実写テクスチャ
+        const miyashitaTex = shibuyaTextureManager.getTexture("miyashitaPark");
+        const miyashitaMat = new THREE.MeshStandardMaterial({
+          map: miyashitaTex,
+          emissive: new THREE.Color(0xffffff),
+          emissiveMap: miyashitaTex,
+          emissiveIntensity: this.isNightActive ? 1.25 : 0.22,
+          roughness: 0.32,
+          metalness: 0.25,
+        });
+        this.shibuyaStreamEmissiveEntries.push({
+          material: miyashitaMat,
+          dayIntensity: 0.22,
+          nightIntensity: 1.25,
+        });
+        this.applyArchitecture3DTexture(miyashitaMat, "retail_storefront");
+        const miyashitaStorefront = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w * 1.012, storefrontHeight * 1.25, b.d * 1.012),
+          miyashitaMat,
+        );
+        miyashitaStorefront.position.y = -b.h / 2 + (storefrontHeight * 1.25) / 2;
+        bGroup.add(miyashitaStorefront);
+
         const parkGreenMat = new THREE.MeshStandardMaterial({
           color: 0x22c55e,
           roughness: 0.85,
@@ -2116,18 +2170,22 @@ export class TokyoStationMap {
           bGroup.add(archCanopy);
         }
       } else if (isQfront109) {
-        // QFRONT・SHIBUYA109 街区: スクランブル交差点正面の大型湾曲LEDビジョン＆109シリンダータワー
+        // QFRONT・SHIBUYA109 街区: スクランブル交差点正面の大型湾曲LEDビジョン「Q'S EYE」実写ストリートビューテクスチャ
+        const qfrontTex = shibuyaTextureManager.getTexture("qfront");
         const mediaWallMat = new THREE.MeshStandardMaterial({
-          color: 0x38bdf8,
-          emissive: 0x0ea5e9,
-          emissiveIntensity: this.isNightActive ? 1.55 : 0.35,
-          roughness: 0.15,
+          map: qfrontTex,
+          emissive: new THREE.Color(0xffffff),
+          emissiveMap: qfrontTex,
+          emissiveIntensity: this.isNightActive ? 1.65 : 0.35,
+          roughness: 0.14,
+          metalness: 0.25,
         });
         this.shibuyaStreamEmissiveEntries.push({
           material: mediaWallMat,
           dayIntensity: 0.35,
-          nightIntensity: 1.55,
+          nightIntensity: 1.65,
         });
+        this.applyArchitecture3DTexture(mediaWallMat, "curtain_glass");
         const qfrontMedia = new THREE.Mesh(
           new THREE.CylinderGeometry(14.0, 14.0, 28.0, 20),
           mediaWallMat,
@@ -2184,6 +2242,9 @@ export class TokyoStationMap {
     // 5. 首都高速3号渋谷線 高架橋（Shutoko Route 3 Shibuya Line Viaduct）＆ 渋谷駅東口歩道橋・鉄道高架のプロシージャル構造物＋歩道橋脚コライダー
     this.buildShutokoRoute3AndShibuyaOverpass(world, rapier, whitePanelMat, darkFrameMat);
 
+    // 5b. 渋谷実写ストリートビュー袖看板・大型屋外電子ビジョン・ビルボード群の構築
+    this.buildShibuyaStreetViewSignsAndBillboards(world, rapier);
+
     // 6. Blender 生成 `shibuya_stream.glb` の非同期ロードと 3D テクスチャシェーダー統合
     if (!this.deferGlbLoads) {
       this.glbLoadPromises.push(this.loadGlbShibuyaStreamModel());
@@ -2230,18 +2291,21 @@ export class TokyoStationMap {
     });
     this.applyArchitecture3DTexture(concretePierMat, "white_granite");
 
+    const shutokoSignTex = shibuyaTextureManager.getTexture("shutokoSign");
     const shutokoGreenSignMat = new THREE.MeshStandardMaterial({
-      color: 0x047857,
-      emissive: 0x059669,
-      emissiveIntensity: this.isNightActive ? 0.95 : 0.05,
-      roughness: 0.26,
-      metalness: 0.15,
+      map: shutokoSignTex,
+      roughness: 0.28,
+      metalness: 0.12,
+      emissive: new THREE.Color(0xffffff),
+      emissiveMap: shutokoSignTex,
+      emissiveIntensity: this.isNightActive ? 1.15 : 0.08,
     });
     this.shibuyaStreamEmissiveEntries.push({
       material: shutokoGreenSignMat,
-      dayIntensity: 0.05,
-      nightIntensity: 0.95,
+      dayIntensity: 0.08,
+      nightIntensity: 1.15,
     });
+    this.applyArchitecture3DTexture(shutokoGreenSignMat, "anodized_metal");
 
     const underpassLightMat = new THREE.MeshStandardMaterial({
       color: 0xfde68a,
@@ -2411,15 +2475,143 @@ export class TokyoStationMap {
     ginzaLineRoof.position.set(-30, 17.2, 48); // worldX = -750, worldZ = 143
     registerCoreFallbackMesh(ginzaLineRoof);
 
-    const jrYamanoteBridge = new THREE.Mesh(
-      new THREE.BoxGeometry(13.5, 3.8, 300),
-      shutokoGreenSignMat,
-    );
+    const jrGreenSteelMat = new THREE.MeshStandardMaterial({
+      color: 0x0f5132,
+      roughness: 0.45,
+      metalness: 0.75,
+    });
+    this.applyArchitecture3DTexture(jrGreenSteelMat, "anodized_metal");
+
+    const jrYamanoteBridge = new THREE.Mesh(new THREE.BoxGeometry(13.5, 3.8, 300), jrGreenSteelMat);
     jrYamanoteBridge.name = "ShibuyaJrYamanoteOverpass";
     jrYamanoteBridge.position.set(-59, 10.2, -60); // worldX = -779
     registerCoreFallbackMesh(jrYamanoteBridge);
 
     this.group.add(viaductGroup);
+  }
+
+  /**
+   * 渋谷実写ストリートビュー袖看板・大型屋外電子ビジョン・ビルボード群の構築
+   * How:
+   * - Google マップ / ストリートビューで明治通り・スクランブル交差点・国道246号沿道に見られる
+   *   突き出し袖看板（カラオケ館、マツモトキヨシ、コンビニ、カフェ等）および屋外大型LEDビジョン群を
+   *   実写テクスチャマテリアルで配置し、夜間発光アニメーションと連動させる。
+   */
+  private buildShibuyaStreetViewSignsAndBillboards(
+    _world: RAPIER.World,
+    _rapier: typeof RAPIER,
+  ): void {
+    const signsGroup = new THREE.Group();
+    signsGroup.name = "ShibuyaStreetViewSignsGroup";
+
+    const commercialMat = shibuyaTextureManager.createCommercialStorefrontMaterial(
+      this.isNightActive,
+    );
+    this.shibuyaStreamEmissiveEntries.push({
+      material: commercialMat,
+      dayIntensity: 0.25,
+      nightIntensity: 1.45,
+    });
+    this.applyArchitecture3DTexture(commercialMat, "retail_storefront");
+
+    const billboardMat = shibuyaTextureManager.createBillboardMaterial(
+      "billboards",
+      this.isNightActive,
+    );
+    this.shibuyaStreamEmissiveEntries.push({
+      material: billboardMat,
+      dayIntensity: 0.45,
+      nightIntensity: 1.85,
+    });
+    this.applyArchitecture3DTexture(billboardMat, "curtain_glass");
+
+    const steelBracketMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.45,
+      metalness: 0.8,
+    });
+    this.applyArchitecture3DTexture(steelBracketMat, "cast_iron");
+
+    // 1. 明治通り沿道 突き出し袖看板群（歩道・車道から見上げる日本のリアルな商業街路景観）
+    // 明治通り中央軸 x = -750m。東側ビル壁面: x ≈ -735.4m、西側ビル壁面: x ≈ -764.6m
+    // 突き出し看板は建物壁面から道路上空へX軸方向に1.35m〜1.6m突出し、進行方向（Z軸南北）に幅広の発光面を向ける。
+    const meijiBladeSigns = [
+      // 東側ビル街（渋谷ストリーム〜ヒカリエ〜宮下公園方向: 壁面 x ≈ -735.4m より道路側 x = -736.3m へ突出）
+      { x: -736.3, y: 7.5, z: -80, w: 1.35, h: 3.8, d: 0.25 },
+      { x: -736.3, y: 12.0, z: -35, w: 1.5, h: 4.5, d: 0.25 },
+      { x: -736.3, y: 8.2, z: 15, w: 1.2, h: 3.2, d: 0.25 },
+      { x: -736.3, y: 11.5, z: 65, w: 1.4, h: 4.2, d: 0.25 },
+      { x: -736.3, y: 9.0, z: 120, w: 1.3, h: 3.6, d: 0.25 },
+      { x: -736.3, y: 13.0, z: 175, w: 1.6, h: 4.8, d: 0.25 },
+      // 西側ビル街（並木橋〜サクラステージ〜フクラス〜道玄坂方向: 壁面 x ≈ -764.6m より道路側 x = -763.7m へ突出）
+      { x: -763.7, y: 8.0, z: -60, w: 1.3, h: 3.5, d: 0.25 },
+      { x: -763.7, y: 12.5, z: -10, w: 1.5, h: 4.6, d: 0.25 },
+      { x: -763.7, y: 7.8, z: 35, w: 1.25, h: 3.4, d: 0.25 },
+      { x: -763.7, y: 10.5, z: 90, w: 1.35, h: 4.0, d: 0.25 },
+      { x: -763.7, y: 8.5, z: 145, w: 1.4, h: 3.8, d: 0.25 },
+      { x: -763.7, y: 14.0, z: 200, w: 1.7, h: 5.0, d: 0.25 },
+    ];
+
+    const bladeGeo = new THREE.BoxGeometry(1, 1, 1);
+    const bracketArmGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.2, 8);
+    bracketArmGeo.rotateZ(Math.PI / 2);
+
+    for (let i = 0; i < meijiBladeSigns.length; i++) {
+      const s = meijiBladeSigns[i];
+      const signMat = i % 2 === 0 ? commercialMat : billboardMat;
+      const signMesh = new THREE.Mesh(bladeGeo, signMat);
+      signMesh.scale.set(s.w, s.h, s.d);
+      signMesh.position.set(s.x, s.y, s.z);
+      signMesh.userData.lodDetailTier = "medium";
+      signsGroup.add(signMesh);
+
+      const armX = s.x > -750 ? s.x + s.w * 0.45 : s.x - s.w * 0.45;
+      const armTop = new THREE.Mesh(bracketArmGeo, steelBracketMat);
+      armTop.position.set(armX, s.y + s.h * 0.35, s.z);
+      armTop.userData.lodDetailTier = "high";
+      signsGroup.add(armTop);
+
+      const armBtm = new THREE.Mesh(bracketArmGeo, steelBracketMat);
+      armBtm.position.set(armX, s.y - s.h * 0.35, s.z);
+      armBtm.userData.lodDetailTier = "high";
+      signsGroup.add(armBtm);
+    }
+
+    // 2. 渋谷スクランブル交差点・駅前広場 屋外大型LEDビジョン＆ビルボード群
+    // ストリートビューから見える実写広告・電子ビジョン
+    const crossingBillboards = [
+      // スクランブル交差点 北東向き大型屋上ビジョン
+      { x: -788.0, y: 34.0, z: 212.0, w: 16.0, h: 9.5, d: 0.8, rotY: 0.45 },
+      // スクランブル交差点 南向き（ハチ公広場正面）大型ファサードビジョン
+      { x: -822.0, y: 28.0, z: 228.0, w: 18.0, h: 10.5, d: 0.8, rotY: 0.15 },
+      // 国道246号・玉川通り 沿道大型ロードサイド看板（東行・渋谷流入車両向き）
+      { x: -725.0, y: 22.0, z: 42.0, w: 14.0, h: 7.5, d: 0.7, rotY: Math.PI / 2 },
+      // 渋谷駅東口広場・明治通り交差点 大型ビジョン
+      { x: -768.0, y: 25.0, z: 125.0, w: 15.0, h: 8.0, d: 0.7, rotY: -0.35 },
+    ];
+
+    const billboardGeo = new THREE.BoxGeometry(1, 1, 1);
+    const frameGeo = new THREE.BoxGeometry(1.02, 1.02, 1.05);
+
+    for (let i = 0; i < crossingBillboards.length; i++) {
+      const b = crossingBillboards[i];
+      const bMesh = new THREE.Mesh(billboardGeo, billboardMat);
+      bMesh.scale.set(b.w, b.h, b.d);
+      bMesh.position.set(b.x, b.y, b.z);
+      bMesh.rotation.y = b.rotY;
+      bMesh.userData.lodDetailTier = "medium";
+      signsGroup.add(bMesh);
+
+      const fMesh = new THREE.Mesh(frameGeo, steelBracketMat);
+      fMesh.scale.set(b.w * 1.02, b.h * 1.02, b.d * 1.1);
+      fMesh.position.set(b.x, b.y, b.z);
+      fMesh.rotation.y = b.rotY;
+      fMesh.userData.lodDetailTier = "high";
+      signsGroup.add(fMesh);
+    }
+
+    signsGroup.userData.isRoadInfra = true;
+    this.group.add(signsGroup);
   }
 
   /**
@@ -2473,15 +2665,19 @@ export class TokyoStationMap {
       return;
     }
 
-    // 3. 首都高速3号渋谷線 緑案内標識ボード＆ヘリポート着陸帯
+    // 3. 首都高速3号渋谷線 緑案内標識ボード（実写案内標識ストリートビューテクスチャ）
     const isShutokoGreenSign = matName.includes("ShutokoHighwayGreenSign");
     if (isShutokoGreenSign) {
-      const dayIntensity = 0.05;
-      const nightIntensity = 1.05;
-      stdMat.emissive = new THREE.Color(0x059669);
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("shutokoSign");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.08;
+      const nightIntensity = 1.15;
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
-      stdMat.roughness = 0.26;
-      stdMat.metalness = 0.15;
+      stdMat.roughness = 0.28;
+      stdMat.metalness = 0.12;
       this.shibuyaStreamEmissiveEntries.push({
         material: stdMat,
         dayIntensity,
@@ -2602,8 +2798,7 @@ export class TokyoStationMap {
     }
 
     // 9. 白アルミカーテンウォールパネル（渋谷ストリーム象徴の白い縦横千鳥ルーバーフィン）
-    const isWhiteAluminumFin =
-      matName.includes("StreamWhitePanel") || matName.includes("ShibuyaStreamFacade");
+    const isWhiteAluminumFin = matName.includes("StreamWhitePanel");
     if (isWhiteAluminumFin) {
       stdMat.roughness = 0.24;
       stdMat.metalness = 0.22;
@@ -2637,6 +2832,180 @@ export class TokyoStationMap {
       stdMat.roughness = 0.12;
       stdMat.metalness = 0.42;
       this.applyArchitecture3DTexture(stdMat, "curtain_glass");
+      return;
+    }
+
+    // 13. QFRONT 巨大湾曲LEDビジョン「Q'S EYE」＆TSUTAYA実写ストリートビューテクスチャ
+    const isQfrontMedia = matName.includes("ShibuyaQfrontMedia");
+    if (isQfrontMedia) {
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("qfront");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.35;
+      const nightIntensity = 1.65;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.14;
+      stdMat.metalness = 0.35;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "curtain_glass");
+      return;
+    }
+
+    // 14. SHIBUYA109 円筒クラウン「109」ロゴ＆ファサード実写ストリートビューテクスチャ
+    const is109Crown = matName.includes("Shibuya109Crown");
+    if (is109Crown) {
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("shibuya109");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.25;
+      const nightIntensity = 1.45;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.22;
+      stdMat.metalness = 0.38;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "anodized_metal");
+      return;
+    }
+
+    // 15. 渋谷スクランブル交差点 屋外大型LEDビジョン＆ビルボード実写ストリートビューテクスチャ
+    const isCrossingBillboard = matName.includes("ShibuyaCrossingBillboard");
+    if (isCrossingBillboard) {
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("billboards");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.45;
+      const nightIntensity = 1.85;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.15;
+      stdMat.metalness = 0.22;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "curtain_glass");
+      return;
+    }
+
+    // 16. 渋谷スクランブルスクエア 東棟超高層ファサード実写ストリートビューテクスチャ
+    const isScrambleSquareFacade = matName.includes("ShibuyaScrambleSquareFacade");
+    if (isScrambleSquareFacade) {
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("scrambleSquare");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.1;
+      const nightIntensity = 1.25;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.12;
+      stdMat.metalness = 0.45;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "curtain_glass");
+      return;
+    }
+
+    // 17. 渋谷ストリーム 水流（Stream）千鳥ルーバーファサード実写ストリートビューテクスチャ
+    const isStreamFacade = matName.includes("ShibuyaStreamFacade");
+    if (isStreamFacade) {
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("stream");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.08;
+      const nightIntensity = 1.15;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.24;
+      stdMat.metalness = 0.32;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "curtain_glass");
+      return;
+    }
+
+    // 18. MIYASHITA PARK 商業ファサード＆渋谷横丁実写ストリートビューテクスチャ
+    const isMiyashitaParkFacade = matName.includes("ShibuyaMiyashitaParkFacade");
+    if (isMiyashitaParkFacade) {
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("miyashitaPark");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.22;
+      const nightIntensity = 1.35;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.32;
+      stdMat.metalness = 0.25;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "retail_storefront");
+      return;
+    }
+
+    // 19. 明治通り・国道246号 沿道商業ビル（コンビニ・ドラッグストア・飲食店）実写ストリートビューテクスチャ
+    const isCommercialFacade = matName.includes("ShibuyaCommercialFacade");
+    if (isCommercialFacade) {
+      if (!stdMat.map) {
+        stdMat.map = shibuyaTextureManager.getTexture("commercialFacade");
+      }
+      stdMat.emissiveMap = stdMat.map;
+      stdMat.emissive = new THREE.Color(0xffffff);
+      const dayIntensity = 0.25;
+      const nightIntensity = 1.45;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.38;
+      stdMat.metalness = 0.18;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      this.applyArchitecture3DTexture(stdMat, "retail_storefront");
+      return;
+    }
+
+    // 20. 渋谷スクランブルスクエア 屋上ヘリポート着陸帯（緑色着陸パッド、道路標識ではない）
+    const isHeliportGreenPad = matName.includes("HeliportGreenPad");
+    if (isHeliportGreenPad) {
+      stdMat.color = new THREE.Color(0x065f46);
+      stdMat.roughness = 0.55;
+      stdMat.metalness = 0.08;
+      this.applyArchitecture3DTexture(stdMat, "white_granite");
+      return;
+    }
+
+    // 21. JR跨道グリーンスチール鉄道橋
+    const isJrGreenSteel = matName.includes("JRGreenSteel");
+    if (isJrGreenSteel) {
+      stdMat.color = new THREE.Color(0x0f5132);
+      stdMat.roughness = 0.45;
+      stdMat.metalness = 0.75;
+      this.applyArchitecture3DTexture(stdMat, "anodized_metal");
       return;
     }
 

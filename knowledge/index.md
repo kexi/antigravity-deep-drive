@@ -47,3 +47,4 @@ trust_signals:
 - [032-cockpit-mirrors-backface-culling-and-frame-cadence.md](./032-cockpit-mirrors-backface-culling-and-frame-cadence.md): 車内ルームミラー・左右ドアミラーの描画バジェット階層化と BMesh 法線カリング防止設計
 - [033-shibuya-shutoko-landmarks-plateau.md](./033-shibuya-shutoko-landmarks-plateau.md): 渋谷区 Project PLATEAU (13113) 都市データ拡充と首都高速3号渋谷線高架・スクランブルスクエア・ヒカリエ 3D 再現
 - [034-360-degree-convergence-review-and-visual-geometry-refinements.md](./034-360-degree-convergence-review-and-visual-geometry-refinements.md): 360度収束レビューに基づく渋谷ランドマーク幾何学・路面PBRライティング・HUDレイアウトの完全収束修正
+- [035-shibuya-street-view-photorealistic-building-textures.md](./035-shibuya-street-view-photorealistic-building-textures.md): Google マップ / ストリートビュー実写テクスチャ統合と渋谷リアル街路景観アーキテクチャ
