@@ -225,6 +225,9 @@ export class TokyoStationMap {
     // 4. 周辺高層ビル群（丸ビル、新丸ビル、大手町・丸の内オフィス群）
     this.buildSurroundingSkyscrapers(world, rapier);
 
+    // 4b. 10倍広域マップ拡張エリアの都市街並み・ビル群（原宿、恵比寿、六本木、赤坂、銀座、新橋、神田、八重洲）
+    this.buildExpandedMetropolitanDistricts(world, rapier);
+
     // 5. 街灯・街路樹・環境小物
     this.buildStreetProps(world, rapier);
 
@@ -302,9 +305,9 @@ export class TokyoStationMap {
   }
 
   private buildJapaneseRoadNetwork(world: RAPIER.World, rapier: typeof RAPIER): void {
-    // 基礎地面（2400m × 2400m）- 国土地理院 地理院タイル DEM5A (5mメッシュ標高) を反映した広域都市地形ベース
+    // 基礎地面（8000m × 8000m = 64 km²、従来の10倍以上）- 国土地理院 地理院タイル DEM5A (5mメッシュ標高) を反映した広域都市地形ベース
     // How: 道路コリドー外周の頂点Y座標に DEM5A の実測標高変位を適用し、車道領域は Rapier コライダーと一致する y=0 を維持する
-    const groundGeo = new THREE.PlaneGeometry(2400, 2400, 64, 64);
+    const groundGeo = new THREE.PlaneGeometry(8000, 8000, 96, 96);
     groundGeo.rotateX(-Math.PI / 2);
     const posAttr = groundGeo.attributes.position;
     for (let i = 0; i < posAttr.count; i++) {
@@ -326,10 +329,10 @@ export class TokyoStationMap {
     groundMesh.receiveShadow = true;
     this.group.add(groundMesh);
 
-    // 広域地面コライダー（Rapier: 2400m × 2400m, halfExtent = 1200m）
+    // 広域地面コライダー（Rapier: 8000m × 8000m, halfExtent = 4000m）
     const groundBodyDesc = rapier.RigidBodyDesc.fixed().setTranslation(0, -0.5, 0);
     const groundBody = world.createRigidBody(groundBodyDesc);
-    const groundColliderDesc = rapier.ColliderDesc.cuboid(1200, 0.5, 1200).setFriction(0.9);
+    const groundColliderDesc = rapier.ColliderDesc.cuboid(4000, 0.5, 4000).setFriction(0.9);
     const groundCollider = world.createCollider(groundColliderDesc, groundBody);
     this.registerCollider(groundCollider, false);
 
@@ -1000,6 +1003,536 @@ export class TokyoStationMap {
       this.puddleMaterials.push(...polyRes.puddleMaterials);
       this.colliders.push(...polyRes.colliders);
       this.obstacleColliderHandles.push(...polyRes.obstacleColliderHandles);
+    }
+
+    // --- K. 10倍広域マップ拡張: 渋谷南北・西側延伸大動脈（原宿・代々木・恵比寿・山手通り・神泉・駒沢通り） ---
+    // How: 渋谷エリアを東西 1600m × 南北 2200m へ大拡張し、原宿・代々木公園・恵比寿・山手通り（環状6号線）を直結する
+    // 1. 明治通り北延伸（原宿・神宮前・代々木方面）
+    for (const meijiNorth of [
+      { cz: 398.5, len: 277 }, // 宮益坂下 z=260 .. 神宮前交差点 z=537
+      { cz: 700.0, len: 274 }, // 神宮前 z=563 .. 原宿駅前交差点 z=837
+      { cz: 981.5, len: 237 }, // 原宿駅前 z=863 .. 代々木・千駄ヶ谷北端 z=1100
+    ]) {
+      addRoadSegment(
+        {
+          name: "Meiji-dori-North-Harajuku",
+          lanesPerDirection: 3,
+          laneWidth: 3.5,
+          shoulderWidth: 1.5,
+          sidewalkWidth: 4.5,
+          curbHeight: 0.15,
+          length: meijiNorth.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 50,
+        },
+        new THREE.Vector3(-750, 0.011, meijiNorth.cz),
+        0,
+      );
+    }
+
+    // 2. 明治通り南延伸（並木橋〜恵比寿駅前〜広尾方面）
+    for (const meijiSouth of [
+      { cz: -373.5, len: 327 }, // 並木橋南 z=-210 .. 渋谷橋交差点 z=-537
+      { cz: -675.0, len: 224 }, // 渋谷橋 z=-563 .. 恵比寿駅前交差点 z=-787
+      { cz: -931.5, len: 237 }, // 恵比寿駅前 z=-813 .. 広尾方面南端 z=-1050
+    ]) {
+      addRoadSegment(
+        {
+          name: "Meiji-dori-South-Ebisu",
+          lanesPerDirection: 3,
+          laneWidth: 3.5,
+          shoulderWidth: 1.5,
+          sidewalkWidth: 4.5,
+          curbHeight: 0.15,
+          length: meijiSouth.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 50,
+        },
+        new THREE.Vector3(-750, 0.011, meijiSouth.cz),
+        0,
+      );
+    }
+
+    // 3. 道玄坂上〜神泉〜山手通り（東西大通り: z = 95）
+    addRoadSegment(
+      {
+        name: "Dogenzaka-Shinsen-Connector",
+        lanesPerDirection: 2,
+        laneWidth: 3.5,
+        shoulderWidth: 1.2,
+        sidewalkWidth: 3.5,
+        curbHeight: 0.15,
+        length: 468,
+        hasYellowCenterLine: false,
+        hasWhiteDashedLines: true,
+        hasCrosswalk: true,
+        hasGuardrails: true,
+        hasManholes: true,
+        hasTrafficLights: true,
+        speedLimitSign: 50,
+      },
+      new THREE.Vector3(-1100, 0.012, 95),
+      Math.PI / 2,
+    );
+
+    // 4. 山手通り（環状6号線: x = -1350 南北縦断幹線）
+    for (const yamateSeg of [
+      { cz: -706.5, len: 287 }, // 南端 z=-850 .. 駒沢通り z=-563
+      { cz: -227.5, len: 619 }, // 駒沢通り z=-537 .. 神泉交差点 z=82
+      { cz: 322.5, len: 429 }, // 神泉 z=108 .. 富ヶ谷交差点 z=537
+      { cz: 706.5, len: 287 }, // 富ヶ谷 z=563 .. 北端 z=850
+    ]) {
+      addRoadSegment(
+        {
+          name: "Yamate-dori-Ring6",
+          lanesPerDirection: 3,
+          laneWidth: 3.5,
+          shoulderWidth: 1.5,
+          sidewalkWidth: 4.0,
+          curbHeight: 0.15,
+          length: yamateSeg.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 60,
+        },
+        new THREE.Vector3(-1350, 0.011, yamateSeg.cz),
+        0,
+      );
+    }
+
+    // 5. 恵比寿・駒沢通り（東西幹線: z = -550）
+    for (const komazawaSeg of [
+      { cx: -1050, len: 568, rot: Math.PI / 2 }, // 山手通り x=-1334 .. 明治通り x=-766
+      { cx: -650, len: 168, rot: -Math.PI / 2 }, // 明治通り x=-734 .. 外苑西通り x=-566
+    ]) {
+      addRoadSegment(
+        {
+          name: "Komazawa-dori-Ebisu",
+          lanesPerDirection: 2,
+          laneWidth: 3.5,
+          shoulderWidth: 1.2,
+          sidewalkWidth: 3.5,
+          curbHeight: 0.15,
+          length: komazawaSeg.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 50,
+        },
+        new THREE.Vector3(komazawaSeg.cx, 0.012, -550),
+        komazawaSeg.rot,
+      );
+    }
+
+    // --- L. 10倍広域マップ拡張: 青山・六本木・赤坂大動脈（六本木通り・外苑西通り・外苑東通り・青山通り本線） ---
+    // 1. 六本木通り（都道412号: z = -350, 渋谷〜西麻布〜六本木ヒルズ〜赤坂アークヒルズ〜日比谷公園）
+    for (const roppongiSeg of [
+      { cx: -465, len: 138 }, // 西麻布 x=-534 .. 六本木 x=-396
+      { cx: -280, len: 168 }, // 六本木 x=-364 .. 溜池 x=-196
+      { cx: -90, len: 148 }, // 溜池 x=-164 .. 日比谷公園 x=-16
+    ]) {
+      addRoadSegment(
+        {
+          name: "Roppongi-dori",
+          lanesPerDirection: 3,
+          laneWidth: 3.5,
+          shoulderWidth: 1.5,
+          sidewalkWidth: 4.5,
+          curbHeight: 0.15,
+          length: roppongiSeg.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 50,
+        },
+        new THREE.Vector3(roppongiSeg.cx, 0.012, -350),
+        Math.PI / 2,
+      );
+    }
+
+    // 2. 外苑西通り（キラー通り: x = -550 南北幹線）
+    for (const gaienWestSeg of [
+      { cz: -50, len: 568 }, // 西麻布 z=-334 .. 青山通り表参道 z=234
+      { cz: 400, len: 268 }, // 表参道 z=266 .. 原宿北 z=534
+    ]) {
+      addRoadSegment(
+        {
+          name: "Gaien-Nishi-dori",
+          lanesPerDirection: 2,
+          laneWidth: 3.5,
+          shoulderWidth: 1.2,
+          sidewalkWidth: 3.5,
+          curbHeight: 0.15,
+          length: gaienWestSeg.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 50,
+        },
+        new THREE.Vector3(-550, 0.011, gaienWestSeg.cz),
+        0,
+      );
+    }
+
+    // 3. 外苑東通り（x = -380 南北幹線: 六本木〜青山一丁目〜信濃町）
+    for (const gaienEastSeg of [
+      { cz: -50, len: 568 }, // 六本木 z=-334 .. 青山一丁目 z=234
+      { cz: 400, len: 268 }, // 青山一丁目 z=266 .. 信濃町方面 z=534
+    ]) {
+      addRoadSegment(
+        {
+          name: "Gaien-Higashi-dori",
+          lanesPerDirection: 2,
+          laneWidth: 3.5,
+          shoulderWidth: 1.2,
+          sidewalkWidth: 3.5,
+          curbHeight: 0.15,
+          length: gaienEastSeg.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 50,
+        },
+        new THREE.Vector3(-380, 0.011, gaienEastSeg.cz),
+        0,
+      );
+    }
+
+    // 4. 青山通り（国道246号）本線東西（z = 250: 表参道〜外苑前〜青山一丁目〜赤坂見附）
+    for (const r246Main of [
+      { cx: -465, len: 138 }, // 表参道 x=-534 .. 外苑前・青山一丁目 x=-396
+      { cx: -324, len: 80 }, // 青山一丁目 x=-364 .. 赤坂見附永代通り接続 x=-284
+    ]) {
+      addRoadSegment(
+        {
+          name: "Route-246-Aoyama-dori-Main",
+          lanesPerDirection: 3,
+          laneWidth: 3.5,
+          shoulderWidth: 1.5,
+          sidewalkWidth: 4.0,
+          curbHeight: 0.15,
+          length: r246Main.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 60,
+        },
+        new THREE.Vector3(r246Main.cx, 0.012, 250),
+        Math.PI / 2,
+      );
+    }
+
+    // --- M. 10倍広域マップ拡張: 皇居一周パノラマ大周回道路（内堀通り周回コース） ---
+    // 1. 皇居西側・内堀通り（三宅坂〜半蔵門〜イギリス大使館前: x = -350）
+    addRoadSegment(
+      {
+        name: "Uchibori-dori-West-Hanzomon",
+        lanesPerDirection: 3,
+        laneWidth: 3.5,
+        shoulderWidth: 1.5,
+        sidewalkWidth: 4.5,
+        curbHeight: 0.15,
+        length: 456,
+        hasYellowCenterLine: false,
+        hasWhiteDashedLines: true,
+        hasCrosswalk: true,
+        hasGuardrails: true,
+        hasManholes: true,
+        hasTrafficLights: true,
+        speedLimitSign: 50,
+      },
+      new THREE.Vector3(-350, 0.011, 606),
+      0,
+    );
+
+    // 2. 皇居北側・内堀通り（千鳥ヶ淵〜北の丸公園〜竹橋: z = 850）
+    addRoadSegment(
+      {
+        name: "Uchibori-dori-North-Takebashi",
+        lanesPerDirection: 3,
+        laneWidth: 3.5,
+        shoulderWidth: 1.5,
+        sidewalkWidth: 4.5,
+        curbHeight: 0.15,
+        length: 318,
+        hasYellowCenterLine: false,
+        hasWhiteDashedLines: true,
+        hasCrosswalk: true,
+        hasGuardrails: true,
+        hasManholes: true,
+        hasTrafficLights: true,
+        speedLimitSign: 50,
+      },
+      new THREE.Vector3(-175, 0.012, 850),
+      Math.PI / 2,
+    );
+
+    // 3. 皇居東側・内堀通り（竹橋〜気象庁前〜大手門・大手町: x = 0）
+    addRoadSegment(
+      {
+        name: "Uchibori-dori-East-Otemon",
+        lanesPerDirection: 3,
+        laneWidth: 3.5,
+        shoulderWidth: 1.5,
+        sidewalkWidth: 4.5,
+        curbHeight: 0.15,
+        length: 456,
+        hasYellowCenterLine: false,
+        hasWhiteDashedLines: true,
+        hasCrosswalk: true,
+        hasGuardrails: true,
+        hasManholes: true,
+        hasTrafficLights: true,
+        speedLimitSign: 50,
+      },
+      new THREE.Vector3(0, 0.011, 606),
+      0,
+    );
+
+    // --- N. 10倍広域マップ拡張: 神田・秋葉原・日本橋（北側大動脈） ---
+    // 1. 中央通り北延伸（日本橋〜神田駅前〜万世橋・秋葉原: x = 156）
+    addRoadSegment(
+      {
+        name: "Chuo-dori-North-Kanda",
+        lanesPerDirection: 2,
+        laneWidth: 3.5,
+        shoulderWidth: 1.2,
+        sidewalkWidth: 4.0,
+        curbHeight: 0.15,
+        length: 568,
+        hasYellowCenterLine: false,
+        hasWhiteDashedLines: true,
+        hasCrosswalk: true,
+        hasGuardrails: true,
+        hasManholes: true,
+        hasTrafficLights: true,
+        speedLimitSign: 40,
+      },
+      new THREE.Vector3(156, 0.011, 550),
+      0,
+    );
+
+    // 2. 昭和通り（都道316号: x = 650, 新橋〜銀座〜宝町〜日本橋〜神田〜秋葉原の片側4車線メガコリドー）
+    for (const showaSeg of [
+      { cz: -550, len: 368 }, // 新橋 z=-734 .. 晴海通り z=-366
+      { cz: -171, len: 326 }, // 晴海通り z=-334 .. 鍛冶橋通り z=-8
+      { cz: 126, len: 216 }, // 鍛冶橋通り z=18 .. 永代通り z=234
+      { cz: 550, len: 568 }, // 永代通り z=266 .. 神田・秋葉原 z=834
+    ]) {
+      addRoadSegment(
+        {
+          name: "Showa-dori-Mega-Arterial",
+          lanesPerDirection: 4,
+          laneWidth: 3.5,
+          shoulderWidth: 1.8,
+          sidewalkWidth: 5.0,
+          curbHeight: 0.15,
+          length: showaSeg.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 60,
+        },
+        new THREE.Vector3(650, 0.011, showaSeg.cz),
+        0,
+      );
+    }
+
+    // --- O. 10倍広域マップ拡張: 銀座・数寄屋橋・晴海通り・新橋・汐留（南東エリア） ---
+    // 1. 銀座中央通り（京橋〜銀座一丁目〜銀座四丁目〜新橋: x = 156）
+    for (const ginzaSeg of [
+      { cz: -170, len: 328 }, // 京橋 z=-6 .. 銀座四丁目 z=-334
+      { cz: -550, len: 368 }, // 銀座四丁目 z=-366 .. 新橋 z=-734
+    ]) {
+      addRoadSegment(
+        {
+          name: "Ginza-Chuo-dori",
+          lanesPerDirection: 2,
+          laneWidth: 3.5,
+          shoulderWidth: 1.2,
+          sidewalkWidth: 5.0,
+          curbHeight: 0.15,
+          length: ginzaSeg.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: false,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 40,
+        },
+        new THREE.Vector3(156, 0.011, ginzaSeg.cz),
+        0,
+      );
+    }
+
+    // 2. 晴海通り（日比谷公園〜数寄屋橋〜銀座四丁目〜歌舞伎座〜昭和通り: z = -350）
+    for (const harumiSeg of [
+      { cx: 78, len: 124 }, // 数寄屋橋 x=16 .. 銀座四丁目 x=140
+      { cx: 402, len: 460 }, // 銀座四丁目 x=172 .. 東銀座昭和通り x=632
+      { cx: 734, len: 132 }, // 昭和通り東 x=668 .. 勝鬨橋方面 x=800
+    ]) {
+      addRoadSegment(
+        {
+          name: "Harumi-dori-Ginza",
+          lanesPerDirection: 3,
+          laneWidth: 3.5,
+          shoulderWidth: 1.5,
+          sidewalkWidth: 4.5,
+          curbHeight: 0.15,
+          length: harumiSeg.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 50,
+        },
+        new THREE.Vector3(harumiSeg.cx, 0.012, -350),
+        Math.PI / 2,
+      );
+    }
+
+    // 3. 日比谷通り南延伸（内幸町〜新橋SL広場〜第一京浜・汐留: x = 0）
+    for (const hibiyaSouthSeg of [
+      { cz: -170, len: 328 }, // 日比谷 z=-6 .. 数寄屋橋 z=-334
+      { cz: -550, len: 368 }, // 数寄屋橋 z=-366 .. 新橋 z=-734
+      { cz: -908, len: 284 }, // 新橋 z=-766 .. 第一京浜南端 z=-1050
+    ]) {
+      addRoadSegment(
+        {
+          name: "Hibiya-dori-South-Shimbashi",
+          lanesPerDirection: 3,
+          laneWidth: 3.5,
+          shoulderWidth: 1.5,
+          sidewalkWidth: 4.5,
+          curbHeight: 0.15,
+          length: hibiyaSouthSeg.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 50,
+        },
+        new THREE.Vector3(0, 0.011, hibiyaSouthSeg.cz),
+        0,
+      );
+    }
+
+    // 4. 新橋・汐留東西大通り（虎ノ門〜新橋SL広場〜汐留シオサイト: z = -750）
+    for (const shimbashiSeg of [
+      { cx: -134, len: 236 }, // 虎ノ門 x=-252 .. 新橋 x=-16
+      { cx: 78, len: 124 }, // 新橋 x=16 .. 銀座南 x=140
+      { cx: 402, len: 460 }, // 銀座南 x=172 .. 汐留昭和通り x=632
+    ]) {
+      addRoadSegment(
+        {
+          name: "Shimbashi-Shiodome-Avenue",
+          lanesPerDirection: 3,
+          laneWidth: 3.5,
+          shoulderWidth: 1.5,
+          sidewalkWidth: 4.5,
+          curbHeight: 0.15,
+          length: shimbashiSeg.len,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasManholes: true,
+          hasTrafficLights: true,
+          speedLimitSign: 50,
+        },
+        new THREE.Vector3(shimbashiSeg.cx, 0.012, -750),
+        Math.PI / 2,
+      );
+    }
+
+    // --- P. 10倍広域マップ拡張: 新規主要交差点フラット接続パッド＆路面標示群 ---
+    const expandedIntersections: Array<{
+      x: number;
+      z: number;
+      width: number;
+      depth: number;
+      lanesX: number;
+      lanesZ: number;
+    }> = [
+      // 原宿・神宮前・代々木
+      { x: -750, z: 550, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
+      { x: -750, z: 850, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
+      // 恵比寿・渋谷橋
+      { x: -750, z: -550, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
+      { x: -750, z: -800, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
+      // 山手通り（神泉・駒沢通り・富ヶ谷）
+      { x: -1350, z: 95, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
+      { x: -1350, z: -550, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
+      { x: -1350, z: 550, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
+      // 青山・六本木・赤坂
+      { x: -550, z: -350, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 西麻布交差点
+      { x: -380, z: -350, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 六本木交差点
+      { x: -180, z: -150, width: 32, depth: 26, lanesX: 3, lanesZ: 2 }, // 赤坂・溜池
+      { x: -550, z: 250, width: 32, depth: 32, lanesX: 3, lanesZ: 3 }, // 表参道交差点
+      { x: -380, z: 250, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 青山一丁目交差点
+      // 皇居周回（三宅坂・半蔵門・竹橋）
+      { x: -350, z: 365, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 三宅坂交差点
+      { x: -350, z: 850, width: 32, depth: 32, lanesX: 3, lanesZ: 3 }, // 半蔵門・千鳥ヶ淵交差点
+      { x: 0, z: 850, width: 32, depth: 32, lanesX: 3, lanesZ: 3 }, // 竹橋交差点
+      // 銀座・数寄屋橋・晴海通り・新橋・汐留
+      { x: 0, z: -350, width: 32, depth: 32, lanesX: 3, lanesZ: 3 }, // 数寄屋橋交差点
+      { x: 156, z: -350, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 銀座四丁目交差点（世界的大交差点）
+      { x: 650, z: -350, width: 36, depth: 32, lanesX: 4, lanesZ: 3 }, // 東銀座・三原橋交差点
+      { x: 0, z: -750, width: 32, depth: 32, lanesX: 3, lanesZ: 3 }, // 新橋交差点（SL広場前）
+      { x: 650, z: -750, width: 36, depth: 32, lanesX: 4, lanesZ: 3 }, // 汐留交差点
+      // 昭和通り（鍛冶橋・永代）
+      { x: 650, z: 5, width: 36, depth: 26, lanesX: 4, lanesZ: 2 },
+      { x: 650, z: 250, width: 36, depth: 32, lanesX: 4, lanesZ: 3 },
+      // 神田・秋葉原
+      { x: 156, z: 850, width: 32, depth: 26, lanesX: 2, lanesZ: 2 },
+    ];
+    for (const expInt of expandedIntersections) {
+      addIntersectionPadAndMarkings(
+        expInt.x,
+        expInt.z,
+        expInt.width,
+        expInt.depth,
+        expInt.lanesX,
+        expInt.lanesZ,
+        true,
+      );
     }
   }
 
@@ -3715,6 +4248,682 @@ export class TokyoStationMap {
           bGroup.add(beaconMesh);
         }
       }
+
+      this.group.add(bGroup);
+      this.plateauBuildingGroups.push(bGroup);
+
+      // 物理コライダー（Rapier）
+      const bBodyDesc = rapier.RigidBodyDesc.fixed().setTranslation(b.x, b.h / 2, b.z);
+      const bBody = world.createRigidBody(bBodyDesc);
+      const bCollider = rapier.ColliderDesc.cuboid(b.w / 2, b.h / 2, b.d / 2)
+        .setFriction(0.5)
+        .setRestitution(0.1);
+      this.registerCollider(world.createCollider(bCollider, bBody), true);
+    }
+  }
+
+  /**
+   * 10倍広域マップ拡張エリアの都市街並み・ビル群を構築する
+   * 原宿・表参道、恵比寿・代官山、山手通り・神泉、六本木・赤坂、皇居周回、銀座・数寄屋橋、新橋・汐留、神田・秋葉原、八重洲東
+   * の主要街区に実在スケールの都市高層ビル群・商業施設・ランドマークタワーを配置し、遠景のビル街スカイラインを形成する。
+   */
+  private buildExpandedMetropolitanDistricts(world: RAPIER.World, rapier: typeof RAPIER): void {
+    const districts: Array<{
+      id: string;
+      name: string;
+      nameEn: string;
+      x: number;
+      z: number;
+      w: number;
+      d: number;
+      h: number;
+      usage: string;
+      mode:
+        | "curtain_glass"
+        | "white_granite"
+        | "stone_punched"
+        | "anodized_metal"
+        | "ribbon_window";
+      color: number;
+      podiumColor: number;
+    }> = [
+      // 1. 原宿・表参道エリア (harajuku-yoyogi / omotesando-aoyama-north)
+      {
+        id: "exp-bldg-harajuku-fashion-1",
+        name: "原宿ファッションプラザ",
+        nameEn: "Harajuku Fashion Plaza",
+        x: -795,
+        z: 450,
+        w: 42,
+        d: 38,
+        h: 48,
+        usage: "商業施設",
+        mode: "curtain_glass",
+        color: 0x38bdf8,
+        podiumColor: 0x1e293b,
+      },
+      {
+        id: "exp-bldg-harajuku-boutique",
+        name: "原宿ブティックタワー",
+        nameEn: "Harajuku Boutique Tower",
+        x: -705,
+        z: 480,
+        w: 36,
+        d: 34,
+        h: 56,
+        usage: "商業施設",
+        mode: "anodized_metal",
+        color: 0x94a3b8,
+        podiumColor: 0x334155,
+      },
+      {
+        id: "exp-bldg-omotesando-complex",
+        name: "表参道テラスコンプレックス",
+        nameEn: "Omotesando Terrace Complex",
+        x: -610,
+        z: 400,
+        w: 78,
+        d: 32,
+        h: 36,
+        usage: "商業施設",
+        mode: "curtain_glass",
+        color: 0x0284c7,
+        podiumColor: 0x0f172a,
+      },
+      {
+        id: "exp-bldg-omotesando-luxury",
+        name: "表参道ラグジュアリータワー",
+        nameEn: "Omotesando Luxury Tower",
+        x: -490,
+        z: 360,
+        w: 38,
+        d: 38,
+        h: 64,
+        usage: "業務施設",
+        mode: "white_granite",
+        color: 0xe2e8f0,
+        podiumColor: 0x64748b,
+      },
+      {
+        id: "exp-bldg-yoyogi-gym-tower",
+        name: "代々木パークタワー",
+        nameEn: "Yoyogi Park Tower",
+        x: -800,
+        z: 720,
+        w: 48,
+        d: 42,
+        h: 72,
+        usage: "業務施設",
+        mode: "ribbon_window",
+        color: 0x475569,
+        podiumColor: 0x1e293b,
+      },
+      {
+        id: "exp-bldg-harajuku-station-front",
+        name: "原宿駅前ゲートビル",
+        nameEn: "Harajuku Station Gate Building",
+        x: -795,
+        z: 820,
+        w: 40,
+        d: 36,
+        h: 52,
+        usage: "商業施設",
+        mode: "curtain_glass",
+        color: 0x38bdf8,
+        podiumColor: 0x0f172a,
+      },
+
+      // 2. 恵比寿・代官山エリア (ebisu-daikanyama)
+      {
+        id: "exp-bldg-ebisu-garden-tower",
+        name: "恵比寿ガーデンタワー",
+        nameEn: "Ebisu Garden Tower",
+        x: -705,
+        z: -720,
+        w: 52,
+        d: 48,
+        h: 167,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x1e293b,
+        podiumColor: 0x0f172a,
+      },
+      {
+        id: "exp-bldg-ebisu-station-front",
+        name: "恵比寿駅前ビル",
+        nameEn: "Ebisu Station Front Building",
+        x: -795,
+        z: -750,
+        w: 46,
+        d: 40,
+        h: 68,
+        usage: "商業施設",
+        mode: "anodized_metal",
+        color: 0x64748b,
+        podiumColor: 0x334155,
+      },
+      {
+        id: "exp-bldg-daikanyama-terrace",
+        name: "代官山テラスセンター",
+        nameEn: "Daikanyama Terrace Center",
+        x: -880,
+        z: -480,
+        w: 44,
+        d: 38,
+        h: 42,
+        usage: "商業施設",
+        mode: "stone_punched",
+        color: 0xd6d3d1,
+        podiumColor: 0x57534e,
+      },
+      {
+        id: "exp-bldg-ebisu-south-office",
+        name: "恵比寿サウスオフィスタワー",
+        nameEn: "Ebisu South Office Tower",
+        x: -705,
+        z: -900,
+        w: 42,
+        d: 38,
+        h: 84,
+        usage: "業務施設",
+        mode: "ribbon_window",
+        color: 0x334155,
+        podiumColor: 0x1e293b,
+      },
+
+      // 3. 山手通り・神泉・松濤エリア (shibuya-west)
+      {
+        id: "exp-bldg-shinsen-crossing",
+        name: "神泉交差点タワー",
+        nameEn: "Shinsen Crossing Tower",
+        x: -920,
+        z: 140,
+        w: 42,
+        d: 36,
+        h: 78,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x0f172a,
+        podiumColor: 0x334155,
+      },
+      {
+        id: "exp-bldg-shoto-heights",
+        name: "松濤レジデンスハイツ",
+        nameEn: "Shoto Residence Heights",
+        x: -1080,
+        z: 140,
+        w: 48,
+        d: 38,
+        h: 46,
+        usage: "共同住宅",
+        mode: "white_granite",
+        color: 0xf1f5f9,
+        podiumColor: 0x64748b,
+      },
+      {
+        id: "exp-bldg-yamate-shinsen-center",
+        name: "山手神泉センタービル",
+        nameEn: "Yamate Shinsen Center Building",
+        x: -1290,
+        z: 140,
+        w: 54,
+        d: 42,
+        h: 96,
+        usage: "業務施設",
+        mode: "anodized_metal",
+        color: 0x475569,
+        podiumColor: 0x1e293b,
+      },
+      {
+        id: "exp-bldg-yamate-komazawa-tower",
+        name: "山手駒沢タワー",
+        nameEn: "Yamate Komazawa Tower",
+        x: -1290,
+        z: -480,
+        w: 48,
+        d: 42,
+        h: 88,
+        usage: "業務施設",
+        mode: "ribbon_window",
+        color: 0x1e293b,
+        podiumColor: 0x0f172a,
+      },
+      {
+        id: "exp-bldg-yamate-tomigaya-tower",
+        name: "山手富ヶ谷タワー",
+        nameEn: "Yamate Tomigaya Tower",
+        x: -1290,
+        z: 480,
+        w: 46,
+        d: 40,
+        h: 92,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x0284c7,
+        podiumColor: 0x1e293b,
+      },
+
+      // 4. 六本木・西麻布・赤坂エリア (roppongi-nishiazabu / aoyama-east)
+      {
+        id: "exp-bldg-roppongi-hills-mori",
+        name: "六本木ヒルズ森タワー",
+        nameEn: "Roppongi Hills Mori Tower",
+        x: -380,
+        z: -420,
+        w: 68,
+        d: 62,
+        h: 238,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x0284c7,
+        podiumColor: 0x0f172a,
+      },
+      {
+        id: "exp-bldg-roppongi-grand-tower",
+        name: "六本木グランドタワー",
+        nameEn: "Roppongi Grand Tower",
+        x: -320,
+        z: -300,
+        w: 54,
+        d: 48,
+        h: 180,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x0f172a,
+        podiumColor: 0x1e293b,
+      },
+      {
+        id: "exp-bldg-nishi-azabu-crossing",
+        name: "西麻布クロッシングビル",
+        nameEn: "Nishi-Azabu Crossing Building",
+        x: -600,
+        z: -300,
+        w: 44,
+        d: 38,
+        h: 62,
+        usage: "商業施設",
+        mode: "anodized_metal",
+        color: 0x64748b,
+        podiumColor: 0x334155,
+      },
+      {
+        id: "exp-bldg-akasaka-ark-hills",
+        name: "赤坂アークヒルズタワー",
+        nameEn: "Akasaka Ark Hills Tower",
+        x: -220,
+        z: -220,
+        w: 56,
+        d: 50,
+        h: 153,
+        usage: "業務施設",
+        mode: "stone_punched",
+        color: 0x78716c,
+        podiumColor: 0x44403c,
+      },
+      {
+        id: "exp-bldg-akasaka-biz-tower",
+        name: "赤坂Bizタワー",
+        nameEn: "Akasaka Biz Tower",
+        x: -220,
+        z: 80,
+        w: 52,
+        d: 46,
+        h: 179,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x38bdf8,
+        podiumColor: 0x0f172a,
+      },
+
+      // 5. 皇居周回（半蔵門・竹橋: kokyo-west-hanzomon / kokyo-north-takebashi）
+      {
+        id: "exp-bldg-national-theater",
+        name: "国立劇場・伝統芸能館",
+        nameEn: "National Theatre of Japan",
+        x: -290,
+        z: 480,
+        w: 64,
+        d: 52,
+        h: 38,
+        usage: "文教施設",
+        mode: "stone_punched",
+        color: 0x292524,
+        podiumColor: 0x1c1917,
+      },
+      {
+        id: "exp-bldg-hanzomon-media",
+        name: "半蔵門メディアセンター",
+        nameEn: "Hanzomon Media Center",
+        x: -290,
+        z: 750,
+        w: 48,
+        d: 42,
+        h: 86,
+        usage: "業務施設",
+        mode: "white_granite",
+        color: 0xe2e8f0,
+        podiumColor: 0x475569,
+      },
+      {
+        id: "exp-bldg-palace-side-takebashi",
+        name: "パレスサイドビルディング",
+        nameEn: "Palaceside Building",
+        x: -50,
+        z: 780,
+        w: 84,
+        d: 44,
+        h: 48,
+        usage: "業務施設",
+        mode: "anodized_metal",
+        color: 0x475569,
+        podiumColor: 0x1e293b,
+      },
+      {
+        id: "exp-bldg-kanda-nishikicho-square",
+        name: "神田錦町スクエアタワー",
+        nameEn: "Kanda Nishikicho Square Tower",
+        x: 60,
+        z: 780,
+        w: 52,
+        d: 46,
+        h: 110,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x0284c7,
+        podiumColor: 0x0f172a,
+      },
+
+      // 6. 銀座・数寄屋橋・晴海通り (ginza-sukiyabashi)
+      {
+        id: "exp-bldg-ginza-wako-clock",
+        name: "銀座和光クロックビル",
+        nameEn: "Ginza Wako Clock Building",
+        x: 110,
+        z: -300,
+        w: 44,
+        d: 40,
+        h: 58,
+        usage: "商業施設",
+        mode: "white_granite",
+        color: 0xfef08a,
+        podiumColor: 0x78716c,
+      },
+      {
+        id: "exp-bldg-ginza-mitsukoshi",
+        name: "銀座三越デパートメント",
+        nameEn: "Ginza Mitsukoshi Department Store",
+        x: 198,
+        z: -300,
+        w: 56,
+        d: 48,
+        h: 54,
+        usage: "商業施設",
+        mode: "stone_punched",
+        color: 0x78716c,
+        podiumColor: 0x44403c,
+      },
+      {
+        id: "exp-bldg-sukiyabashi-plaza",
+        name: "数寄屋橋東急プラザ",
+        nameEn: "Sukiyabashi Tokyu Plaza",
+        x: -50,
+        z: -300,
+        w: 58,
+        d: 46,
+        h: 66,
+        usage: "商業施設",
+        mode: "curtain_glass",
+        color: 0x0284c7,
+        podiumColor: 0x0f172a,
+      },
+      {
+        id: "exp-bldg-kabukiza-tower",
+        name: "歌舞伎座タワー",
+        nameEn: "Kabukiza Tower",
+        x: 480,
+        z: -300,
+        w: 54,
+        d: 48,
+        h: 143,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x38bdf8,
+        podiumColor: 0x1e293b,
+      },
+
+      // 7. 新橋・汐留エリア (shimbashi-shiodome)
+      {
+        id: "exp-bldg-shiodome-dentsu-tower",
+        name: "汐留電通タワー",
+        nameEn: "Shiodome Dentsu Tower",
+        x: 480,
+        z: -820,
+        w: 62,
+        d: 54,
+        h: 213,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x0284c7,
+        podiumColor: 0x0f172a,
+      },
+      {
+        id: "exp-bldg-shiodome-nippon-tv",
+        name: "汐留日本テレビタワー",
+        nameEn: "Shiodome NTV Tower",
+        x: 400,
+        z: -700,
+        w: 54,
+        d: 48,
+        h: 192,
+        usage: "業務施設",
+        mode: "anodized_metal",
+        color: 0x334155,
+        podiumColor: 0x0f172a,
+      },
+      {
+        id: "exp-bldg-shimbashi-sl-station",
+        name: "新橋SLステーションビル",
+        nameEn: "Shimbashi SL Station Building",
+        x: 60,
+        z: -700,
+        w: 46,
+        d: 40,
+        h: 52,
+        usage: "商業施設",
+        mode: "ribbon_window",
+        color: 0x64748b,
+        podiumColor: 0x1e293b,
+      },
+      {
+        id: "exp-bldg-shimbashi-keihin-tower",
+        name: "新橋第一京浜タワー",
+        nameEn: "Shimbashi Daiichi-Keihin Tower",
+        x: 200,
+        z: -820,
+        w: 48,
+        d: 44,
+        h: 96,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x0f172a,
+        podiumColor: 0x1e293b,
+      },
+
+      // 8. 神田・秋葉原エリア (kanda-akihabara)
+      {
+        id: "exp-bldg-nihombashi-mitsukoshi-main",
+        name: "日本橋三越本店",
+        nameEn: "Nihombashi Mitsukoshi Main Store",
+        x: 110,
+        z: 320,
+        w: 62,
+        d: 52,
+        h: 42,
+        usage: "商業施設",
+        mode: "white_granite",
+        color: 0xf5f5f4,
+        podiumColor: 0x78716c,
+      },
+      {
+        id: "exp-bldg-kanda-station-tower",
+        name: "神田駅前タワー",
+        nameEn: "Kanda Station Front Tower",
+        x: 210,
+        z: 600,
+        w: 48,
+        d: 42,
+        h: 98,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x0284c7,
+        podiumColor: 0x0f172a,
+      },
+      {
+        id: "exp-bldg-akihabara-udx-cross",
+        name: "秋葉原UDXクロスタワー",
+        nameEn: "Akihabara UDX Cross Tower",
+        x: 210,
+        z: 800,
+        w: 64,
+        d: 54,
+        h: 107,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x0f172a,
+        podiumColor: 0x334155,
+      },
+
+      // 9. 八重洲・昭和通り東エリア (yaesu-showadori-east)
+      {
+        id: "exp-bldg-yaesu-midtown-tower",
+        name: "東京ミッドタウン八重洲",
+        nameEn: "Tokyo Midtown Yaesu",
+        x: 480,
+        z: 80,
+        w: 64,
+        d: 56,
+        h: 240,
+        usage: "業務施設",
+        mode: "curtain_glass",
+        color: 0x0284c7,
+        podiumColor: 0x0f172a,
+      },
+      {
+        id: "exp-bldg-takaracho-complex",
+        name: "宝町メガコンプレックス",
+        nameEn: "Takaracho Mega Complex",
+        x: 620,
+        z: -120,
+        w: 54,
+        d: 48,
+        h: 125,
+        usage: "業務施設",
+        mode: "ribbon_window",
+        color: 0x334155,
+        podiumColor: 0x1e293b,
+      },
+      {
+        id: "exp-bldg-kabutocho-financial",
+        name: "兜町フィナンシャルタワー",
+        nameEn: "Kabutocho Financial Tower",
+        x: 620,
+        z: 280,
+        w: 52,
+        d: 46,
+        h: 130,
+        usage: "業務施設",
+        mode: "anodized_metal",
+        color: 0x475569,
+        podiumColor: 0x1e293b,
+      },
+    ];
+
+    const lod2ProxyMat = shibuyaTextureManager.createPlateauLod2ProxyMaterial();
+    const beaconRedMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+
+    for (const b of districts) {
+      const bGroup = new THREE.Group();
+      bGroup.name = b.id;
+      bGroup.userData = {
+        buildingId: b.id,
+        gmlId: `13100-expanded-${b.id}`,
+        name: b.name,
+        nameEn: b.nameEn,
+        usage: b.usage,
+        measuredHeight: b.h,
+        storeysAboveGround: Math.round(b.h / 3.8),
+        groundElevationM: 0,
+        isLargeStructure: true,
+      };
+      bGroup.position.set(b.x, b.h / 2, b.z);
+
+      const podiumHeight = Math.min(28, b.h * 0.35);
+      const crownHeight = Math.min(10, Math.max(4, b.h * 0.08));
+      const towerHeight = Math.max(8, b.h - podiumHeight - crownHeight);
+
+      // 1. 低層ポディウム
+      const baseGeo = new THREE.BoxGeometry(b.w, podiumHeight, b.d);
+      const baseMat = new THREE.MeshStandardMaterial({
+        color: b.podiumColor,
+        roughness: 0.65,
+        metalness: 0.15,
+      });
+      this.applyArchitecture3DTexture(
+        baseMat,
+        b.mode === "white_granite" ? "white_granite" : "anodized_metal",
+      );
+      const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+      baseMesh.position.y = -b.h / 2 + podiumHeight / 2;
+      baseMesh.castShadow = true;
+      baseMesh.receiveShadow = true;
+      baseMesh.userData.lodDetailTier = "high";
+      bGroup.add(baseMesh);
+
+      // 2. タワー部（高層カーテンウォール / パンチング石造）
+      const towerGeo = new THREE.BoxGeometry(b.w * 0.94, towerHeight, b.d * 0.94);
+      const towerMat = new THREE.MeshStandardMaterial({
+        color: b.color,
+        roughness: b.mode === "curtain_glass" ? 0.18 : 0.55,
+        metalness: b.mode === "curtain_glass" ? 0.88 : 0.25,
+      });
+      this.applyArchitecture3DTexture(towerMat, b.mode);
+      const towerMesh = new THREE.Mesh(towerGeo, towerMat);
+      towerMesh.position.y = -b.h / 2 + podiumHeight + towerHeight / 2;
+      towerMesh.castShadow = true;
+      towerMesh.receiveShadow = true;
+      towerMesh.userData.lodDetailTier = "high";
+      bGroup.add(towerMesh);
+
+      // 3. 塔屋・クラウン
+      const crownGeo = new THREE.BoxGeometry(b.w * 0.65, crownHeight, b.d * 0.65);
+      const crownMat = new THREE.MeshStandardMaterial({
+        color: 0x334155,
+        metalness: 0.72,
+        roughness: 0.32,
+      });
+      this.applyArchitecture3DTexture(crownMat, "anodized_metal");
+      const crownMesh = new THREE.Mesh(crownGeo, crownMat);
+      crownMesh.position.y = b.h / 2 - crownHeight / 2;
+      crownMesh.userData.lodDetailTier = "medium";
+      bGroup.add(crownMesh);
+
+      // 4. 超高層ビル (h >= 60m) の航空障害灯
+      if (b.h >= 60) {
+        const beaconGeo = new THREE.SphereGeometry(0.7, 8, 8);
+        const beaconMesh = new THREE.Mesh(beaconGeo, beaconRedMat);
+        beaconMesh.position.set(0, b.h / 2 + 0.5, 0);
+        beaconMesh.userData.lodDetailTier = "medium";
+        bGroup.add(beaconMesh);
+      }
+
+      // 5. 遠距離用軽量プロキシメッシュ（LOD2）
+      const proxyGeo = new THREE.BoxGeometry(b.w, b.h, b.d);
+      const proxyMesh = new THREE.Mesh(proxyGeo, lod2ProxyMat);
+      proxyMesh.position.set(0, 0, 0);
+      proxyMesh.visible = false;
+      proxyMesh.userData.isLodProxyMesh = true;
+      proxyMesh.userData.lodDetailTier = "low";
+      bGroup.add(proxyMesh);
 
       this.group.add(bGroup);
       this.plateauBuildingGroups.push(bGroup);

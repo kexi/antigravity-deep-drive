@@ -62,7 +62,7 @@ export class CameraController {
     const safeAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 16 / 9;
     this.currentAspect = safeAspect;
     const initialFov = this.computeResponsiveFov(safeAspect);
-    this.camera = new THREE.PerspectiveCamera(initialFov, safeAspect, 0.1, 1200);
+    this.camera = new THREE.PerspectiveCamera(initialFov, safeAspect, 0.1, 2600);
   }
 
   /**

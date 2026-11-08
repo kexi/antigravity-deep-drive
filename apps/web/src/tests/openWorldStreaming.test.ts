@@ -14,8 +14,8 @@ import { TokyoStationMap } from "../city/tokyoStationMap";
 import { RoadProps } from "../roads/roadProps";
 
 describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
-  it("全9つの空間チャンクが渋谷・青山通り・大手町・丸の内・皇居外苑・有楽町を隙間なく網羅し、現在座標から適切なチャンクIDを解決できることを保証する", () => {
-    expect(WORLD_CHUNK_DEFINITIONS.length).toBe(9);
+  it("全20の空間チャンクが10倍広域マップ（渋谷・原宿・恵比寿・山手通り・青山・六本木・大手町・丸の内・皇居周回・有楽町・銀座・新橋・神田・八重洲）を隙間なく網羅し、現在座標から適切なチャンクIDを解決できることを保証する", () => {
+    expect(WORLD_CHUNK_DEFINITIONS.length).toBe(20);
 
     // 渋谷ストリーム周辺
     expect(resolveChunkIdAtPosition(-750, 12)).toBe("shibuya-core");
@@ -35,6 +35,30 @@ describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
     expect(resolveChunkIdAtPosition(0, 320)).toBe("kokyo-north");
     // 有楽町・八重洲東
     expect(resolveChunkIdAtPosition(220, 180)).toBe("yurakucho-east");
+
+    // 10倍広域マップ拡張チャンク
+    // 渋谷西・神泉・山手通り
+    expect(resolveChunkIdAtPosition(-1250, 50)).toBe("shibuya-west");
+    // 原宿・代々木
+    expect(resolveChunkIdAtPosition(-750, 600)).toBe("harajuku-yoyogi");
+    // 恵比寿・代官山
+    expect(resolveChunkIdAtPosition(-750, -600)).toBe("ebisu-daikanyama");
+    // 六本木通り・西麻布
+    expect(resolveChunkIdAtPosition(-380, -350)).toBe("roppongi-nishiazabu");
+    // 表参道北・外苑前
+    expect(resolveChunkIdAtPosition(-450, 500)).toBe("omotesando-aoyama-north");
+    // 皇居西・半蔵門・三宅坂
+    expect(resolveChunkIdAtPosition(-250, 600)).toBe("kokyo-west-hanzomon");
+    // 皇居北・竹橋
+    expect(resolveChunkIdAtPosition(0, 700)).toBe("kokyo-north-takebashi");
+    // 神田・秋葉原
+    expect(resolveChunkIdAtPosition(350, 600)).toBe("kanda-akihabara");
+    // 銀座・数寄屋橋・晴海通り
+    expect(resolveChunkIdAtPosition(156, -350)).toBe("ginza-sukiyabashi");
+    // 新橋・汐留
+    expect(resolveChunkIdAtPosition(156, -750)).toBe("shimbashi-shiodome");
+    // 八重洲東・昭和通り
+    expect(resolveChunkIdAtPosition(700, 0)).toBe("yaesu-showadori-east");
   });
 
   it("チャンク境界ボックス（AABB）への最短距離が正しく計算されることを保証する", () => {

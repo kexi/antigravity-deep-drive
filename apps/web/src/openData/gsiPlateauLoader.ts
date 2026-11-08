@@ -899,9 +899,22 @@ export function getRelativeTerrainDisplacement(x: number, z: number): number {
   const isNearHibiyaDori = Math.abs(z - 250) < 26 && Math.abs(x) < 500;
   const isNearUchiboriDori = Math.abs(z - 365) < 42 && Math.abs(x) < 500;
   const isNearKokyoGaienCurve = Math.abs(x) < 135 && z >= 250 && z <= 405;
-  const isNearShibuyaMeijiDori = Math.abs(x - -750) < 75 && z > -350 && z < 350;
-  const isNearShibuyaRoute246 = Math.abs(z - 95) < 58 && x >= -880 && x <= 30;
-  const isNearShibuyaUrbanGrid = x >= -885 && x <= -620 && z >= -230 && z <= 230;
+  const isNearShibuyaMeijiDori = Math.abs(x - -750) < 75 && z > -1050 && z < 1150;
+  const isNearShibuyaRoute246 = Math.abs(z - 95) < 58 && x >= -1450 && x <= 30;
+  const isNearShibuyaUrbanGrid = x >= -1450 && x <= -620 && z >= -1050 && z <= 1050;
+  // 10倍拡張エリアの主要大動脈（六本木通り、晴海通り、銀座中央通り、昭和通り、山手通り、皇居一周道路等）
+  const isNearRoppongiDori = Math.abs(z - -350) < 40 && x >= -750 && x <= -120;
+  const isNearHarumiDori = Math.abs(z - -350) < 36 && x >= -200 && x <= 800;
+  const isNearGinzaChuoDori = Math.abs(x - 156) < 32 && z >= -850 && z <= 5;
+  const isNearShowaDori = Math.abs(x - 550) < 42 && z >= -850 && z <= 1050;
+  const isNearYamateDori = Math.abs(x - -1350) < 42 && z >= -1050 && z <= 1050;
+  const isNearKokyoLoopWest = Math.abs(x - -350) < 38 && z >= 340 && z <= 900;
+  const isNearKokyoLoopNorth = Math.abs(z - 850) < 38 && x >= -380 && x <= 50;
+  const isNearShimbashiAvenue = Math.abs(z - -750) < 36 && x >= -300 && x <= 650;
+  const isNearKandaChuoDori = Math.abs(x - 156) < 32 && z >= 250 && z <= 1050;
+  const isNearHibiyaSouthNorth = Math.abs(x) < 36 && z >= -1050 && z <= 1050;
+  const isNearGaienWestEast =
+    (Math.abs(x - -550) < 32 || Math.abs(x - -380) < 32) && z >= -600 && z <= 800;
   const isOnRoadCorridor =
     isNearGyokoDori ||
     isNearMarunouchiSideStreets ||
@@ -914,7 +927,18 @@ export function getRelativeTerrainDisplacement(x: number, z: number): number {
     isNearKokyoGaienCurve ||
     isNearShibuyaMeijiDori ||
     isNearShibuyaRoute246 ||
-    isNearShibuyaUrbanGrid;
+    isNearShibuyaUrbanGrid ||
+    isNearRoppongiDori ||
+    isNearHarumiDori ||
+    isNearGinzaChuoDori ||
+    isNearShowaDori ||
+    isNearYamateDori ||
+    isNearKokyoLoopWest ||
+    isNearKokyoLoopNorth ||
+    isNearShimbashiAvenue ||
+    isNearKandaChuoDori ||
+    isNearHibiyaSouthNorth ||
+    isNearGaienWestEast;
 
   if (isOnRoadCorridor) {
     return 0;
@@ -1604,6 +1628,127 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
       { x: -268, z: 95 },
     ],
   },
+  // 10倍広域マップ拡張幹線道路
+  {
+    id: "nav-road-meiji-dori-north",
+    displayName: "明治通り北（原宿・代々木方面）",
+    routeCode: "都道305号",
+    category: "major_avenue",
+    widthMeters: 22.0,
+    hasMedianLine: true,
+    points: [
+      { x: -750, z: 248 },
+      { x: -750, z: 1050 },
+    ],
+  },
+  {
+    id: "nav-road-meiji-dori-south",
+    displayName: "明治通り南（恵比寿・広尾方面）",
+    routeCode: "都道305号",
+    category: "major_avenue",
+    widthMeters: 22.0,
+    hasMedianLine: true,
+    points: [
+      { x: -750, z: -1050 },
+      { x: -750, z: -200 },
+    ],
+  },
+  {
+    id: "nav-road-yamate-dori",
+    displayName: "山手通り（環状6号線）",
+    routeCode: "都道317号",
+    category: "major_avenue",
+    widthMeters: 24.0,
+    hasMedianLine: true,
+    points: [
+      { x: -1350, z: -850 },
+      { x: -1350, z: 850 },
+    ],
+  },
+  {
+    id: "nav-road-roppongi-dori",
+    displayName: "六本木通り（渋谷〜六本木〜赤坂）",
+    routeCode: "都道412号",
+    category: "major_avenue",
+    widthMeters: 22.0,
+    hasMedianLine: true,
+    points: [
+      { x: -600, z: -350 },
+      { x: 0, z: -350 },
+    ],
+  },
+  {
+    id: "nav-road-harumi-dori",
+    displayName: "晴海通り（数寄屋橋〜銀座四丁目〜東銀座）",
+    routeCode: "都道304号",
+    category: "major_avenue",
+    widthMeters: 22.0,
+    hasMedianLine: true,
+    points: [
+      { x: 0, z: -350 },
+      { x: 800, z: -350 },
+    ],
+  },
+  {
+    id: "nav-road-ginza-chuo-dori",
+    displayName: "銀座中央通り（銀座一丁目〜銀座八丁目）",
+    routeCode: "国道15号",
+    category: "major_avenue",
+    widthMeters: 18.0,
+    hasMedianLine: true,
+    points: [
+      { x: 156, z: -750 },
+      { x: 156, z: -90 },
+    ],
+  },
+  {
+    id: "nav-road-showa-dori",
+    displayName: "昭和通り（新橋〜銀座〜宝町〜日本橋〜神田）",
+    routeCode: "都道316号",
+    category: "national_highway",
+    widthMeters: 28.0,
+    hasMedianLine: true,
+    points: [
+      { x: 650, z: -750 },
+      { x: 650, z: 850 },
+    ],
+  },
+  {
+    id: "nav-road-uchibori-loop-west",
+    displayName: "内堀通り西（三宅坂〜半蔵門〜千鳥ヶ淵）",
+    routeCode: "都道301号",
+    category: "major_avenue",
+    widthMeters: 22.0,
+    hasMedianLine: true,
+    points: [
+      { x: -350, z: 365 },
+      { x: -350, z: 850 },
+    ],
+  },
+  {
+    id: "nav-road-uchibori-loop-north",
+    displayName: "内堀通り北（千鳥ヶ淵〜竹橋）",
+    routeCode: "都道301号",
+    category: "major_avenue",
+    widthMeters: 22.0,
+    hasMedianLine: true,
+    points: [
+      { x: -350, z: 850 },
+      { x: 0, z: 850 },
+    ],
+  },
+  {
+    id: "nav-road-shimbashi-avenue",
+    displayName: "新橋・汐留大通り（虎ノ門〜新橋〜汐留）",
+    routeCode: "都道405号",
+    category: "major_avenue",
+    widthMeters: 22.0,
+    hasMedianLine: true,
+    points: [
+      { x: -268, z: -750 },
+      { x: 550, z: -750 },
+    ],
+  },
 ];
 
 const NAVIGATION_INTERSECTIONS: ReadonlyArray<NavigationIntersectionSpec> = [
@@ -1786,6 +1931,135 @@ const NAVIGATION_INTERSECTIONS: ReadonlyArray<NavigationIntersectionSpec> = [
     z: 248,
     widthMeters: 18,
     depthMeters: 16,
+  },
+  // 10倍広域マップ拡張主要交差点
+  {
+    id: "nav-int-jingumae",
+    name: "神宮前",
+    x: -750,
+    z: 550,
+    widthMeters: 28,
+    depthMeters: 24,
+  },
+  {
+    id: "nav-int-harajuku-station",
+    name: "原宿駅前",
+    x: -750,
+    z: 850,
+    widthMeters: 28,
+    depthMeters: 24,
+  },
+  {
+    id: "nav-int-shibuyabashi",
+    name: "渋谷橋",
+    x: -750,
+    z: -550,
+    widthMeters: 28,
+    depthMeters: 24,
+  },
+  {
+    id: "nav-int-ebisu-station",
+    name: "恵比寿駅前",
+    x: -750,
+    z: -800,
+    widthMeters: 28,
+    depthMeters: 24,
+  },
+  {
+    id: "nav-int-nishi-azabu",
+    name: "西麻布",
+    x: -550,
+    z: -350,
+    widthMeters: 30,
+    depthMeters: 30,
+  },
+  {
+    id: "nav-int-roppongi",
+    name: "六本木",
+    x: -380,
+    z: -350,
+    widthMeters: 30,
+    depthMeters: 30,
+  },
+  {
+    id: "nav-int-omotesando",
+    name: "表参道",
+    x: -550,
+    z: 250,
+    widthMeters: 30,
+    depthMeters: 30,
+  },
+  {
+    id: "nav-int-aoyama-itchome",
+    name: "青山一丁目",
+    x: -380,
+    z: 250,
+    widthMeters: 30,
+    depthMeters: 28,
+  },
+  {
+    id: "nav-int-miyakezaka",
+    name: "三宅坂",
+    x: -350,
+    z: 365,
+    widthMeters: 30,
+    depthMeters: 28,
+  },
+  {
+    id: "nav-int-hanzomon",
+    name: "半蔵門",
+    x: -350,
+    z: 850,
+    widthMeters: 30,
+    depthMeters: 30,
+  },
+  {
+    id: "nav-int-takebashi",
+    name: "竹橋",
+    x: 0,
+    z: 850,
+    widthMeters: 30,
+    depthMeters: 30,
+  },
+  {
+    id: "nav-int-sukiyabashi",
+    name: "数寄屋橋",
+    x: 0,
+    z: -350,
+    widthMeters: 30,
+    depthMeters: 30,
+  },
+  {
+    id: "nav-int-ginza-4chome",
+    name: "銀座四丁目",
+    x: 156,
+    z: -350,
+    widthMeters: 32,
+    depthMeters: 30,
+  },
+  {
+    id: "nav-int-shimbashi",
+    name: "新橋",
+    x: 0,
+    z: -750,
+    widthMeters: 30,
+    depthMeters: 30,
+  },
+  {
+    id: "nav-int-shiodome",
+    name: "汐留",
+    x: 650,
+    z: -750,
+    widthMeters: 32,
+    depthMeters: 30,
+  },
+  {
+    id: "nav-int-yamate-shinsen",
+    name: "山手神泉",
+    x: -1350,
+    z: 95,
+    widthMeters: 30,
+    depthMeters: 26,
   },
 ];
 

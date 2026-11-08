@@ -10,12 +10,23 @@ export type WorldChunkId =
   | "shibuya-core"
   | "shibuya-south"
   | "shibuya-north"
+  | "shibuya-west"
+  | "harajuku-yoyogi"
+  | "ebisu-daikanyama"
   | "aoyama-west"
   | "aoyama-east"
+  | "roppongi-nishiazabu"
+  | "omotesando-aoyama-north"
   | "otemachi-west"
   | "marunouchi-core"
   | "kokyo-north"
-  | "yurakucho-east";
+  | "kokyo-west-hanzomon"
+  | "kokyo-north-takebashi"
+  | "kanda-akihabara"
+  | "yurakucho-east"
+  | "ginza-sukiyabashi"
+  | "shimbashi-shiodome"
+  | "yaesu-showadori-east";
 
 /**
  * チャンクのライフサイクル状態
@@ -268,6 +279,149 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     centerZ: 120,
     bounds: { minX: 125, maxX: 520, minZ: -200, maxZ: 460 },
     estimatedMemoryMb: 22,
+    associatedGlbModelIds: ["street_tree"],
+    isPrimaryHub: false,
+  },
+  {
+    id: "shibuya-west",
+    nameJa: "渋谷西・松濤・神泉・山手通り",
+    nameEn: "Shibuya West, Shoto, Shinsen & Yamate-dori",
+    nameZh: "涩谷西・松涛・神泉・山手通",
+    zone: "shibuya",
+    centerX: -1260,
+    centerZ: 0,
+    bounds: { minX: -1600, maxX: -920, minZ: -320, maxZ: 320 },
+    estimatedMemoryMb: 16,
+    associatedGlbModelIds: ["street_tree"],
+    isPrimaryHub: false,
+  },
+  {
+    id: "harajuku-yoyogi",
+    nameJa: "原宿・明治通り北・表参道・代々木",
+    nameEn: "Harajuku, Meiji-dori North, Omotesando & Yoyogi",
+    nameZh: "原宿・明治通北・表参道・代代木",
+    zone: "shibuya",
+    centerX: -1100,
+    centerZ: 760,
+    bounds: { minX: -1600, maxX: -610, minZ: 320, maxZ: 1200 },
+    estimatedMemoryMb: 20,
+    associatedGlbModelIds: ["street_tree"],
+    isPrimaryHub: false,
+  },
+  {
+    id: "ebisu-daikanyama",
+    nameJa: "恵比寿・明治通り南・代官山・並木橋南",
+    nameEn: "Ebisu, Meiji-dori South, Daikanyama & Hiroo",
+    nameZh: "惠比寿・明治通南・代官山・广尾",
+    zone: "shibuya",
+    centerX: -1100,
+    centerZ: -760,
+    bounds: { minX: -1600, maxX: -610, minZ: -1200, maxZ: -320 },
+    estimatedMemoryMb: 18,
+    associatedGlbModelIds: ["street_tree"],
+    isPrimaryHub: false,
+  },
+  {
+    id: "roppongi-nishiazabu",
+    nameJa: "六本木通り・西麻布・六本木ヒルズ",
+    nameEn: "Roppongi-dori, Nishi-Azabu & Roppongi Hills",
+    nameZh: "六本木通・西麻布・六本木之丘",
+    zone: "corridor",
+    centerX: -365,
+    centerZ: -530,
+    bounds: { minX: -610, maxX: -120, minZ: -900, maxZ: -260 },
+    estimatedMemoryMb: 24,
+    associatedGlbModelIds: ["street_tree"],
+    isPrimaryHub: false,
+  },
+  {
+    id: "omotesando-aoyama-north",
+    nameJa: "表参道北・外苑前・神宮外苑・キラー通り",
+    nameEn: "Omotesando North, Gaienmae & Jingu Gaien",
+    nameZh: "表参道北・外苑前・神宫外苑",
+    zone: "corridor",
+    centerX: -465,
+    centerZ: 770,
+    bounds: { minX: -610, maxX: -320, minZ: 340, maxZ: 1200 },
+    estimatedMemoryMb: 18,
+    associatedGlbModelIds: ["street_tree"],
+    isPrimaryHub: false,
+  },
+  {
+    id: "kokyo-west-hanzomon",
+    nameJa: "皇居西・半蔵門・三宅坂・千鳥ヶ淵",
+    nameEn: "Imperial Palace West, Hanzomon & Chidorigafuchi",
+    nameZh: "皇居西・半藏门・三宅坂・千鸟渊",
+    zone: "tokyo",
+    centerX: -220,
+    centerZ: 810,
+    bounds: { minX: -320, maxX: -120, minZ: 420, maxZ: 1200 },
+    estimatedMemoryMb: 20,
+    associatedGlbModelIds: ["street_tree"],
+    isPrimaryHub: false,
+  },
+  {
+    id: "kokyo-north-takebashi",
+    nameJa: "皇居北・竹橋・北の丸公園・神田錦町",
+    nameEn: "Imperial Palace North, Takebashi & Kanda-Nishikicho",
+    nameZh: "皇居北・竹桥・北之丸公园・神田锦町",
+    zone: "tokyo",
+    centerX: 0,
+    centerZ: 830,
+    bounds: { minX: -120, maxX: 125, minZ: 460, maxZ: 1200 },
+    estimatedMemoryMb: 20,
+    associatedGlbModelIds: ["street_tree"],
+    isPrimaryHub: false,
+  },
+  {
+    id: "kanda-akihabara",
+    nameJa: "神田・秋葉原・日本橋本石町・万世橋",
+    nameEn: "Kanda, Akihabara, Nihombashi-Honcho & Manseibashi",
+    nameZh: "神田・秋叶原・日本桥本町・万世桥",
+    zone: "tokyo",
+    centerX: 385,
+    centerZ: 830,
+    bounds: { minX: 125, maxX: 1200, minZ: 460, maxZ: 1200 },
+    estimatedMemoryMb: 22,
+    associatedGlbModelIds: ["street_tree"],
+    isPrimaryHub: false,
+  },
+  {
+    id: "ginza-sukiyabashi",
+    nameJa: "銀座中央通り・晴海通り・数寄屋橋交差点",
+    nameEn: "Ginza Chuo-dori, Harumi-dori & Sukiyabashi",
+    nameZh: "银座中央通・晴海通・数寄屋桥",
+    zone: "tokyo",
+    centerX: 200,
+    centerZ: -425,
+    bounds: { minX: -120, maxX: 520, minZ: -650, maxZ: -200 },
+    estimatedMemoryMb: 24,
+    associatedGlbModelIds: ["street_tree"],
+    isPrimaryHub: false,
+  },
+  {
+    id: "shimbashi-shiodome",
+    nameJa: "新橋・SL広場・汐留シオサイト・第一京浜",
+    nameEn: "Shimbashi, SL Plaza, Shiodome Sio-Site & Route 15",
+    nameZh: "新桥・SL广场・汐留・第一京滨",
+    zone: "tokyo",
+    centerX: 200,
+    centerZ: -925,
+    bounds: { minX: -120, maxX: 520, minZ: -1200, maxZ: -650 },
+    estimatedMemoryMb: 22,
+    associatedGlbModelIds: ["street_tree"],
+    isPrimaryHub: false,
+  },
+  {
+    id: "yaesu-showadori-east",
+    nameJa: "八重洲東・昭和通り・宝町・日本橋兜町",
+    nameEn: "Yaesu East, Showa-dori, Takaracho & Kabutocho",
+    nameZh: "八重洲东・昭和通・宝町・日本桥兜町",
+    zone: "tokyo",
+    centerX: 860,
+    centerZ: -95,
+    bounds: { minX: 520, maxX: 1200, minZ: -650, maxZ: 460 },
+    estimatedMemoryMb: 20,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
   },

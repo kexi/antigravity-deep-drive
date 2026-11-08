@@ -1856,6 +1856,10 @@ export function getNavigationMapLabels(
         { text: "Shibuya River", x: -726, z: -85, color: "#7dd3fc" },
         { text: "Meiji-dori Ave", x: -750, z: 30, color: "#86efac" },
         { text: "Route 246 (Aoyama)", x: -660, z: 95, color: "#86efac" },
+        { text: "Harajuku / Omotesando", x: -750, z: 550, color: "#f472b6" },
+        { text: "Ebisu Station", x: -750, z: -800, color: "#fb923c" },
+        { text: "Yamate-dori (Ring 6)", x: -1350, z: 95, color: "#60a5fa" },
+        { text: "Roppongi Hills", x: -380, z: -420, color: "#38bdf8" },
       ];
     }
     const isChinese = locale === "zh";
@@ -1871,6 +1875,10 @@ export function getNavigationMapLabels(
         { text: "涩谷川步道", x: -726, z: -85, color: "#7dd3fc" },
         { text: "明治通", x: -750, z: 30, color: "#86efac" },
         { text: "国道246号 (青山通)", x: -660, z: 95, color: "#86efac" },
+        { text: "原宿・表参道", x: -750, z: 550, color: "#f472b6" },
+        { text: "惠比寿站", x: -750, z: -800, color: "#fb923c" },
+        { text: "山手通 (环状6号)", x: -1350, z: 95, color: "#60a5fa" },
+        { text: "六本木之丘", x: -380, z: -420, color: "#38bdf8" },
       ];
     }
     return [
@@ -1884,6 +1892,10 @@ export function getNavigationMapLabels(
       { text: "渋谷川プロムナード", x: -726, z: -85, color: "#7dd3fc" },
       { text: "明治通り", x: -750, z: 30, color: "#86efac" },
       { text: "国道246号 (青山通り)", x: -660, z: 95, color: "#86efac" },
+      { text: "原宿・表参道", x: -750, z: 550, color: "#f472b6" },
+      { text: "恵比寿駅", x: -750, z: -800, color: "#fb923c" },
+      { text: "山手通り (環状6号)", x: -1350, z: 95, color: "#60a5fa" },
+      { text: "六本木ヒルズ", x: -380, z: -420, color: "#38bdf8" },
     ];
   }
 
@@ -1898,6 +1910,12 @@ export function getNavigationMapLabels(
       { text: "Uchibori / Imperial Plz", x: 0, z: 365, color: "#86efac" },
       { text: "Otemachi / Eitai Ave", x: -268, z: 165, color: "#93c5fd" },
       { text: "Yurakucho / Babasakimon", x: 270, z: 250, color: "#93c5fd" },
+      { text: "Ginza 4-chome / Wako", x: 156, z: -350, color: "#fbbf24" },
+      { text: "Shimbashi SL Plaza", x: 0, z: -750, color: "#fb923c" },
+      { text: "Shiodome Sio-Site", x: 550, z: -750, color: "#38bdf8" },
+      { text: "Chidorigafuchi / Hanzomon", x: -350, z: 850, color: "#4ade80" },
+      { text: "Kanda / Akihabara", x: 156, z: 850, color: "#c084fc" },
+      { text: "Showa-dori Mega Ave", x: 550, z: 0, color: "#94a3b8" },
     ];
   }
   const isChinese = locale === "zh";
@@ -1911,6 +1929,12 @@ export function getNavigationMapLabels(
       { text: "内堀通・皇居外苑", x: 0, z: 365, color: "#86efac" },
       { text: "大手町・永代通", x: -268, z: 165, color: "#93c5fd" },
       { text: "有乐町・马场先门", x: 270, z: 250, color: "#93c5fd" },
+      { text: "银座四丁目 (和光)", x: 156, z: -350, color: "#fbbf24" },
+      { text: "新桥SL广场", x: 0, z: -750, color: "#fb923c" },
+      { text: "汐留Sio-Site", x: 550, z: -750, color: "#38bdf8" },
+      { text: "千鸟渊・半藏门", x: -350, z: 850, color: "#4ade80" },
+      { text: "神田・秋叶原", x: 156, z: 850, color: "#c084fc" },
+      { text: "昭和通", x: 550, z: 0, color: "#94a3b8" },
     ];
   }
   return [
@@ -1922,6 +1946,12 @@ export function getNavigationMapLabels(
     { text: "内堀通り・皇居外苑", x: 0, z: 365, color: "#86efac" },
     { text: "大手町・永代通り", x: -268, z: 165, color: "#93c5fd" },
     { text: "有楽町・馬場先門", x: 270, z: 250, color: "#93c5fd" },
+    { text: "銀座四丁目 (和光)", x: 156, z: -350, color: "#fbbf24" },
+    { text: "新橋SL広場", x: 0, z: -750, color: "#fb923c" },
+    { text: "汐留シオサイト", x: 550, z: -750, color: "#38bdf8" },
+    { text: "千鳥ヶ淵・半蔵門", x: -350, z: 850, color: "#4ade80" },
+    { text: "神田・秋葉原", x: 156, z: 850, color: "#c084fc" },
+    { text: "昭和通り", x: 550, z: 0, color: "#94a3b8" },
   ];
 }
 
