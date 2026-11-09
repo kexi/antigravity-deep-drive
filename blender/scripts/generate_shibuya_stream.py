@@ -3606,8 +3606,360 @@ def build_shibuya_toei_plaza_bic_camera(
     return obj
 
 
+def build_shibuya_cerulean_tower(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    セルリアンタワー（Cerulean Tower Tokyu Hotel, 実寸 184.0m / 地上41階）
+    Three.js ワールド座標 (x=-898.0, z=-45.0) -> Blender 座標 (bx=-30.0, by=-203.0)
+    1. 低層ホテルポディウム・車寄せキャノピー・大宴会場 (Z = 0m..32m)
+    2. 中高層オフィスタワー＆東急ホテル客室階 (Z = 32m..170m) - 特徴的な三角形扇状セットバック平面とカーテンウォール
+    3. 屋上クラウン・ヘリポート（HeliportGreenPad + 白色Hマーク）＆航空障害灯 (Z = 170m..184m)
+    """
+    mesh = bpy.data.meshes.new("ShibuyaCerulean_TowerMesh")
+    bm = bmesh.new()
+
+    cx = -30.0  # worldZ = -45.0
+    cy = -203.0  # worldX = -898.0
+    w_x = 48.0
+    d_y = 48.0
+
+    # 1. 低層ポディウム・ホテルロビー (Z = 0m..32m)
+    add_box(
+        bm,
+        center=Vector((cx, cy, 16.0)),
+        size=Vector((w_x + 12.0, d_y + 10.0, 32.0)),
+        mat_idx=8,  # ShutokoConcretePier
+    )
+    # ホテル車寄せエントランスキャノピー
+    add_box(
+        bm,
+        center=Vector((cx, cy - d_y * 0.5 - 5.0, 6.5)),
+        size=Vector((w_x * 0.65, 12.0, 1.8)),
+        mat_idx=2,  # StreamDarkVoidSteel
+    )
+    # キャノピー支柱
+    for c_x in [cx - w_x * 0.28, cx + w_x * 0.28]:
+        add_cylinder_z(
+            bm,
+            center=Vector((c_x, cy - d_y * 0.5 - 10.0, 3.25)),
+            radius=0.55,
+            height=6.5,
+            segments=12,
+            mat_idx=2,
+        )
+    # 1F〜3F 暖色エントランスロビー窓
+    add_box(
+        bm,
+        center=Vector((cx, cy - d_y * 0.5 - 0.2, 8.0)),
+        size=Vector((w_x * 0.7, 1.2, 10.0)),
+        mat_idx=6,  # WarmPlazaGlow
+    )
+
+    # 2. 中高層タワー（6F〜40F, Z = 32m..170m）
+    tower_height = 138.0
+    add_box(
+        bm,
+        center=Vector((cx, cy, 32.0 + tower_height * 0.5)),
+        size=Vector((w_x, d_y, tower_height)),
+        mat_idx=1,  # StreamCurtainGlass
+    )
+    # 水平アルミフィン・バンド
+    for band_z in range(36, 170, 7):
+        add_box(
+            bm,
+            center=Vector((cx, cy, float(band_z))),
+            size=Vector((w_x + 0.6, d_y + 0.6, 0.85)),
+            mat_idx=0,  # StreamWhitePanel
+        )
+    # 垂直シャープマリオン
+    for m_x in [cx - w_x * 0.48, cx, cx + w_x * 0.48]:
+        for m_y in [cy - d_y * 0.48, cy + d_y * 0.48]:
+            add_box(
+                bm,
+                center=Vector((m_x, m_y, 32.0 + tower_height * 0.5)),
+                size=Vector((1.1, 1.1, tower_height)),
+                mat_idx=2,  # StreamDarkVoidSteel
+            )
+
+    # 3. 屋上ペントハウス・ヘリポート＆クラウン (Z = 170m..184m)
+    add_box(
+        bm,
+        center=Vector((cx, cy, 174.0)),
+        size=Vector((w_x * 0.65, d_y * 0.65, 8.0)),
+        mat_idx=8,
+    )
+    # 屋上ヘリポート着陸帯（HeliportGreenPad）
+    add_box(
+        bm,
+        center=Vector((cx, cy, 178.6)),
+        size=Vector((18.0, 18.0, 1.2)),
+        mat_idx=21,  # HeliportGreenPad
+    )
+    # ヘリポート白色Hマーク
+    add_box(
+        bm,
+        center=Vector((cx - 3.2, cy, 179.3)),
+        size=Vector((1.2, 7.5, 0.2)),
+        mat_idx=0,  # StreamWhitePanel
+    )
+    add_box(
+        bm,
+        center=Vector((cx + 3.2, cy, 179.3)),
+        size=Vector((1.2, 7.5, 0.2)),
+        mat_idx=0,
+    )
+    add_box(
+        bm,
+        center=Vector((cx, cy, 179.3)),
+        size=Vector((6.4, 1.4, 0.2)),
+        mat_idx=0,
+    )
+
+    # 四隅の航空障害灯（BeaconRed）
+    for corner_x in [cx - w_x * 0.42, cx + w_x * 0.42]:
+        for corner_y in [cy - d_y * 0.42, cy + d_y * 0.42]:
+            add_cylinder_z(
+                bm,
+                center=Vector((corner_x, corner_y, 184.0)),
+                radius=0.45,
+                height=1.4,
+                segments=12,
+                mat_idx=7,  # BeaconRed
+            )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaCerulean_Tower", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_shibuya_parco_complex(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    渋谷PARCO（Shibuya PARCO, 実寸 100.0m / 地上19階）
+    Three.js ワールド座標 (x=-824.0, z=375.0) -> Blender 座標 (bx=390.0, by=-129.0)
+    1. 低層商業ポディウム＆立体街路スパイラル階段テラス（Z = 0m..48m, 1F〜10F屋外回廊）
+    2. 10F 屋上庭園「ROOFTOP PARK」＆野外テラスカフェ (Z = 45m..52m)
+    3. 中高層オフィスタワー＆カルチャーフロア (Z = 50m..100m)
+    """
+    mesh = bpy.data.meshes.new("ShibuyaParco_ComplexMesh")
+    bm = bmesh.new()
+
+    cx = 397.0  # worldZ = 382.0
+    cy = -135.0  # worldX = -830.0
+    w_x = 40.0
+    d_y = 40.0
+
+    # 1. 低層商業ポディウム (Z = 0m..48m)
+    add_box(
+        bm,
+        center=Vector((cx, cy, 24.0)),
+        size=Vector((w_x, d_y, 48.0)),
+        mat_idx=19,  # ShibuyaCommercialFacade
+    )
+
+    # 1F〜3F 路面ガラスエントランス
+    add_box(
+        bm,
+        center=Vector((cx - w_x * 0.5 - 0.2, cy, 7.0)),
+        size=Vector((0.8, d_y * 0.8, 12.0)),
+        mat_idx=6,  # WarmPlazaGlow
+    )
+
+    # 立体街路スパイラル階段テラス（外周をらせん状に巻き上がる屋外デッキ）
+    step_count = 10
+    for s_i in range(step_count):
+        s_ratio = s_i / step_count
+        step_z = 4.0 + s_ratio * 42.0
+        angle = s_ratio * math.pi * 1.5
+        s_dx = math.cos(angle) * (w_x * 0.52)
+        s_dy = math.sin(angle) * (d_y * 0.52)
+        add_box(
+            bm,
+            center=Vector((cx + s_dx, cy + s_dy, step_z)),
+            size=Vector((7.0, 7.0, 1.8)),
+            mat_idx=0,  # StreamWhitePanel
+        )
+        add_box(
+            bm,
+            center=Vector((cx + s_dx * 1.05, cy + s_dy * 1.05, step_z + 1.4)),
+            size=Vector((7.2, 7.2, 1.1)),
+            mat_idx=10,  # ShibuyaSkyEdgeGlow
+        )
+
+    # 2. 10F 屋上庭園「ROOFTOP PARK」(Z = 48m..52m)
+    add_box(
+        bm,
+        center=Vector((cx - 4.0, cy - 4.0, 49.0)),
+        size=Vector((w_x * 0.75, d_y * 0.75, 2.0)),
+        mat_idx=4,  # StreamVerticalGreen
+    )
+
+    # 3. 中高層オフィスタワー (Z = 50m..100m)
+    add_box(
+        bm,
+        center=Vector((cx + 2.0, cy + 2.0, 75.0)),
+        size=Vector((w_x * 0.75, d_y * 0.75, 50.0)),
+        mat_idx=1,  # StreamCurtainGlass
+    )
+    # 上層アルミマリオンフレーム
+    for f_z in range(54, 98, 6):
+        add_box(
+            bm,
+            center=Vector((cx + 2.0, cy + 2.0, float(f_z))),
+            size=Vector((w_x * 0.76, d_y * 0.76, 0.75)),
+            mat_idx=0,
+        )
+
+    # 塔屋・パラペット＆航空障害灯 (Z = 100m..103m)
+    add_box(
+        bm,
+        center=Vector((cx + 2.0, cy + 2.0, 101.5)),
+        size=Vector((w_x * 0.5, d_y * 0.5, 3.0)),
+        mat_idx=2,
+    )
+    add_cylinder_z(
+        bm,
+        center=Vector((cx + 2.0, cy + 2.0, 103.5)),
+        radius=0.45,
+        height=1.2,
+        segments=12,
+        mat_idx=7,  # BeaconRed
+    )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaParco_Complex", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def build_shibuya_center_gai_entrance(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    渋谷センター街（バスケットボール通り）メイン入口アーチ看板＆ストリートバナー
+    Three.js ワールド座標 (x=-835.0, z=268.0) -> Blender 座標 (bx=283.0, by=-140.0)
+    1. スクランブル北西角の鉄骨トラスアーチゲート（スパン 8.4m、有効高 7.0m、車道横断直交配置）
+    2. ネオン発光看板「SHIBUYA CENTER-GAI バスケットボール通り」（ShibuyaQfront109Accent / BeaconRed）
+    3. センター街フラッグ・ペナントバナー
+    """
+    mesh = bpy.data.meshes.new("ShibuyaCenterGai_ArchMesh")
+    bm = bmesh.new()
+
+    cx = 283.0  # worldZ = 268.0
+    cy = -140.0  # worldX = -835.0
+
+    # センター街道路進行方向 (Three.js: dx=-40, dz=52 -> Blender: dbx=52, dby=-40)
+    # 接線ベクトル (tangent_dir) と直交法線ベクトル (normal_dir: 道路を跨ぐ横断方向)
+    tangent_dir = Vector((0.7926238, -0.6097106, 0.0))
+    normal_dir = Vector((-0.6097106, -0.7926238, 0.0))
+
+    half_span = 4.2
+    for side in [-1.0, 1.0]:
+        pillar_pos = Vector((cx, cy, 4.0)) + side * half_span * normal_dir
+        add_cylinder_z(
+            bm,
+            center=pillar_pos,
+            radius=0.28,
+            height=8.0,
+            segments=14,
+            mat_idx=2,  # StreamDarkVoidSteel
+        )
+        base_pos = Vector((cx, cy, 0.4)) + side * half_span * normal_dir
+        add_oriented_box(
+            bm,
+            center=base_pos,
+            tangent_dir=tangent_dir,
+            normal_dir=normal_dir,
+            size_tangent=0.9,
+            size_normal=0.9,
+            size_z=0.8,
+            mat_idx=2,
+        )
+
+    # 上部トラス梁（道路直交方向にスパン 9.2m）
+    add_oriented_box(
+        bm,
+        center=Vector((cx, cy, 7.6)),
+        tangent_dir=tangent_dir,
+        normal_dir=normal_dir,
+        size_tangent=0.6,
+        size_normal=9.2,
+        size_z=0.6,
+        mat_idx=3,  # StreamGalvanizedFrame
+    )
+
+    # メイン看板パネル「SHIBUYA CENTER-GAI バスケットボール通り」
+    add_oriented_box(
+        bm,
+        center=Vector((cx, cy, 6.8)),
+        tangent_dir=tangent_dir,
+        normal_dir=normal_dir,
+        size_tangent=0.42,
+        size_normal=6.4,
+        size_z=1.4,
+        mat_idx=13,  # ShibuyaQfront109Accent
+    )
+    # 看板上部ブルーアクセント
+    add_oriented_box(
+        bm,
+        center=Vector((cx, cy, 7.7)),
+        tangent_dir=tangent_dir,
+        normal_dir=normal_dir,
+        size_tangent=0.5,
+        size_normal=6.8,
+        size_z=0.28,
+        mat_idx=10,  # ShibuyaSkyEdgeGlow
+    )
+
+    # センター街沿道フラッグポスト（道路両脇に直交オフセット配置）
+    for f_dist in [12.0, 24.0]:
+        fx = cx + f_dist * tangent_dir.x
+        fy = cy + f_dist * tangent_dir.y
+        for side in [-1.0, 1.0]:
+            p_pos = Vector((fx, fy, 2.5)) + side * 3.8 * normal_dir
+            add_cylinder_z(
+                bm,
+                center=p_pos,
+                radius=0.1,
+                height=5.0,
+                segments=10,
+                mat_idx=2,
+            )
+            b_pos = Vector((fx, fy, 3.8)) + side * 3.8 * normal_dir
+            add_oriented_box(
+                bm,
+                center=b_pos,
+                tangent_dir=tangent_dir,
+                normal_dir=normal_dir,
+                size_tangent=0.8,
+                size_normal=0.1,
+                size_z=1.8,
+                mat_idx=12,  # SakuraStagePinkGlow
+            )
+
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaCenterGai_Arch", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
 def generate_shibuya_stream():
-    """渋谷ストリームおよび渋谷駅周辺8大ランドマーク・首都高3号渋谷線高架橋の3Dモデル全体を生成し GLB としてエクスポートする"""
+    """渋谷ストリームおよび渋谷駅周辺主要ランドマーク群・首都高3号渋谷線高架橋の3Dモデル全体を生成し GLB としてエクスポートする"""
     clean_scene()
     materials = setup_materials()
 
@@ -3660,6 +4012,15 @@ def generate_shibuya_stream():
 
     toei_bic = build_shibuya_toei_plaza_bic_camera(materials)
     toei_bic.parent = root
+
+    cerulean = build_shibuya_cerulean_tower(materials)
+    cerulean.parent = root
+
+    parco = build_shibuya_parco_complex(materials)
+    parco.parent = root
+
+    center_gai = build_shibuya_center_gai_entrance(materials)
+    center_gai.parent = root
 
     print("Preserving procedural and cylindrical UV coordinates for all mesh objects...")
     for m_obj in bpy.data.objects:
@@ -3809,6 +4170,24 @@ def render_360_review(review_dir: str):
             "18_driver_eye_miyamasuzaka_toei_bic",
             Vector((263.0, -55.0, 3.0)),
             Vector((290.0, -28.0, 26.0)),
+            24.0,
+        ),
+        (
+            "19_closeup_shibuya_parco_and_spiral",
+            Vector((330.0, -110.0, 60.0)),
+            Vector((390.0, -129.0, 50.0)),
+            28.0,
+        ),
+        (
+            "20_closeup_cerulean_tower_and_helipad",
+            Vector((30.0, -170.0, 120.0)),
+            Vector((-30.0, -203.0, 140.0)),
+            28.0,
+        ),
+        (
+            "21_driver_eye_center_gai_entrance_arch",
+            Vector((255.0, -119.0, 2.5)),
+            Vector((283.0, -140.0, 7.0)),
             24.0,
         ),
     ]

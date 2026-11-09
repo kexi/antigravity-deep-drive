@@ -111,6 +111,10 @@ export class TokyoStationMap {
   private proceduralFukurasGroup: THREE.Group | null = null;
   private proceduralMiyashitaParkGroup: THREE.Group | null = null;
   private proceduralQfront109Group: THREE.Group | null = null;
+  private proceduralParcoGroup: THREE.Group | null = null;
+  private proceduralCeruleanGroup: THREE.Group | null = null;
+  private proceduralMarkCityGroup: THREE.Group | null = null;
+  private proceduralCenterGaiArchGroup: THREE.Group | null = null;
   private proceduralShutokoCoreMeshes: THREE.Mesh[] = [];
   private treeSlots: {
     slotGroup: THREE.Group;
@@ -849,6 +853,8 @@ export class TokyoStationMap {
       { x: -1350, z: 150, w: 32, d: 28, lx: 3, lz: 2 }, // 山手通り・神泉町交差点（玉川通り西進合流）
       { x: -855, z: 95, w: 32, d: 28, lx: 2, lz: 2 }, // セルリアンタワー前・玉川通り（国道246号・さくら坂入口）
       { x: -750, z: 95, w: 28, d: 24, lx: 3, lz: 2 }, // 渋谷駅東口（明治通り×国道246号・青山通り分岐交差点）
+      { x: -730, z: 155, w: 26, d: 24, lx: 1, lz: 1 }, // 渋谷ヒカリエ前交差点（アクセス道路・ShinQsエントランス前）
+      { x: -730, z: 95, w: 28, d: 24, lx: 2, lz: 2 }, // 金王坂下・ヒカリエ南交差点（国道246号・青山通り合流）
     ];
     for (const ri of shibuyaRadialIntersections) {
       addIntersectionPadAndMarkings(ri.x, ri.z, ri.w, ri.d, ri.lx, ri.lz, true);
@@ -856,6 +862,9 @@ export class TokyoStationMap {
 
     // I-7. 渋谷ハチ公前広場インフラ（忠犬ハチ公像・石畳舗装・植栽・ベンチ・照明灯・JR駅前キャノピー）
     this.buildHachikoPlazaInfrastructure(world, rapier, groundBody);
+
+    // I-8. 渋谷センター街（バスケットボール通り）インフラ（歩行者天国タイル舗装・入口アーチ看板・フラッグ・沿道商業テナントビル群）
+    this.buildShibuyaCenterGaiInfrastructure(world, rapier, groundBody);
 
     // --- J. 国土地理院 道路中心線 (experimental_rdcl) & PLATEAU 道路網オープンデータに基づく曲線・屈曲道路区間 ---
     const curvedRoadCorridors = getOpenDataCurvedRoadCorridors();
@@ -2450,6 +2459,8 @@ export class TokyoStationMap {
       const isFukuras = b.buildingId === "13113-bldg-shibuya-fukuras";
       const isMiyashitaPark = b.buildingId === "13113-bldg-miyashita-park";
       const isQfront109 = b.buildingId === "13113-bldg-qfront-109";
+      const isParco = b.buildingId === "13113-bldg-shibuya-parco";
+      const isMarkCity = b.buildingId === "13113-bldg-shibuya-mark-city";
 
       for (let i = 0; i < stripeCount; i++) {
         const stripeY =
@@ -2528,18 +2539,18 @@ export class TokyoStationMap {
           bGroup.add(diagFin);
         }
       } else if (isHikarie) {
-        // 渋谷ヒカリエ: 中層11F〜16Fに浮かぶ球体・円筒劇場「東急シアターオーブ (Tokyu Theatre Orb)」＆スカイロビー
+        // 渋谷ヒカリエ: 中層11F〜16Fに浮かぶ球体・円筒劇場「東急シアターオーブ (Tokyu Theatre Orb)」＆スカイロビー＋2Fアーバンコア
         const orbMat = new THREE.MeshStandardMaterial({
           color: 0xf59e0b,
           emissive: 0xd97706,
-          emissiveIntensity: this.isNightActive ? 1.15 : 0.0,
+          emissiveIntensity: this.isNightActive ? 1.35 : 0.0,
           roughness: 0.22,
           metalness: 0.48,
         });
         this.shibuyaStreamEmissiveEntries.push({
           material: orbMat,
           dayIntensity: 0.0,
-          nightIntensity: 1.15,
+          nightIntensity: 1.35,
         });
         this.applyArchitecture3DTexture(orbMat, "anodized_metal");
 
@@ -2551,12 +2562,37 @@ export class TokyoStationMap {
         theatreOrbMesh.position.set(-4.5, -b.h / 2 + podiumHeight + 18.0, -3.5);
         bGroup.add(theatreOrbMesh);
 
-        const skyLobbyFrame = new THREE.Mesh(
-          new THREE.BoxGeometry(b.w + 3.0, 2.2, b.d + 3.0),
-          whitePanelMat,
+        const skyLobbyDeckMat = new THREE.MeshStandardMaterial({
+          color: 0x93c5fd,
+          emissive: 0x38bdf8,
+          emissiveIntensity: this.isNightActive ? 1.25 : 0.15,
+          roughness: 0.18,
+          metalness: 0.35,
+        });
+        this.shibuyaStreamEmissiveEntries.push({
+          material: skyLobbyDeckMat,
+          dayIntensity: 0.15,
+          nightIntensity: 1.25,
+        });
+        const skyLobbyDeck = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w + 3.0, 3.2, b.d + 3.0),
+          skyLobbyDeckMat,
         );
-        skyLobbyFrame.position.y = -b.h / 2 + podiumHeight + 4.0;
-        bGroup.add(skyLobbyFrame);
+        skyLobbyDeck.name = "HikarieSkyLobbyDeck";
+        skyLobbyDeck.position.set(-2.0, -b.h / 2 + podiumHeight + 4.0, 0);
+        bGroup.add(skyLobbyDeck);
+
+        const urbanCoreEntrance = new THREE.Mesh(
+          new THREE.BoxGeometry(16.0, 8.0, 14.0),
+          new THREE.MeshStandardMaterial({
+            color: 0x1e293b,
+            roughness: 0.25,
+            metalness: 0.5,
+          }),
+        );
+        urbanCoreEntrance.name = "HikarieUrbanCoreEntrance";
+        urbanCoreEntrance.position.set(-b.w * 0.45, -b.h / 2 + 5.0, 0);
+        bGroup.add(urbanCoreEntrance);
       } else if (isSakuraStage) {
         // 渋谷サクラステージ: 桜色（チェリーピンク）発光アトリウム＆段状グリーンテラス
         const sakuraGlowMat = new THREE.MeshStandardMaterial({
@@ -2660,6 +2696,112 @@ export class TokyoStationMap {
         qfrontMedia.name = "ShibuyaQfrontMediaWall";
         qfrontMedia.position.set(b.w * 0.25, -b.h / 2 + 22.0, -b.d * 0.28);
         bGroup.add(qfrontMedia);
+      } else if (isParco) {
+        // 渋谷PARCO: 立体街路スパイラル階段テラス（1F〜10F屋外回廊）＆屋上グリーンパーク＋店舗ファサード
+        const terraceMat = new THREE.MeshStandardMaterial({
+          color: 0xf8fafc,
+          roughness: 0.4,
+          metalness: 0.2,
+        });
+        const spiralGroup = new THREE.Group();
+        spiralGroup.name = "ShibuyaParcoSpiralWalkway";
+        const terraceStepCount = 8;
+        for (let t = 0; t < terraceStepCount; t++) {
+          const tRatio = t / terraceStepCount;
+          const ty = -b.h / 2 + podiumHeight * 0.4 + tRatio * (b.h * 0.45);
+          const angle = tRatio * Math.PI * 1.5;
+          const tx = Math.cos(angle) * (b.w * 0.52);
+          const tz = Math.sin(angle) * (b.d * 0.52);
+          const stepMesh = new THREE.Mesh(new THREE.BoxGeometry(6.5, 1.8, 6.5), terraceMat);
+          stepMesh.position.set(tx, ty, tz);
+          stepMesh.userData.lodDetailTier = "medium";
+          spiralGroup.add(stepMesh);
+        }
+        bGroup.add(spiralGroup);
+
+        const parcoRoofPark = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w * 0.75, 1.6, b.d * 0.75),
+          new THREE.MeshStandardMaterial({
+            color: 0x16a34a,
+            roughness: 0.82,
+            metalness: 0.05,
+          }),
+        );
+        parcoRoofPark.name = "ParcoRooftopPark";
+        parcoRoofPark.position.y = -b.h / 2 + podiumHeight + (b.h - podiumHeight) * 0.65;
+        bGroup.add(parcoRoofPark);
+
+        const parcoStorefrontMat = new THREE.MeshStandardMaterial({
+          map: shibuyaTextureManager.getTexture("commercialFacade"),
+          emissive: new THREE.Color(0xffffff),
+          emissiveMap: shibuyaTextureManager.getTexture("commercialFacade"),
+          emissiveIntensity: this.isNightActive ? 1.35 : 0.25,
+          roughness: 0.35,
+          metalness: 0.2,
+        });
+        this.shibuyaStreamEmissiveEntries.push({
+          material: parcoStorefrontMat,
+          dayIntensity: 0.25,
+          nightIntensity: 1.35,
+        });
+        const parcoStorefront = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w + 0.8, storefrontHeight * 1.4, b.d + 0.8),
+          parcoStorefrontMat,
+        );
+        parcoStorefront.position.y = -b.h / 2 + (storefrontHeight * 1.4) / 2;
+        bGroup.add(parcoStorefront);
+      } else if (isCerulean) {
+        // セルリアンタワー: 三角形セットバック冠部＆屋上ヘリポート＋東急ホテルエントランスキャノピー
+        const ceruleanHelipadMat = new THREE.MeshStandardMaterial({
+          color: 0x047857,
+          emissive: 0x065f46,
+          emissiveIntensity: this.isNightActive ? 0.65 : 0.15,
+          roughness: 0.45,
+          metalness: 0.15,
+        });
+        this.shibuyaStreamEmissiveEntries.push({
+          material: ceruleanHelipadMat,
+          dayIntensity: 0.15,
+          nightIntensity: 0.65,
+        });
+        const helipad = new THREE.Mesh(new THREE.BoxGeometry(16, 0.6, 16), ceruleanHelipadMat);
+        helipad.name = "CeruleanTowerRooftopHelipad";
+        helipad.position.y = b.h / 2 + 0.3;
+        bGroup.add(helipad);
+
+        const hotelCanopy = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w * 0.6, 1.4, 12.0),
+          new THREE.MeshStandardMaterial({
+            color: 0x1e293b,
+            metalness: 0.85,
+            roughness: 0.2,
+          }),
+        );
+        hotelCanopy.name = "CeruleanHotelPodiumLobby";
+        hotelCanopy.position.set(0, -b.h / 2 + 6.0, b.d * 0.5 + 4.0);
+        bGroup.add(hotelCanopy);
+      } else if (isMarkCity) {
+        // 渋谷マークシティ: 京王井の頭線渋谷駅・空中連絡コンコース
+        const concourseMat = new THREE.MeshStandardMaterial({
+          map: shibuyaTextureManager.getTexture("markCity"),
+          emissive: new THREE.Color(0xffffff),
+          emissiveMap: shibuyaTextureManager.getTexture("markCity"),
+          emissiveIntensity: this.isNightActive ? 1.25 : 0.15,
+          roughness: 0.25,
+          metalness: 0.35,
+        });
+        this.shibuyaStreamEmissiveEntries.push({
+          material: concourseMat,
+          dayIntensity: 0.15,
+          nightIntensity: 1.25,
+        });
+        const concourseMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w + 4.0, 14.0, b.d * 0.6),
+          concourseMat,
+        );
+        concourseMesh.name = "MarkCitySkyConcourse";
+        concourseMesh.position.set(0, -b.h / 2 + podiumHeight * 0.65, 0);
+        bGroup.add(concourseMesh);
       }
 
       const crownMesh = new THREE.Mesh(
@@ -2693,6 +2835,12 @@ export class TokyoStationMap {
         this.proceduralMiyashitaParkGroup = bGroup;
       } else if (isQfront109) {
         this.proceduralQfront109Group = bGroup;
+      } else if (isParco) {
+        this.proceduralParcoGroup = bGroup;
+      } else if (isCerulean) {
+        this.proceduralCeruleanGroup = bGroup;
+      } else if (isMarkCity) {
+        this.proceduralMarkCityGroup = bGroup;
       }
       this.group.add(bGroup);
       this.plateauBuildingGroups.push(bGroup);
@@ -3467,6 +3615,297 @@ export class TokyoStationMap {
   }
 
   /**
+   * 渋谷センター街（バスケットボール通り）インフラ
+   * How: スクランブル交差点北西（x = -825, z = 265 〜 井の頭通り合流 x = -875, z = 320）に、
+   * 象徴的な入口アーチ看板「SHIBUYA CENTER-GAI バスケットボール通り」、歩行者天国インターロッキング舗装、
+   * ストリートフラッグ、沿道商業テナントビル群（多層ネオンサイン・店舗ファサード）を配置する。
+   */
+  private buildShibuyaCenterGaiInfrastructure(
+    world: RAPIER.World,
+    rapier: typeof RAPIER,
+    groundBody: RAPIER.RigidBody,
+  ): void {
+    const centerGaiGroup = new THREE.Group();
+    centerGaiGroup.name = "ShibuyaCenterGaiInfrastructure";
+    centerGaiGroup.userData.isRoadInfrastructure = true;
+
+    // 1. 渋谷センター街 歩行者天国タイル・インターロッキングブロック舗装（PuddleMaterial 赤茶舗装）
+    // スクランブル交差点北西端 (-835, 268) から井の頭通り合流 (-875, 320) を結ぶコリドー
+    const dx = -875 - -835;
+    const dz = 320 - 268;
+    const streetLength = Math.hypot(dx, dz);
+    const streetAngle = Math.atan2(dx, dz);
+    const streetMidX = (-835 + -875) / 2;
+    const streetMidZ = (268 + 320) / 2;
+    const streetWidth = 8.2;
+
+    const pavementGeo = new THREE.PlaneGeometry(streetWidth, streetLength, 8, 16);
+    pavementGeo.rotateX(-Math.PI / 2);
+    const pavementMat = new PuddleMaterial({
+      baseColor: 0x78350f,
+      baseRoughness: 0.68,
+      baseMetalness: 0.06,
+      puddleThreshold: 0.38,
+    });
+    this.puddleMaterials.push(pavementMat);
+
+    const pavementMesh = new THREE.Mesh(pavementGeo, pavementMat);
+    pavementMesh.name = "CenterGaiPedestrianPavement";
+    pavementMesh.userData.isRoadInfrastructure = true;
+    pavementMesh.position.set(streetMidX, 0.024, streetMidZ);
+    pavementMesh.rotation.y = streetAngle;
+    pavementMesh.receiveShadow = true;
+    centerGaiGroup.add(pavementMesh);
+
+    // 平坦路面コライダー（上面高さ y = 0.024 で滑らかに通行可能）
+    const pavementColDesc = rapier.ColliderDesc.cuboid(streetWidth / 2, 0.25, streetLength / 2)
+      .setTranslation(streetMidX, 0.524 - 0.25, streetMidZ)
+      .setRotation({ x: 0, y: Math.sin(streetAngle / 2), z: 0, w: Math.cos(streetAngle / 2) })
+      .setFriction(0.85)
+      .setRestitution(0.02);
+    this.registerCollider(world.createCollider(pavementColDesc, groundBody), false);
+
+    // 2. 渋谷センター街 入口アーチ看板（Center Gai Main Entrance Arch）
+    // スクランブル交差点北西角（x = -835, z = 268）にまたがる大迫力トラスゲート
+    const archGroup = new THREE.Group();
+    archGroup.name = "CenterGaiEntranceArchSign";
+    archGroup.userData.isRoadInfrastructure = true;
+    archGroup.position.set(-835, 0, 268);
+    archGroup.rotation.y = streetAngle;
+    this.proceduralCenterGaiArchGroup = archGroup;
+
+    const archSteelMat = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,
+      roughness: 0.35,
+      metalness: 0.85,
+    });
+    this.applyArchitecture3DTexture(archSteelMat, "cast_iron");
+
+    // 左右スチール支柱（Pillars）
+    const halfSpan = streetWidth * 0.52;
+    for (const side of [-1, 1]) {
+      const colX = side * halfSpan;
+      const colMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 7.8, 12), archSteelMat);
+      colMesh.position.set(colX, 3.9, 0);
+      colMesh.castShadow = true;
+      archGroup.add(colMesh);
+
+      // 支柱基台
+      const baseMesh = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.6, 0.85), archSteelMat);
+      baseMesh.position.set(colX, 0.3, 0);
+      baseMesh.castShadow = true;
+      archGroup.add(baseMesh);
+
+      // 支柱障害物コライダー
+      const cosA = Math.cos(streetAngle);
+      const sinA = Math.sin(streetAngle);
+      const worldColX = -835 + colX * cosA;
+      const worldColZ = 268 - colX * sinA;
+      const pillarCol = world.createCollider(
+        rapier.ColliderDesc.cylinder(3.9, 0.3).setTranslation(worldColX, 3.9, worldColZ),
+        groundBody,
+      );
+      this.registerCollider(pillarCol, true);
+    }
+
+    // 上部トラス梁（Cross Beam Truss）
+    const crossBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(halfSpan * 2 + 0.6, 0.55, 0.55),
+      archSteelMat,
+    );
+    crossBeam.position.set(0, 7.4, 0);
+    crossBeam.castShadow = true;
+    archGroup.add(crossBeam);
+
+    // メインネオン看板パネル「SHIBUYA CENTER-GAI / バスケットボール通り」
+    const signBoardMat = new THREE.MeshStandardMaterial({
+      color: 0xef4444,
+      emissive: new THREE.Color(0xf59e0b),
+      emissiveIntensity: this.isNightActive ? 2.4 : 0.45,
+      roughness: 0.18,
+      metalness: 0.35,
+    });
+    this.shibuyaStreamEmissiveEntries.push({
+      material: signBoardMat,
+      dayIntensity: 0.45,
+      nightIntensity: 2.4,
+    });
+    const signBoardMesh = new THREE.Mesh(new THREE.BoxGeometry(5.8, 1.35, 0.38), signBoardMat);
+    signBoardMesh.name = "CenterGaiMainSignPanel";
+    signBoardMesh.position.set(0, 6.7, 0);
+    signBoardMesh.castShadow = true;
+    archGroup.add(signBoardMesh);
+
+    // サイン上部アクセントクラウン
+    const signCrownMat = new THREE.MeshStandardMaterial({
+      color: 0x3b82f6,
+      emissive: new THREE.Color(0x2563eb),
+      emissiveIntensity: this.isNightActive ? 1.8 : 0.3,
+      roughness: 0.22,
+    });
+    this.shibuyaStreamEmissiveEntries.push({
+      material: signCrownMat,
+      dayIntensity: 0.3,
+      nightIntensity: 1.8,
+    });
+    const signCrownMesh = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.25, 0.48), signCrownMat);
+    signCrownMesh.position.set(0, 7.45, 0);
+    archGroup.add(signCrownMesh);
+
+    centerGaiGroup.add(archGroup);
+
+    // 3. センター街ストリートフラッグ・バナー（Center Gai Street Banners）
+    const bannerMat = new THREE.MeshStandardMaterial({
+      color: 0x2563eb,
+      emissive: new THREE.Color(0x1d4ed8),
+      emissiveIntensity: this.isNightActive ? 0.8 : 0.1,
+      roughness: 0.6,
+    });
+    this.shibuyaStreamEmissiveEntries.push({
+      material: bannerMat,
+      dayIntensity: 0.1,
+      nightIntensity: 0.8,
+    });
+    const bannerDistances = [14.0, 28.0, 42.0, 56.0];
+    for (let bi = 0; bi < bannerDistances.length; bi++) {
+      const dRatio = bannerDistances[bi] / streetLength;
+      const bX = -830 + dx * dRatio;
+      const bZ = 270 + dz * dRatio;
+      const cosA = Math.cos(streetAngle);
+      const sinA = Math.sin(streetAngle);
+
+      for (const side of [-1, 1]) {
+        const poleX = bX + side * (streetWidth * 0.48) * cosA;
+        const poleZ = bZ - side * (streetWidth * 0.48) * sinA;
+
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 4.8, 8), archSteelMat);
+        pole.position.set(poleX, 2.4, poleZ);
+        centerGaiGroup.add(pole);
+
+        const bannerMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 1.8), bannerMat);
+        bannerMesh.name = `CenterGaiStreetBanner_${bi}_${side}`;
+        bannerMesh.position.set(poleX, 3.6, poleZ);
+        bannerMesh.rotation.y = streetAngle + (side > 0 ? 0 : Math.PI);
+        centerGaiGroup.add(bannerMesh);
+      }
+    }
+
+    // 4. センター街 沿道商業テナントビル群（多層ネオンサイン・店舗ファサード実写テクスチャ）
+    const commTex = shibuyaTextureManager.getTexture("commercialFacade");
+    const dogenTex = shibuyaTextureManager.getTexture("dogenzakaCommercial");
+
+    const buildingMat1 = new THREE.MeshStandardMaterial({
+      map: commTex,
+      emissiveMap: commTex,
+      emissive: new THREE.Color(0xffffff),
+      emissiveIntensity: this.isNightActive ? 1.45 : 0.25,
+      roughness: 0.35,
+      metalness: 0.2,
+    });
+    const buildingMat2 = new THREE.MeshStandardMaterial({
+      map: dogenTex,
+      emissiveMap: dogenTex,
+      emissive: new THREE.Color(0xffffff),
+      emissiveIntensity: this.isNightActive ? 1.55 : 0.28,
+      roughness: 0.36,
+      metalness: 0.18,
+    });
+    this.shibuyaStreamEmissiveEntries.push(
+      { material: buildingMat1, dayIntensity: 0.25, nightIntensity: 1.45 },
+      { material: buildingMat2, dayIntensity: 0.28, nightIntensity: 1.55 },
+    );
+    this.applyArchitecture3DTexture(buildingMat1, "retail_storefront");
+    this.applyArchitecture3DTexture(buildingMat2, "retail_storefront");
+
+    const buildingConfigs = [
+      {
+        side: 1,
+        dist: 12.0,
+        w: 14.0,
+        d: 15.0,
+        h: 28.0,
+        mat: buildingMat1,
+        name: "CenterGaiCommercialBuilding_North_1",
+      },
+      {
+        side: 1,
+        dist: 28.0,
+        w: 16.0,
+        d: 16.0,
+        h: 36.0,
+        mat: buildingMat2,
+        name: "CenterGaiCommercialBuilding_North_2",
+      },
+      {
+        side: 1,
+        dist: 46.0,
+        w: 18.0,
+        d: 16.0,
+        h: 32.0,
+        mat: buildingMat1,
+        name: "CenterGaiCommercialBuilding_North_3",
+      },
+      {
+        side: -1,
+        dist: 15.0,
+        w: 14.0,
+        d: 14.0,
+        h: 26.0,
+        mat: buildingMat2,
+        name: "CenterGaiCommercialBuilding_South_1",
+      },
+      {
+        side: -1,
+        dist: 32.0,
+        w: 16.0,
+        d: 15.0,
+        h: 34.0,
+        mat: buildingMat1,
+        name: "CenterGaiCommercialBuilding_South_2",
+      },
+      {
+        side: -1,
+        dist: 50.0,
+        w: 18.0,
+        d: 16.0,
+        h: 30.0,
+        mat: buildingMat2,
+        name: "CenterGaiCommercialBuilding_South_3",
+      },
+    ];
+
+    const cosA = Math.cos(streetAngle);
+    const sinA = Math.sin(streetAngle);
+
+    for (const bConf of buildingConfigs) {
+      const dRatio = bConf.dist / streetLength;
+      const streetPtX = -835 + dx * dRatio;
+      const streetPtZ = 268 + dz * dRatio;
+
+      const offsetDist = streetWidth * 0.5 + bConf.d * 0.5 + 1.2;
+      const bCenterX = streetPtX + bConf.side * offsetDist * cosA;
+      const bCenterZ = streetPtZ - bConf.side * offsetDist * sinA;
+
+      const bMesh = new THREE.Mesh(new THREE.BoxGeometry(bConf.w, bConf.h, bConf.d), bConf.mat);
+      bMesh.name = bConf.name;
+      bMesh.position.set(bCenterX, bConf.h / 2, bCenterZ);
+      bMesh.rotation.y = streetAngle;
+      bMesh.castShadow = true;
+      bMesh.receiveShadow = true;
+      centerGaiGroup.add(bMesh);
+
+      const bColDesc = rapier.ColliderDesc.cuboid(bConf.w / 2, bConf.h / 2, bConf.d / 2)
+        .setTranslation(bCenterX, bConf.h / 2, bCenterZ)
+        .setRotation({ x: 0, y: Math.sin(streetAngle / 2), z: 0, w: Math.cos(streetAngle / 2) })
+        .setFriction(0.65)
+        .setRestitution(0.01);
+      this.registerCollider(world.createCollider(bColDesc, groundBody), false);
+    }
+
+    this.group.add(centerGaiGroup);
+  }
+
+  /**
    * `shibuya_stream.glb` 内のマテリアルを解析し、
    * 屋上航空障害灯・イエローアクセント・暖色ロビー窓・首都高緑標識・SHIBUYA SKY・ヒカリエシアターオーブは固有の発光と色調を保持し、
    * 白アルミ千鳥パネル・溶融亜鉛メッキ鉄骨・コンクリート橋脚・壁面緑化・カーテンウォールには WebGL2 3D ボリュームテクスチャを適用する。
@@ -3946,6 +4385,55 @@ export class TokyoStationMap {
         nightIntensity,
       });
       this.applyArchitecture3DTexture(stdMat, "retail_storefront");
+      return;
+    }
+
+    // 26. セルリアンタワー（Cerulean Tower）外観カーテンウォール・ホテル基壇＆屋上ヘリポート
+    const isCeruleanMat = matName.includes("Cerulean");
+    if (isCeruleanMat) {
+      if (matName.includes("Helipad")) {
+        stdMat.color = new THREE.Color(0x065f46);
+        stdMat.roughness = 0.52;
+        stdMat.metalness = 0.12;
+        this.applyArchitecture3DTexture(stdMat, "white_granite");
+      } else {
+        stdMat.roughness = 0.18;
+        stdMat.metalness = 0.38;
+        this.applyArchitecture3DTexture(stdMat, "curtain_glass");
+      }
+      return;
+    }
+
+    // 27. 渋谷PARCO（Shibuya PARCO）外観カーテンウォール・立体街路スパイラル＆屋上庭園
+    const isParcoMat = matName.includes("Parco");
+    if (isParcoMat) {
+      if (matName.includes("Roof") || matName.includes("Garden")) {
+        stdMat.roughness = 0.82;
+        stdMat.metalness = 0.05;
+        this.applyArchitecture3DTexture(stdMat, "white_granite");
+      } else {
+        stdMat.roughness = 0.25;
+        stdMat.metalness = 0.32;
+        this.applyArchitecture3DTexture(stdMat, "retail_storefront");
+      }
+      return;
+    }
+
+    // 28. 渋谷センター街 入口アーチ看板・ネオンフラッグ
+    const isCenterGaiMat = matName.includes("CenterGai");
+    if (isCenterGaiMat) {
+      if (matName.includes("Sign") || matName.includes("Arch")) {
+        const dayIntensity = 0.45;
+        const nightIntensity = 2.4;
+        stdMat.emissive = new THREE.Color(0xf59e0b);
+        stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+        this.shibuyaStreamEmissiveEntries.push({
+          material: stdMat,
+          dayIntensity,
+          nightIntensity,
+        });
+      }
+      this.applyArchitecture3DTexture(stdMat, "anodized_metal");
       return;
     }
 
@@ -6004,7 +6492,10 @@ export class TokyoStationMap {
 
     const loadTasks: Promise<void>[] = [];
     const isShibuyaZone =
-      chunkId === "shibuya-core" || chunkId === "shibuya-north" || chunkId === "shibuya-south";
+      chunkId === "shibuya-core" ||
+      chunkId === "shibuya-north" ||
+      chunkId === "shibuya-south" ||
+      chunkId === "shibuya-west";
     const isMarunouchiCore = chunkId === "marunouchi-core";
 
     if (isShibuyaZone && this.glbShibuyaStreamGroup === null) {
@@ -6083,7 +6574,8 @@ export class TokyoStationMap {
     const hasRemainingShibuyaChunks =
       !this.unloadedChunkIds.has("shibuya-core") ||
       !this.unloadedChunkIds.has("shibuya-north") ||
-      !this.unloadedChunkIds.has("shibuya-south");
+      !this.unloadedChunkIds.has("shibuya-south") ||
+      !this.unloadedChunkIds.has("shibuya-west");
 
     if (!hasRemainingShibuyaChunks && this.glbShibuyaStreamGroup) {
       this.disposeGlbHierarchy(this.glbShibuyaStreamGroup);
@@ -6170,6 +6662,10 @@ export class TokyoStationMap {
       this.proceduralFukurasGroup,
       this.proceduralMiyashitaParkGroup,
       this.proceduralQfront109Group,
+      this.proceduralParcoGroup,
+      this.proceduralCeruleanGroup,
+      this.proceduralMarkCityGroup,
+      this.proceduralCenterGaiArchGroup,
     ]) {
       if (procGroup) {
         procGroup.visible = showProcedural;

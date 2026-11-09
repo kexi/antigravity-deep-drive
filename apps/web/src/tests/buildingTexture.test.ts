@@ -381,6 +381,30 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     expect(jrSteelMat.userData.arch3DVolumeChannel).toBe("anodized_metal");
     expect(jrSteelMat.map).toBeNull();
 
+    // セルリアンタワー（カーテンウォール＆屋上ヘリポート）
+    const ceruleanTowerMat = new THREE.MeshStandardMaterial({ name: "CeruleanTowerCurtainWall" });
+    cityMap.applyShibuyaStreamGlbMaterial3DTexture(ceruleanTowerMat);
+    expect(ceruleanTowerMat.userData.arch3DVolumeChannel).toBe("curtain_glass");
+
+    const ceruleanHeliMat = new THREE.MeshStandardMaterial({ name: "CeruleanHelipadPad" });
+    cityMap.applyShibuyaStreamGlbMaterial3DTexture(ceruleanHeliMat);
+    expect(ceruleanHeliMat.userData.arch3DVolumeChannel).toBe("white_granite");
+
+    // 渋谷PARCO（スパイラル街路＆屋上庭園）
+    const parcoWallMat = new THREE.MeshStandardMaterial({ name: "ShibuyaParcoTerraceWall" });
+    cityMap.applyShibuyaStreamGlbMaterial3DTexture(parcoWallMat);
+    expect(parcoWallMat.userData.arch3DVolumeChannel).toBe("retail_storefront");
+
+    const parcoRoofMat = new THREE.MeshStandardMaterial({ name: "ShibuyaParcoRoofGarden" });
+    cityMap.applyShibuyaStreamGlbMaterial3DTexture(parcoRoofMat);
+    expect(parcoRoofMat.userData.arch3DVolumeChannel).toBe("white_granite");
+
+    // 渋谷センター街（入口アーチ＆サイン看板）
+    const centerGaiSignMat = new THREE.MeshStandardMaterial({ name: "CenterGaiSignBanner" });
+    cityMap.applyShibuyaStreamGlbMaterial3DTexture(centerGaiSignMat);
+    expect(centerGaiSignMat.userData.arch3DVolumeChannel).toBe("anodized_metal");
+    expect(centerGaiSignMat.emissive.getHex()).toBe(0xf59e0b);
+
     // PLATEAU 実在建物群向けマテリアル（LOD2実写テクスチャ＆Mipmap検証）
     const plateauTowerMat = new THREE.MeshStandardMaterial({ name: "PlateauGlassTower" });
     cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauTowerMat);
@@ -572,5 +596,61 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     expect(mockShader.fragmentShader).toContain("#ifdef USE_MAP");
     // USE_EMISSIVEMAP ガードが含まれていること
     expect(mockShader.fragmentShader).toContain("#ifdef USE_EMISSIVEMAP");
+  });
+
+  it("渋谷センター街（バスケットボール通り）インフラ（舗装、アーチ看板、沿道商業ビル、バナーフラッグ）が構築され、夜間発光が連動することを保証する", async () => {
+    await RAPIER.init();
+    const scene = new THREE.Scene();
+    const world = new RAPIER.World(new RAPIER.Vector3(0, -9.81, 0));
+    const cityMap = new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+
+    const centerGaiGroup = cityMap.group.getObjectByName("ShibuyaCenterGaiInfrastructure");
+    expect(centerGaiGroup).toBeDefined();
+    expect(centerGaiGroup).not.toBeNull();
+
+    // 入口アーチ看板の存在と位置
+    const archSign = centerGaiGroup!.getObjectByName("CenterGaiEntranceArchSign");
+    expect(archSign).toBeDefined();
+    expect(archSign!.position.x).toBeCloseTo(-835, 1);
+    expect(archSign!.position.z).toBeCloseTo(268, 1);
+
+    const signPanel = archSign!.getObjectByName("CenterGaiMainSignPanel");
+    expect(signPanel).toBeDefined();
+
+    // インターロッキング舗装の存在
+    const pavement = centerGaiGroup!.getObjectByName("CenterGaiPedestrianPavement");
+    expect(pavement).toBeDefined();
+
+    // 沿道商業ビル群の存在（北側3棟・南側3棟の計6棟）
+    const commercialBuildings = centerGaiGroup!.children.filter((c) =>
+      c.name.startsWith("CenterGaiCommercialBuilding_"),
+    );
+    expect(commercialBuildings.length).toBe(6);
+
+    // バナーフラッグの存在（4地点×左右2 = 8本）
+    const banners = centerGaiGroup!.children.filter((c) =>
+      c.name.startsWith("CenterGaiStreetBanner_"),
+    );
+    expect(banners.length).toBe(8);
+
+    // 昼夜切り替えでセンター街マテリアルの発光強度が変化すること
+    cityMap.setNightMode(false);
+    const daySignIntensity = ((signPanel as THREE.Mesh).material as THREE.MeshStandardMaterial)
+      .emissiveIntensity;
+    cityMap.setNightMode(true);
+    const nightSignIntensity = ((signPanel as THREE.Mesh).material as THREE.MeshStandardMaterial)
+      .emissiveIntensity;
+    expect(nightSignIntensity).toBeGreaterThan(daySignIntensity);
+
+    // shibuya_stream.glb ロード時のプロシージャルアーチ非表示化（二重アーチ・重複コライダー防止）
+    const cityMapInternal = cityMap as unknown as {
+      setShibuyaGlbOverlappingProceduralVisible: (show: boolean) => void;
+    };
+    expect(archSign!.visible).toBe(true);
+    cityMapInternal.setShibuyaGlbOverlappingProceduralVisible(false);
+    expect(archSign!.visible).toBe(false);
+    expect(archSign!.userData.permanentlyHiddenByGlb).toBe(true);
+    cityMapInternal.setShibuyaGlbOverlappingProceduralVisible(true);
+    expect(archSign!.visible).toBe(true);
   });
 });

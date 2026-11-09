@@ -807,6 +807,22 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
     en: "Meiji-dori Ave. (Pref. Rte 305 / GSI Shibuya Exp.)",
     zh: "明治通・东京都道305号 (GSI experimental_rdcl 涩谷区间)",
   },
+  "渋谷センター街・バスケットボール通り (スクランブル北西〜宇田川町交番・井の頭通り合流)": {
+    en: "Shibuya Center-Gai / Basketball St. (Scramble NW–Udagawacho–Inokashira)",
+    zh: "涩谷中心街・篮球街 (十字路口西北〜宇田川町交番・井之头通合流)",
+  },
+  "渋谷センター街・バスケットボール通り（スクランブル北西〜宇田川町交番・井の頭通り合流）": {
+    en: "Shibuya Center-Gai / Basketball St. (Scramble NW–Udagawacho–Inokashira)",
+    zh: "涩谷中心街・篮球街 (十字路口西北〜宇田川町交番・井之头通合流)",
+  },
+  "ヒカリエ前通り・金王坂連絡路 (宮益坂下〜ヒカリエ前〜金王坂・国道246号)": {
+    en: "Hikarie-mae St. & Kon-ozaka Connector (Miyamasuzaka–Hikarie–Route 246)",
+    zh: "Hikarie前通・金王坂联络路 (宫益坂下〜Hikarie前〜金王坂・国道246号)",
+  },
+  "ヒカリエ前通り・金王坂連絡路（宮益坂下〜ヒカリエ前〜金王坂・国道246号）": {
+    en: "Hikarie-mae St. & Kon-ozaka Connector (Miyamasuzaka–Hikarie–Route 246)",
+    zh: "Hikarie前通・金王坂联络路 (宫益坂下〜Hikarie前〜金王坂・国道246号)",
+  },
 };
 
 /**
@@ -879,6 +895,7 @@ const BUILDING_NAME_ZH_BY_ID: Readonly<Record<string, string>> = {
   "13113-bldg-miyashita-park": "MIYASHITA PARK・涩谷Cast街区 (宫下公园)",
   "13113-bldg-shibuya-mark-city": "涩谷Mark City (道玄坂街区)",
   "13113-bldg-qfront-109": "涩谷QFRONT・SHIBUYA109 十字路口街区",
+  "13113-bldg-shibuya-parco": "涩谷PARCO (公园通・风琴坂街区)",
   "13113-bldg-shibuya-solasta": "涩谷Solasta (道玄坂・南平台街区)",
   "13103-bldg-aoyama-twins": "新青山大厦 (青山双子塔・国道246号沿线)",
   "13103-bldg-akasaka-intercity": "青山通大道塔楼 (赤坂・表参道街区)",
@@ -1876,6 +1893,8 @@ export function getNavigationMapLabels(
         { text: "Ebisu Station", x: -750, z: -800, color: "#fb923c" },
         { text: "Yamate-dori (Ring 6)", x: -1350, z: 95, color: "#60a5fa" },
         { text: "Roppongi Hills", x: -380, z: -420, color: "#38bdf8" },
+        { text: "Center-Gai / Basketball St.", x: -850, z: 292, color: "#f59e0b" },
+        { text: "Shibuya PARCO", x: -824, z: 375, color: "#cbd5e1" },
       ];
     }
     const isChinese = locale === "zh";
@@ -1895,6 +1914,8 @@ export function getNavigationMapLabels(
         { text: "惠比寿站", x: -750, z: -800, color: "#fb923c" },
         { text: "山手通 (环状6号)", x: -1350, z: 95, color: "#60a5fa" },
         { text: "六本木之丘", x: -380, z: -420, color: "#38bdf8" },
+        { text: "涩谷中心街 (篮球街)", x: -850, z: 292, color: "#f59e0b" },
+        { text: "涩谷PARCO", x: -824, z: 375, color: "#cbd5e1" },
       ];
     }
     return [
@@ -1912,6 +1933,8 @@ export function getNavigationMapLabels(
       { text: "恵比寿駅", x: -750, z: -800, color: "#fb923c" },
       { text: "山手通り (環状6号)", x: -1350, z: 95, color: "#60a5fa" },
       { text: "六本木ヒルズ", x: -380, z: -420, color: "#38bdf8" },
+      { text: "渋谷センター街 (バスケ通り)", x: -850, z: 292, color: "#f59e0b" },
+      { text: "渋谷PARCO", x: -824, z: 375, color: "#cbd5e1" },
     ];
   }
 

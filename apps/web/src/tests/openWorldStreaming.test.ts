@@ -21,8 +21,17 @@ describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
     expect(resolveChunkIdAtPosition(-750, 12)).toBe("shibuya-core");
     // 渋谷南（恵比寿・並木橋側: z = -115..-320）
     expect(resolveChunkIdAtPosition(-750, -220)).toBe("shibuya-south");
-    // 渋谷北（表参道・宮下パーク側: z = +115..+320）
+    // 渋谷北（表参道・宮下パーク・ヒカリエ・センター街・PARCO側: z = +115..+460）
     expect(resolveChunkIdAtPosition(-750, 220)).toBe("shibuya-north");
+    expect(resolveChunkIdAtPosition(-710, 155)).toBe("shibuya-north"); // 渋谷ヒカリエ
+    expect(resolveChunkIdAtPosition(-850, 292)).toBe("shibuya-north"); // 渋谷センター街
+    expect(resolveChunkIdAtPosition(-935, 375)).toBe("shibuya-north"); // センター街北西端（井の頭通り合流）
+    expect(resolveChunkIdAtPosition(-830, 382)).toBe("shibuya-north"); // 渋谷PARCO
+    const shibuyaNorthDef = WORLD_CHUNK_DEFINITIONS.find((c) => c.id === "shibuya-north")!;
+    expect(shibuyaNorthDef.associatedGlbModelIds).toContain("shibuya_stream");
+    expect(shibuyaNorthDef.associatedGlbModelIds).toContain("shibuya_plateau_buildings");
+    const shibuyaSouthDef = WORLD_CHUNK_DEFINITIONS.find((c) => c.id === "shibuya-south")!;
+    expect(shibuyaSouthDef.associatedGlbModelIds).toContain("shibuya_stream");
     // 国道246号・青山通り西（渋谷〜表参道・外苑前）
     expect(resolveChunkIdAtPosition(-480, 0)).toBe("aoyama-west");
     // 国道246号・青山通り東（赤坂見附・永田町〜霞が関）

@@ -461,5 +461,62 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
       );
     }
     expect(scrambleLen).toBeGreaterThanOrEqual(100);
+
+    // 8. 渋谷センター街（バスケットボール通り）ナビゲーションコリドーが幅員10m・全長100m以上で登録されていること
+    const centerGaiNav = navCorridors.find((c) => c.id === "nav-road-shibuya-center-gai");
+    expect(centerGaiNav, "Missing nav-road-shibuya-center-gai").toBeDefined();
+    expect(centerGaiNav!.widthMeters).toBe(10);
+    expect(centerGaiNav!.points.length).toBeGreaterThanOrEqual(4);
+    let centerGaiLen = 0;
+    for (let i = 1; i < centerGaiNav!.points.length; i++) {
+      centerGaiLen += Math.hypot(
+        centerGaiNav!.points[i].x - centerGaiNav!.points[i - 1].x,
+        centerGaiNav!.points[i].z - centerGaiNav!.points[i - 1].z,
+      );
+    }
+    expect(centerGaiLen).toBeGreaterThanOrEqual(100);
+    expect(centerGaiNav!.points[0].x).toBe(-835);
+    expect(centerGaiNav!.points[0].z).toBe(268);
+
+    // 9. 渋谷ヒカリエ前アクセス道路ナビゲーションコリドーが幅員10m・全長100m以上で登録されていること
+    const hikarieNav = navCorridors.find((c) => c.id === "nav-road-shibuya-hikarie-access");
+    expect(hikarieNav, "Missing nav-road-shibuya-hikarie-access").toBeDefined();
+    expect(hikarieNav!.widthMeters).toBe(10);
+    expect(hikarieNav!.points.length).toBeGreaterThanOrEqual(4);
+    let hikarieLen = 0;
+    for (let i = 1; i < hikarieNav!.points.length; i++) {
+      hikarieLen += Math.hypot(
+        hikarieNav!.points[i].x - hikarieNav!.points[i - 1].x,
+        hikarieNav!.points[i].z - hikarieNav!.points[i - 1].z,
+      );
+    }
+    expect(hikarieLen).toBeGreaterThanOrEqual(100);
+    expect(hikarieNav!.points.some((p) => p.x === -730 && p.z === 155)).toBe(true);
+
+    // 10. センター街・ヒカリエ前・金王坂下の新設交差点が存在すること
+    expect(intersections.some((i) => i.id === "nav-int-shibuya-center-gai")).toBe(true);
+    expect(intersections.some((i) => i.id === "nav-int-shibuya-hikarie-front")).toBe(true);
+    expect(intersections.some((i) => i.id === "nav-int-shibuya-kon-ozaka")).toBe(true);
+
+    // 11. 渋谷主要ランドマーク建築物（ヒカリエ、PARCO、セルリアンタワー、ストリーム、スクランブルスクエア等）が登録されていること
+    const shibuyaBuildings = getShibuyaPlateauBuildingsForMap();
+    const requiredBuildingIds = [
+      "13113-bldg-shibuya-stream",
+      "13113-bldg-scramble-square",
+      "13113-bldg-shibuya-hikarie",
+      "13113-bldg-sakura-stage",
+      "13113-bldg-shibuya-fukuras",
+      "13113-bldg-cerulean-tower",
+      "13113-bldg-miyashita-park",
+      "13113-bldg-shibuya-mark-city",
+      "13113-bldg-qfront-109",
+      "13113-bldg-shibuya-parco",
+    ];
+    for (const bldgId of requiredBuildingIds) {
+      const found = shibuyaBuildings.find((b) => b.buildingId === bldgId);
+      expect(found, `Missing Shibuya landmark building: ${bldgId}`).toBeDefined();
+      expect(found!.h).toBeGreaterThan(50);
+      expect(found!.storeysAboveGround).toBeGreaterThanOrEqual(15);
+    }
   });
 });

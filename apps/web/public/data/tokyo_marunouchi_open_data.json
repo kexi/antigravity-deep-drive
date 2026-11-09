@@ -1086,6 +1086,26 @@
       "depth": 32
     },
     {
+      "buildingId": "13113-bldg-shibuya-parco",
+      "gmlId": "bldg_a4b6c8d2-5e71-48f3-9c02-3b4e6a8d1113",
+      "name": "渋谷PARCO (公園通り・オルガン坂・宇田川街区)",
+      "nameEn": "Shibuya PARCO",
+      "address": "東京都渋谷区宇田川町15番1号",
+      "usage": "商業施設・文化施設・業務施設",
+      "measuredHeight": 100,
+      "podiumHeight": 28,
+      "storeysAboveGround": 19,
+      "storeysBelowGround": 3,
+      "roofEdgeAreaSqm": 3750,
+      "groundElevationM": 26.2,
+      "lat": 35.66205,
+      "lon": 139.69875,
+      "localX": -830,
+      "localZ": 382,
+      "width": 40,
+      "depth": 40
+    },
+    {
       "buildingId": "13113-bldg-shibuya-solasta",
       "gmlId": "bldg_1596554a-b474-454b-889e-1cd43091f393",
       "name": "渋谷ソラスタ (道玄坂・南平台街区)",
@@ -2257,6 +2277,36 @@
       "end": {
         "x": -855,
         "z": 440
+      }
+    },
+    {
+      "rID": "533935-shibuya-rdcl-center-gai",
+      "rdCtg": "市区町村道等",
+      "rnkWidth": "5.5m-13m未満",
+      "displayName": "渋谷センター街・バスケットボール通り (スクランブル北西〜宇田川町交番・井の頭通り合流)",
+      "routeCode": "渋谷区道センター街線",
+      "start": {
+        "x": -825,
+        "z": 265
+      },
+      "end": {
+        "x": -875,
+        "z": 320
+      }
+    },
+    {
+      "rID": "533935-shibuya-rdcl-hikarie",
+      "rdCtg": "市区町村道等",
+      "rnkWidth": "5.5m-13m未満",
+      "displayName": "ヒカリエ前通り・金王坂連絡路 (宮益坂下〜ヒカリエ前〜金王坂・国道246号)",
+      "routeCode": "渋谷区道ヒカリエ連絡線",
+      "start": {
+        "x": -732,
+        "z": 248
+      },
+      "end": {
+        "x": -710,
+        "z": 95
       }
     },
     {
