@@ -2083,11 +2083,11 @@ export const TOKYO_MARUNOUCHI_OPEN_DATA = {
       routeCode: "東京都道305号",
       start: {
         x: -750,
-        z: -220,
+        z: -210,
       },
       end: {
         x: -750,
-        z: 240,
+        z: 248,
       },
     },
     {
@@ -2101,7 +2101,7 @@ export const TOKYO_MARUNOUCHI_OPEN_DATA = {
         z: 95,
       },
       end: {
-        x: -268,
+        x: -283,
         z: 95,
       },
     },

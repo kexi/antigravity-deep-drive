@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import * as THREE from "three";
+import RAPIER from "@dimforge/rapier3d-compat";
 import { JapaneseRoadBuilder } from "../roads/roadBuilder";
 import { JapaneseRoadMaterial } from "../roads/japaneseRoadMaterial";
 import { RoadProps } from "../roads/roadProps";
 import type { JapaneseRoadSegmentConfig } from "../roads/types";
 import { getOpenDataCurvedRoadCorridors } from "../openData/gsiPlateauLoader";
+import { TokyoStationMap } from "../city/tokyoStationMap";
 
 describe("日本の道路作成システムの仕様検証", () => {
   it("道路構造令に基づき視覚メッシュ（凸凹シェーダー）と完全平坦コライダーが生成されることを保証する", () => {
@@ -1331,5 +1333,81 @@ describe("日本の道路作成システムの仕様検証", () => {
     expect((zebraRetroPlate.material as THREE.MeshStandardMaterial).userData.roadPropMode).toBe(
       "retroreflector",
     );
+  });
+
+  it("渋谷エリア（x ∈ [-1350, -400], z ∈ [-350, 550]）において直交直線道路メッシュおよび直角横断歩道パッドが完全撤廃され、スプライン曲線幹線網として構築されていることを保証する", async () => {
+    await RAPIER.init();
+    const scene = new THREE.Scene();
+    const world = new RAPIER.World(new RAPIER.Vector3(0, -9.81, 0));
+    const cityMap = new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+
+    // 1. 渋谷エリアの直交直線道路メッシュ（Meiji-dori-North-Harajuku, Meiji-dori-South-Ebisu, Yamate-dori-Ring6, Komazawa-dori-Ebisu, Gaien-Nishi-dori）が全廃されていること
+    const prohibitedRoadMeshNames = [
+      "Meiji-dori-North-Harajuku",
+      "Meiji-dori-South-Ebisu",
+      "Yamate-dori-Ring6",
+      "Komazawa-dori-Ebisu",
+      "Gaien-Nishi-dori",
+    ];
+    const foundProhibitedRoads: string[] = [];
+    cityMap.group.traverse((child) => {
+      if (prohibitedRoadMeshNames.includes(child.name)) {
+        foundProhibitedRoads.push(child.name);
+      }
+    });
+    expect(foundProhibitedRoads).toEqual([]);
+
+    // 2. 宮益坂下交差点（Intersection_-750_248）およびスクランブル交差点（Intersection_-815_248）に直角横断歩道白線スタンプが存在しないこと
+    const miyamasuzakaPad = cityMap.group.getObjectByName("Intersection_-750_248");
+    expect(miyamasuzakaPad).toBeDefined();
+    let miyamasuzakaCrosswalkCount = 0;
+    miyamasuzakaPad?.traverse((child) => {
+      const isCrosswalkStripe = child.name.includes("crosswalk_stripe");
+      if (isCrosswalkStripe) {
+        miyamasuzakaCrosswalkCount += 1;
+      }
+    });
+    expect(miyamasuzakaCrosswalkCount).toBe(0);
+
+    const scramblePad = cityMap.group.getObjectByName("Intersection_-815_248");
+    expect(scramblePad).toBeDefined();
+    let scramblePerpendicularCrosswalkCount = 0;
+    scramblePad?.traverse((child) => {
+      const isCrosswalkStripe = child.name.includes("crosswalk_stripe");
+      if (isCrosswalkStripe) {
+        scramblePerpendicularCrosswalkCount += 1;
+      }
+    });
+    expect(scramblePerpendicularCrosswalkCount).toBe(0);
+
+    // 対角線X字型スクランブル横断歩道は存在すること
+    const scrambleDiagonal = cityMap.group.getObjectByName("ShibuyaScrambleDiagonalCrosswalks");
+    expect(scrambleDiagonal).toBeDefined();
+
+    // 3. 曲線道路コリドー群に明治通り原宿・恵比寿延伸、山手通り、スクランブル連絡路が幅員20m以上・4頂点以上のスプライン曲線として登録されていること
+    const curvedCorridors = getOpenDataCurvedRoadCorridors();
+    const requiredCurvedCorridorIds = [
+      "nav-road-meiji-dori",
+      "nav-road-meiji-dori-harajuku-curve",
+      "nav-road-meiji-dori-ebisu-curve",
+      "nav-road-yamate-dori",
+      "nav-road-shibuya-scramble",
+    ];
+
+    for (const reqId of requiredCurvedCorridorIds) {
+      const found = curvedCorridors.find((c) => c.id === reqId);
+      expect(found, `Missing curved road: ${reqId}`).toBeDefined();
+      expect(found!.points.length).toBeGreaterThanOrEqual(4);
+      expect(found!.widthMeters).toBeGreaterThanOrEqual(20);
+
+      let len = 0;
+      for (let i = 1; i < found!.points.length; i++) {
+        len += Math.hypot(
+          found!.points[i].x - found!.points[i - 1].x,
+          found!.points[i].z - found!.points[i - 1].z,
+        );
+      }
+      expect(len).toBeGreaterThanOrEqual(100);
+    }
   });
 });

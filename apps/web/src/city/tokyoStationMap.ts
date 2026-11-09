@@ -766,63 +766,29 @@ export class TokyoStationMap {
       this.group.add(lawnMesh);
     }
 
-    // --- I. 渋谷エリア実在幹線道路網: 明治通り（都道305号）渋谷駅前本線 ---
-    // Why not: 直角碁盤の目（z = -200, -95, +95, +195 や x = -855, -645）は実在しない仮置き街路であり、
-    // 有機的な放射状曲線道路網（道玄坂、文化村通り、公園通り、井の頭通り、玉川通り、さくら坂、神泉仲通り、宮益坂）が
-    // 渋谷の本来の主軸道路網であるため、格子状街路を完全廃止し、明治通り本線は南端（z = -210: 恵比寿方面）から
-    // 北端（z = +236: 宮益坂下交差点南）まで途切れのない3車線幹線道路として構築する。
-    addRoadSegment(
-      {
-        name: "Meiji-dori-Shibuya",
-        lanesPerDirection: 3,
-        laneWidth: 3.5,
-        shoulderWidth: 1.5,
-        sidewalkWidth: 4.5,
-        curbHeight: 0.15,
-        length: 446,
-        hasYellowCenterLine: false,
-        hasWhiteDashedLines: true,
-        hasCrosswalk: true,
-        hasGuardrails: true,
-        hasManholes: true,
-        hasTrafficLights: true,
-        speedLimitSign: 50,
-      },
-      new THREE.Vector3(-750, 0.011, 13.0),
-      0,
-    );
-
-    // I-5b. 渋谷駅前東西連絡路（宮益坂下交差点西 x = -766 〜 スクランブル交差点東 x = -794、z = 248）
-    addRoadSegment(
-      {
-        name: "Shibuya-Station-Link-St",
-        lanesPerDirection: 2,
-        laneWidth: 3.5,
-        shoulderWidth: 1.2,
-        sidewalkWidth: 3.0,
-        curbHeight: 0.15,
-        length: 28,
-        hasYellowCenterLine: false,
-        hasWhiteDashedLines: true,
-        hasCrosswalk: false,
-        hasGuardrails: false,
-        hasManholes: false,
-        hasTrafficLights: false,
-        speedLimitSign: 40,
-      },
-      new THREE.Vector3(-780, 0.012, 248),
-      Math.PI / 2,
-    );
+    // --- I. 渋谷エリア実在幹線道路網: 明治通り（都道305号）渋谷駅前本線および放射状接続 ---
+    // Why not addRoadSegment による直線明治通り・東西連絡路:
+    // 直線板道路はスポーン直前（z = -49, z = 124）に架空の直角横断歩道・停止線スタンプを自動生成し、
+    // 渋谷の景色を「碁盤の目」に見せる最大の幾何学的要因であったため完全廃止。
+    // 明治通り渋谷駅前本線（nav-road-meiji-dori）は Section J にて国土地理院オープンデータに基づく
+    // 多頂点 Catmull-Rom スプライン曲線道路（buildPolylineSegment: 3車線・白破線・縁石・歩道）として構築する。
+    // また東西連絡路（Shibuya-Station-Link-St）も nav-road-shibuya-scramble に完全包含されているため直線生成を廃止。
 
     // 渋谷スクランブル交差点（x = -815, z = 248）および宮益坂下交差点（x = -750, z = 248）
-    // Why not hasCenterDiamond / hasGuideDots:
+    // Why not hasCrosswalks / hasCenterDiamond / hasGuideDots:
     // スクランブル交差点内部は対角線X字型横断歩道が交差する全方向歩行者専用領域であり、
-    // 中央ダイヤ標示（◇）や南北誘導破線を描画すると斜め横断歩道白線と十字に衝突・貫通して視覚的ノイズとなるため無効化する。
-    addIntersectionPadAndMarkings(-815, 248, 44, 44, 3, 3, true, {
+    // 中央ダイヤ標示（◇）や南北誘導破線を描画すると斜め横断歩道白線と十字に衝突・貫通して視覚的ノイズとなる。
+    // また宮益坂下交差点（スポーン地点正面）およびスクランブル交差点に真北・真南・真東・真西の
+    // 直角横断歩道白線スタンプを押すと「碁盤の目」の視覚的要因となるため、hasCrosswalks を false に設定し
+    // 平滑なアスファルト舗装接続面と物理コライダーのみを供給する。
+    addIntersectionPadAndMarkings(-815, 248, 44, 44, 3, 3, false, {
       hasCenterDiamond: false,
       hasGuideDots: false,
     });
-    addIntersectionPadAndMarkings(-750, 248, 32, 24, 3, 2, true);
+    addIntersectionPadAndMarkings(-750, 248, 32, 24, 3, 2, false, {
+      hasCenterDiamond: false,
+      hasGuideDots: false,
+    });
 
     // 渋谷スクランブル交差点 象徴の対角線X字型スクランブル横断歩道（斜め横断歩道）
     // 外周横断歩道上面（world y = 0.0115 + 0.022 = 0.0335）と完全に揃えた y = 0.0336 で重畳
@@ -833,11 +799,12 @@ export class TokyoStationMap {
     // 永代通り×国道246号T字交差点（x = -268 × z = 95）フラットアスファルト接続パッド＆路面標示
     addIntersectionPadAndMarkings(-268, 95, 26, 26, 2, 2, true);
 
-    // I-6. 渋谷周辺4倍拡大エリア新設交差点フラットアスファルト接続パッド＆路面標示
-    // Why not (-830, 252: 109前Y字路) および (-790, 265: 神南一丁目) をここで重複生成しないか:
-    // スクランブル交差点パッド（x = -815, 44m x 44m: x ∈ [-837, -793], z ∈ [226, 270]）が既に 109前分岐および公園通り入口を
-    // 完全包含しており、ここで同座標に個別交差点パッドを重複配置すると、4方向横断歩道（特にスクランブル中央を東西南北に貫通する架空横断歩道）
-    // や中央ダイヤ・誘導破線・アスファルト板の同一平面 Z-fighting・物理コライダー重複を引き起こすため。
+    // I-6. 渋谷放射状曲線道路合流点 フラットアスファルト接続パッド（直角横断歩道・ダイヤ標示抑制）
+    // Why not hasCrosswalks / hasCenterDiamond:
+    // 有機的な放射状曲線道路同士の合流点に真北・真南・真東・真西を向いた直角横断歩道スタンプや
+    // 中央ダイヤ標示を押すと、斜め道路と直角白線が格子状に衝突して「碁盤の目」の視覚的印象を生むため、
+    // 横断歩道・ダイヤ標示を無効化し、平滑なアスファルト舗装接続面と物理コライダーのみを供給する。
+    // また旧グリッド座標（z = 95）の架空交差点パッド（-750, 95 および -730, 95）は完全廃止。
     const shibuyaRadialIntersections = [
       { x: -1080, z: 140, w: 36, d: 32, lx: 2, lz: 2 }, // 道玄坂上交差点（玉川通り合流）
       { x: -1250, z: 150, w: 34, d: 32, lx: 2, lz: 2 }, // 神泉町交差点（旧山手通り交差）
@@ -852,12 +819,12 @@ export class TokyoStationMap {
       { x: -400, z: 248, w: 30, d: 28, lx: 2, lz: 2 }, // 青山通り・表参道方面接続交差点
       { x: -1350, z: 150, w: 32, d: 28, lx: 3, lz: 2 }, // 山手通り・神泉町交差点（玉川通り西進合流）
       { x: -855, z: 95, w: 32, d: 28, lx: 2, lz: 2 }, // セルリアンタワー前・玉川通り（国道246号・さくら坂入口）
-      { x: -750, z: 95, w: 28, d: 24, lx: 3, lz: 2 }, // 渋谷駅東口（明治通り×国道246号・青山通り分岐交差点）
-      { x: -730, z: 155, w: 26, d: 24, lx: 1, lz: 1 }, // 渋谷ヒカリエ前交差点（アクセス道路・ShinQsエントランス前）
-      { x: -730, z: 95, w: 28, d: 24, lx: 2, lz: 2 }, // 金王坂下・ヒカリエ南交差点（国道246号・青山通り合流）
     ];
     for (const ri of shibuyaRadialIntersections) {
-      addIntersectionPadAndMarkings(ri.x, ri.z, ri.w, ri.d, ri.lx, ri.lz, true);
+      addIntersectionPadAndMarkings(ri.x, ri.z, ri.w, ri.d, ri.lx, ri.lz, false, {
+        hasCenterDiamond: false,
+        hasGuideDots: false,
+      });
     }
 
     // I-7. 渋谷ハチ公前広場インフラ（忠犬ハチ公像・石畳舗装・植栽・ベンチ・照明灯・JR駅前キャノピー）
@@ -869,7 +836,10 @@ export class TokyoStationMap {
     // --- J. 国土地理院 道路中心線 (experimental_rdcl) & PLATEAU 道路網オープンデータに基づく曲線・屈曲道路区間 ---
     const curvedRoadCorridors = getOpenDataCurvedRoadCorridors();
     for (const curvedCorridor of curvedRoadCorridors) {
-      const lanesPerDir = Math.max(1, Math.min(3, Math.round(curvedCorridor.widthMeters / 8.5)));
+      const lanesPerDir =
+        curvedCorridor.widthMeters >= 20.0
+          ? 3
+          : Math.max(1, Math.min(3, Math.round(curvedCorridor.widthMeters / 8.5)));
       const isArterialCategory = curvedCorridor.category !== "local_street";
       const polyRes = this.roadBuilder.buildPolylineSegment(
         {
@@ -902,124 +872,16 @@ export class TokyoStationMap {
     }
 
     // --- K. 10倍広域マップ拡張: 渋谷南北・西側延伸大動脈（原宿・代々木・恵比寿・山手通り・神泉・駒沢通り） ---
-    // How: 渋谷エリアを東西 1600m × 南北 2200m へ大拡張し、原宿・代々木公園・恵比寿・山手通り（環状6号線）を直結する
-    // 1. 明治通り北延伸（原宿・神宮前・代々木方面）
-    for (const meijiNorth of [
-      { cz: 398.5, len: 277 }, // 宮益坂下 z=260 .. 神宮前交差点 z=537
-      { cz: 700.0, len: 274 }, // 神宮前 z=563 .. 原宿駅前交差点 z=837
-      { cz: 981.5, len: 237 }, // 原宿駅前 z=863 .. 代々木・千駄ヶ谷北端 z=1100
-    ]) {
-      addRoadSegment(
-        {
-          name: "Meiji-dori-North-Harajuku",
-          lanesPerDirection: 3,
-          laneWidth: 3.5,
-          shoulderWidth: 1.5,
-          sidewalkWidth: 4.5,
-          curbHeight: 0.15,
-          length: meijiNorth.len,
-          hasYellowCenterLine: false,
-          hasWhiteDashedLines: true,
-          hasCrosswalk: true,
-          hasGuardrails: true,
-          hasManholes: true,
-          hasTrafficLights: true,
-          speedLimitSign: 50,
-        },
-        new THREE.Vector3(-750, 0.011, meijiNorth.cz),
-        0,
-      );
-    }
+    // Why not addRoadSegment による直線グリッド道路:
+    // 直線板道路（明治通り北・明治通り南・山手通り・駒沢通り）は直角・平行なグリッド構造を生み出し、
+    // 渋谷の景色を「碁盤の目」に見せる根本原因であったため完全撤去。
+    // 原宿方面・恵比寿方面・山手通りはすべて Section J の Catmull-Rom スプライン曲線道路
+    // （nav-road-meiji-dori-harajuku-curve, nav-road-meiji-dori-ebisu-curve, nav-road-yamate-dori）として構築する。
 
-    // 2. 明治通り南延伸（並木橋〜恵比寿駅前〜広尾方面）
-    for (const meijiSouth of [
-      { cz: -373.5, len: 327 }, // 並木橋南 z=-210 .. 渋谷橋交差点 z=-537
-      { cz: -675.0, len: 224 }, // 渋谷橋 z=-563 .. 恵比寿駅前交差点 z=-787
-      { cz: -931.5, len: 237 }, // 恵比寿駅前 z=-813 .. 広尾方面南端 z=-1050
-    ]) {
-      addRoadSegment(
-        {
-          name: "Meiji-dori-South-Ebisu",
-          lanesPerDirection: 3,
-          laneWidth: 3.5,
-          shoulderWidth: 1.5,
-          sidewalkWidth: 4.5,
-          curbHeight: 0.15,
-          length: meijiSouth.len,
-          hasYellowCenterLine: false,
-          hasWhiteDashedLines: true,
-          hasCrosswalk: true,
-          hasGuardrails: true,
-          hasManholes: true,
-          hasTrafficLights: true,
-          speedLimitSign: 50,
-        },
-        new THREE.Vector3(-750, 0.011, meijiSouth.cz),
-        0,
-      );
-    }
-
-    // 3. 山手通り（環状6号線: x = -1350 南北縦断幹線）
-    // 玉川通り西進（国道246号・神泉町交差点 z = 150）とシームレスに平面交差接続する
-    for (const yamateSeg of [
-      { cz: -706.5, len: 287 }, // 南端 z=-850 .. 駒沢通り z=-563
-      { cz: -200.0, len: 674 }, // 駒沢通り z=-537 .. 神泉交差点 z=137
-      { cz: 350.0, len: 374 }, // 神泉 z=163 .. 富ヶ谷交差点 z=537
-      { cz: 706.5, len: 287 }, // 富ヶ谷 z=563 .. 北端 z=850
-    ]) {
-      addRoadSegment(
-        {
-          name: "Yamate-dori-Ring6",
-          lanesPerDirection: 3,
-          laneWidth: 3.5,
-          shoulderWidth: 1.5,
-          sidewalkWidth: 4.0,
-          curbHeight: 0.15,
-          length: yamateSeg.len,
-          hasYellowCenterLine: false,
-          hasWhiteDashedLines: true,
-          hasCrosswalk: true,
-          hasGuardrails: true,
-          hasManholes: true,
-          hasTrafficLights: true,
-          speedLimitSign: 60,
-        },
-        new THREE.Vector3(-1350, 0.011, yamateSeg.cz),
-        0,
-      );
-    }
-
-    // 5. 恵比寿・駒沢通り（東西幹線: z = -550）
-    for (const komazawaSeg of [
-      { cx: -1050, len: 568, rot: Math.PI / 2 }, // 山手通り x=-1334 .. 明治通り x=-766
-      { cx: -650, len: 168, rot: -Math.PI / 2 }, // 明治通り x=-734 .. 外苑西通り x=-566
-    ]) {
-      addRoadSegment(
-        {
-          name: "Komazawa-dori-Ebisu",
-          lanesPerDirection: 2,
-          laneWidth: 3.5,
-          shoulderWidth: 1.2,
-          sidewalkWidth: 3.5,
-          curbHeight: 0.15,
-          length: komazawaSeg.len,
-          hasYellowCenterLine: false,
-          hasWhiteDashedLines: true,
-          hasCrosswalk: true,
-          hasGuardrails: true,
-          hasManholes: true,
-          hasTrafficLights: true,
-          speedLimitSign: 50,
-        },
-        new THREE.Vector3(komazawaSeg.cx, 0.012, -550),
-        komazawaSeg.rot,
-      );
-    }
-
-    // --- L. 10倍広域マップ拡張: 青山・六本木・赤坂大動脈（六本木通り・外苑西通り・外苑東通り・青山通り本線） ---
-    // 1. 六本木通り（都道412号: z = -350, 渋谷〜西麻布〜六本木ヒルズ〜赤坂アークヒルズ〜日比谷公園）
+    // --- L. 10倍広域マップ拡張: 青山・六本木・赤坂大動脈（六本木通り・外苑東通り・青山通り本線） ---
+    // 1. 六本木通り（都道412号: z = -350, 六本木ヒルズ〜赤坂アークヒルズ〜日比谷公園）
+    // Why not cx: -465（西麻布〜渋谷区間）: 直角東西グリッド道路となるため撤去し、港区側（六本木〜溜池〜日比谷公園）のみ直線維持。
     for (const roppongiSeg of [
-      { cx: -465, len: 138 }, // 西麻布 x=-534 .. 六本木 x=-396
       { cx: -280, len: 168 }, // 六本木 x=-364 .. 溜池 x=-196
       { cx: -90, len: 148 }, // 溜池 x=-164 .. 日比谷公園 x=-16
     ]) {
@@ -1046,31 +908,8 @@ export class TokyoStationMap {
     }
 
     // 2. 外苑西通り（キラー通り: x = -550 南北幹線）
-    for (const gaienWestSeg of [
-      { cz: -50, len: 568 }, // 西麻布 z=-334 .. 青山通り表参道 z=234
-      { cz: 400, len: 268 }, // 表参道 z=266 .. 原宿北 z=534
-    ]) {
-      addRoadSegment(
-        {
-          name: "Gaien-Nishi-dori",
-          lanesPerDirection: 2,
-          laneWidth: 3.5,
-          shoulderWidth: 1.2,
-          sidewalkWidth: 3.5,
-          curbHeight: 0.15,
-          length: gaienWestSeg.len,
-          hasYellowCenterLine: false,
-          hasWhiteDashedLines: true,
-          hasCrosswalk: true,
-          hasGuardrails: true,
-          hasManholes: true,
-          hasTrafficLights: true,
-          speedLimitSign: 50,
-        },
-        new THREE.Vector3(-550, 0.011, gaienWestSeg.cz),
-        0,
-      );
-    }
+    // Why not addRoadSegment: 明治通り（x = -750）と完全平行に走る直線板道路であり、
+    // 渋谷エリアを直角格子状にする主要因であったため撤去。
 
     // 3. 外苑東通り（x = -380 南北幹線: 六本木〜青山一丁目〜信濃町）
     for (const gaienEastSeg of [
@@ -1099,9 +938,10 @@ export class TokyoStationMap {
       );
     }
 
-    // 4. 青山通り（国道246号）本線東西（z = 250: 表参道〜外苑前〜青山一丁目〜赤坂見附）
+    // 4. 青山通り（国道246号）本線東西（z = 250: 青山一丁目〜赤坂見附）
+    // Why not cx: -465（表参道区間）: 表参道区間（z = 250, x = -534..-396）は宮益坂・スクランブル（z = 248）と
+    // 水平直角グリッドを形成するため撤去。赤坂見附永代通り接続区間のみ直線維持。
     for (const r246Main of [
-      { cx: -465, len: 138 }, // 表参道 x=-534 .. 外苑前・青山一丁目 x=-396
       { cx: -324, len: 80 }, // 青山一丁目 x=-364 .. 赤坂見附永代通り接続 x=-284
     ]) {
       addRoadSegment(
@@ -1366,21 +1206,9 @@ export class TokyoStationMap {
       lanesX: number;
       lanesZ: number;
     }> = [
-      // 原宿・神宮前・代々木
-      { x: -750, z: 550, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
-      { x: -750, z: 850, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
-      // 恵比寿・渋谷橋
-      { x: -750, z: -550, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
-      { x: -750, z: -800, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
-      // 山手通り（神泉・駒沢通り・富ヶ谷）
-      { x: -1350, z: 95, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
-      { x: -1350, z: -550, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
-      { x: -1350, z: 550, width: 32, depth: 26, lanesX: 3, lanesZ: 2 },
-      // 青山・六本木・赤坂
-      { x: -550, z: -350, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 西麻布交差点
+      // 青山・六本木・赤坂（港区側交差点のみ維持）
       { x: -380, z: -350, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 六本木交差点
       { x: -180, z: -150, width: 32, depth: 26, lanesX: 3, lanesZ: 2 }, // 赤坂・溜池
-      { x: -550, z: 250, width: 32, depth: 32, lanesX: 3, lanesZ: 3 }, // 表参道交差点
       { x: -380, z: 250, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 青山一丁目交差点
       // 皇居周回（三宅坂・半蔵門・竹橋）
       { x: -350, z: 365, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 三宅坂交差点
