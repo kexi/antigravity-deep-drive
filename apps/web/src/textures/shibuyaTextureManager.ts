@@ -13,7 +13,9 @@ export type ShibuyaTextureId =
   | "markCity"
   | "toeiBic"
   | "dogenzakaCommercial"
-  | "plateauLod2Facade";
+  | "plateauLod2Facade"
+  | "plateauLod2Storefront"
+  | "plateauLod2Roof";
 
 export interface ShibuyaTextureConfig {
   id: ShibuyaTextureId;
@@ -143,6 +145,24 @@ export const SHIBUYA_TEXTURE_CONFIGS: Record<ShibuyaTextureId, ShibuyaTextureCon
     emissiveIntensityDay: 0.12,
     emissiveIntensityNight: 0.85,
   },
+  plateauLod2Storefront: {
+    id: "plateauLod2Storefront",
+    url: "/textures/shibuya/plateau_lod2_storefront.jpg",
+    repeat: [1, 1],
+    roughness: 0.32,
+    metalness: 0.22,
+    emissiveIntensityDay: 0.22,
+    emissiveIntensityNight: 1.25,
+  },
+  plateauLod2Roof: {
+    id: "plateauLod2Roof",
+    url: "/textures/shibuya/plateau_lod2_roof.jpg",
+    repeat: [1, 1],
+    roughness: 0.75,
+    metalness: 0.12,
+    emissiveIntensityDay: 0.02,
+    emissiveIntensityNight: 0.15,
+  },
 };
 
 /**
@@ -205,7 +225,7 @@ export class ShibuyaTextureManager {
   }
 
   /**
-   * PLATEAU LOD2 写真ベースの実写ファサードマテリアル（木々や地面の映り込み）を生成する
+   * PLATEAU LOD2 写真ベースの実写ファサードマテリアル（中高層階カーテンウォール・窓サッシ）を生成する
    */
   public createPlateauLod2Material(isNight = false): THREE.MeshStandardMaterial {
     const tex = this.getTexture("plateauLod2Facade");
@@ -221,6 +241,46 @@ export class ShibuyaTextureManager {
         : (cfg.emissiveIntensityDay ?? 0.12),
     });
     mat.name = "PlateauLod2PhotorealisticMat";
+    return mat;
+  }
+
+  /**
+   * PLATEAU LOD2 低層階・路面店舗・街路樹＆地面の映り込み実写マテリアルを生成する
+   */
+  public createPlateauLod2StorefrontMaterial(isNight = false): THREE.MeshStandardMaterial {
+    const tex = this.getTexture("plateauLod2Storefront");
+    const cfg = SHIBUYA_TEXTURE_CONFIGS.plateauLod2Storefront;
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: cfg.roughness ?? 0.32,
+      metalness: cfg.metalness ?? 0.22,
+      emissive: new THREE.Color(0xffffff),
+      emissiveMap: tex,
+      emissiveIntensity: isNight
+        ? (cfg.emissiveIntensityNight ?? 1.25)
+        : (cfg.emissiveIntensityDay ?? 0.22),
+    });
+    mat.name = "PlateauLod2StorefrontMat";
+    return mat;
+  }
+
+  /**
+   * PLATEAU LOD2 屋上・パラペット・エレベーター機械室塔屋マテリアルを生成する
+   */
+  public createPlateauLod2RoofMaterial(isNight = false): THREE.MeshStandardMaterial {
+    const tex = this.getTexture("plateauLod2Roof");
+    const cfg = SHIBUYA_TEXTURE_CONFIGS.plateauLod2Roof;
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: cfg.roughness ?? 0.75,
+      metalness: cfg.metalness ?? 0.12,
+      emissive: new THREE.Color(0xffffff),
+      emissiveMap: tex,
+      emissiveIntensity: isNight
+        ? (cfg.emissiveIntensityNight ?? 0.15)
+        : (cfg.emissiveIntensityDay ?? 0.02),
+    });
+    mat.name = "PlateauLod2RoofMat";
     return mat;
   }
 

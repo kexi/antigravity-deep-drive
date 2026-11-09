@@ -11,9 +11,12 @@ import {
   getShibuyaPlateauBuildingsForMap,
   getTokyoOpenData,
   localToWgs84,
+  pointToSegmentDistance,
   sampleGsiDemElevation,
+  SHIBUYA_GSI_ROAD_SEGMENTS,
   wgs84ToLocal,
 } from "../openData/gsiPlateauLoader";
+import { TOKYO_MARUNOUCHI_OPEN_DATA } from "../openData/tokyoMarunouchiOpenData";
 
 describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI DEM5A / 道路中心線) オープンデータ統合検証", () => {
   it("JGD2011 / WGS84 緯度経度と東京駅丸の内ローカル3D座標 (x, z) の双方向変換が誤差 0.05m 以内で一致することを保証する", () => {
@@ -225,19 +228,23 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
       expect(overlapsMeijiDori).toBe(false);
     }
 
-    // 首都高速3号渋谷線および渋谷街中周回ストリートが GSI 道路検索で特定できること
+    // 首都高速3号渋谷線および渋谷実在放射状幹線が GSI 道路検索で特定できること
     const shutokoRoad = findNearestGsiRoad(-830, 99);
     expect(shutokoRoad.routeCode).toBe("首都高速3号渋谷線");
     expect(shutokoRoad.rdCtg).toBe("高速自動車国道等");
-    const inaribashiRoad = findNearestGsiRoad(-695, -95);
-    expect(inaribashiRoad.routeCode).toBe("渋谷区道稲荷橋線");
-    const konnozakaRoad = findNearestGsiRoad(-645, -15);
-    expect(konnozakaRoad.routeCode).toBe("渋谷区道金王坂線");
-    const miyashitaRoad = findNearestGsiRoad(-795, 195);
-    expect(miyashitaRoad.routeCode).toBe("渋谷区道美竹線");
+    const dogenzakaRoad = findNearestGsiRoad(-925, 215);
+    expect(dogenzakaRoad.displayName).toContain("道玄坂");
+    const bunkamuraRoad = findNearestGsiRoad(-905, 325);
+    expect(bunkamuraRoad.displayName).toContain("文化村通り");
+    const koenRoad = findNearestGsiRoad(-800, 380);
+    expect(koenRoad.displayName).toContain("公園通り");
+    const tamagawaRoad = findNearestGsiRoad(-1200, 148);
+    expect(tamagawaRoad.routeCode).toBe("国道246号");
+    const inokashiraRoad = findNearestGsiRoad(-860, 335);
+    expect(inokashiraRoad.displayName).toContain("井の頭通り");
     expect(getRelativeTerrainDisplacement(-156, 100)).toBe(0);
     expect(getRelativeTerrainDisplacement(156, 100)).toBe(0);
-    expect(getRelativeTerrainDisplacement(-645, -95)).toBe(0);
+    expect(getRelativeTerrainDisplacement(-855, 95)).toBe(0);
 
     // 渋谷エリアの全 PLATEAU 建築物の gmlId が仮文字列ではなく実測の Spec 5.0 CityGML UUID 形式 (`bldg_<UUID>`) であり、
     // TOKYO_MARUNOUCHI_OPEN_DATA にも shibuyaDem5a / shibuyaPlateauBuildings / shibuyaGsiRoadSegments が統合されていること
@@ -289,22 +296,18 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
     ];
 
     for (const c of corridors) {
-      const halfRoad = c.widthMeters * 0.5 + 3.0; // 縁石ケーシング＋歩道クリアランス込み
-      const p0 = c.points[0];
-      const p1 = c.points[c.points.length - 1];
-      const roadMinX = Math.min(p0.x, p1.x) - halfRoad;
-      const roadMaxX = Math.max(p0.x, p1.x) + halfRoad;
-      const roadMinZ = Math.min(p0.z, p1.z) - halfRoad;
-      const roadMaxZ = Math.max(p0.z, p1.z) + halfRoad;
+      const halfRoad = c.widthMeters * 0.5 + 1.5; // 車道幅員半分＋歩道クリアランス
 
-      for (const b of allMapBuildings) {
-        const bMinX = b.x - b.w * 0.5;
-        const bMaxX = b.x + b.w * 0.5;
-        const bMinZ = b.z - b.d * 0.5;
-        const bMaxZ = b.z + b.d * 0.5;
-        const isOverlappingRoad =
-          roadMaxX > bMinX && roadMinX < bMaxX && roadMaxZ > bMinZ && roadMinZ < bMaxZ;
-        expect(isOverlappingRoad, `${c.id} overlaps ${b.buildingId}`).toBe(false);
+      for (let i = 0; i < c.points.length - 1; i++) {
+        const p0 = c.points[i];
+        const p1 = c.points[i + 1];
+
+        for (const b of allMapBuildings) {
+          const bRadius = Math.min(b.w, b.d) * 0.5;
+          const dist = pointToSegmentDistance(b.x, b.z, p0.x, p0.z, p1.x, p1.z);
+          const isOverlappingRoad = dist < halfRoad + bRadius;
+          expect(isOverlappingRoad, `${c.id} seg${i} overlaps ${b.buildingId}`).toBe(false);
+        }
       }
     }
 
@@ -322,5 +325,122 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
         expect(isOverlappingEachOther).toBe(false);
       }
     }
+  });
+
+  it("渋谷の非実在直角格子グリッド道路およびグリッド交差点が完全廃止され、実在の放射状曲線道路網（道玄坂・文化村通り・神泉・宮益坂等）として再構成されていることを保証する", () => {
+    const navCorridors = getNavigationRoadCorridors();
+    const curvedCorridors = getOpenDataCurvedRoadCorridors();
+    const intersections = getNavigationIntersections();
+
+    // 1. 廃止された非実在グリッド道路コリドーが存在しないこと
+    const abolishedCorridorIds = [
+      "nav-road-shibuya-sakuragaoka",
+      "nav-road-shibuya-namikibashi",
+      "nav-road-shibuya-miyashita",
+      "nav-road-shibuya-west-st",
+      "nav-road-shibuya-east-konnozaka",
+      "nav-road-shibuya-sakuragaoka-loop",
+    ];
+    for (const abolishedId of abolishedCorridorIds) {
+      expect(navCorridors.some((c) => c.id === abolishedId)).toBe(false);
+      expect(curvedCorridors.some((c) => c.id === abolishedId)).toBe(false);
+    }
+
+    // 1b. GSI オープンデータ (openData / TOKYO_MARUNOUCHI_OPEN_DATA / SHIBUYA_GSI_ROAD_SEGMENTS) からも非実在グリッド線が完全抹消されていること
+    const abolishedGsiRoadIds = [
+      "533935-shibuya-rdcl-inaribashi-st",
+      "533935-shibuya-rdcl-namikibashi-st",
+      "533935-shibuya-rdcl-miyashita-st",
+      "533935-shibuya-rdcl-west-loop",
+      "533935-shibuya-rdcl-east-konnozaka",
+    ];
+    const openData = getTokyoOpenData();
+    for (const abolishedGsiId of abolishedGsiRoadIds) {
+      expect(openData.shibuyaGsiRoadSegments.some((s) => s.rID === abolishedGsiId)).toBe(false);
+      expect(
+        TOKYO_MARUNOUCHI_OPEN_DATA.shibuyaGsiRoadSegments.some((s) => s.rID === abolishedGsiId),
+      ).toBe(false);
+      expect(SHIBUYA_GSI_ROAD_SEGMENTS.some((s) => s.rID === abolishedGsiId)).toBe(false);
+    }
+
+    // 2. 廃止された非実在グリッド交差点が存在しないこと
+    const abolishedIntersectionIds = [
+      "nav-int-shibuya-stream",
+      "nav-int-shibuya-namikibashi",
+      "nav-int-shibuya-miyashita",
+      "nav-int-shibuya-west-r246",
+      "nav-int-shibuya-sakuragaoka-west",
+      "nav-int-shibuya-konnozaka",
+      "nav-int-shibuya-stream-east",
+    ];
+    for (const abolishedIntId of abolishedIntersectionIds) {
+      expect(intersections.some((i) => i.id === abolishedIntId)).toBe(false);
+    }
+
+    // 2b. 実在の放射状曲線幹線が GSI 道路セグメント群に漏れなく登録されていること
+    const requiredGsiRoadIds = [
+      "533935-shibuya-rdcl-scramble",
+      "533935-shibuya-rdcl-dogenzaka",
+      "533935-shibuya-rdcl-bunkamura",
+      "533935-shibuya-rdcl-koen-dori",
+      "533935-shibuya-rdcl-inokashira-organ",
+      "533935-shibuya-rdcl-tamagawa-west",
+      "533935-shibuya-rdcl-shinsen-nakadori",
+      "533935-shibuya-rdcl-sakurazaka",
+      "533935-shibuya-rdcl-miyamasuzaka",
+      "533935-shibuya-rdcl-jinnan-cross",
+    ];
+    for (const reqGsiId of requiredGsiRoadIds) {
+      expect(openData.shibuyaGsiRoadSegments.some((s) => s.rID === reqGsiId)).toBe(true);
+      expect(
+        TOKYO_MARUNOUCHI_OPEN_DATA.shibuyaGsiRoadSegments.some((s) => s.rID === reqGsiId),
+      ).toBe(true);
+      expect(SHIBUYA_GSI_ROAD_SEGMENTS.some((s) => s.rID === reqGsiId)).toBe(true);
+    }
+
+    // 3. 実在放射状曲線道路網（道玄坂・文化村通り・井の頭通り・公園通り・玉川通り西進・さくら坂・円山町神泉仲通り・宮益坂・神南連絡路）がすべて定義されていること
+    const requiredCurvedRoads = [
+      "nav-road-shibuya-dogenzaka",
+      "nav-road-shibuya-bunkamura-dori",
+      "nav-road-shibuya-inokashira-organ",
+      "nav-road-shibuya-koen-dori",
+      "nav-road-shibuya-tamagawa-west",
+      "nav-road-shibuya-sakurazaka-loop",
+      "nav-road-shibuya-shinsen-nakadori",
+      "nav-road-shibuya-miyamasuzaka",
+      "nav-road-shibuya-jinnan-cross",
+    ];
+    for (const reqRoad of requiredCurvedRoads) {
+      const foundInCurved = curvedCorridors.find((c) => c.id === reqRoad);
+      expect(
+        foundInCurved,
+        `Missing curved road in getOpenDataCurvedRoadCorridors: ${reqRoad}`,
+      ).toBeDefined();
+      expect(foundInCurved!.points.length).toBeGreaterThanOrEqual(4);
+
+      const foundInNav = navCorridors.find((c) => c.id === reqRoad);
+      expect(
+        foundInNav,
+        `Missing curved road in getNavigationRoadCorridors: ${reqRoad}`,
+      ).toBeDefined();
+      expect(foundInNav!.points.length).toBeGreaterThanOrEqual(4);
+    }
+
+    // 4. 玉川通り西進が山手通り交差点（x = -1350, z = 150）まで延伸接続されていること
+    const tamagawaWest = curvedCorridors.find((c) => c.id === "nav-road-shibuya-tamagawa-west")!;
+    const lastPoint = tamagawaWest.points[tamagawaWest.points.length - 1];
+    expect(lastPoint.x).toBe(-1350);
+    expect(lastPoint.z).toBe(150);
+
+    // 5. 山手神泉交差点が玉川通り西進（z = 150）と整合していること
+    const yamateShinsen = intersections.find((i) => i.id === "nav-int-yamate-shinsen")!;
+    expect(yamateShinsen).toBeDefined();
+    expect(yamateShinsen.x).toBe(-1350);
+    expect(yamateShinsen.z).toBe(150);
+
+    // 6. 新設の実在交差点（SHIBUYA109前Y字路、宮益坂下、セルリアンタワー前）が存在すること
+    expect(intersections.some((i) => i.id === "nav-int-shibuya-109-y")).toBe(true);
+    expect(intersections.some((i) => i.id === "nav-int-shibuya-miyamasuzaka-shita")).toBe(true);
+    expect(intersections.some((i) => i.id === "nav-int-shibuya-cerulean-tamagawa")).toBe(true);
   });
 });

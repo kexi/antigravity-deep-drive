@@ -751,45 +751,53 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
     en: "Shibuya Stream Front Rd (Inaribashi Plaza)",
     zh: "涩谷Stream前区道 (稻荷桥广场联络线)",
   },
-  "稲荷橋通り・サクラステージ南通り (渋谷区道)": {
-    en: "Inaribashi St. / Sakura Stage South Rd (Shibuya Ward Rd)",
-    zh: "稻荷桥通・Sakura Stage南通 (涩谷区道)",
+  "渋谷スクランブル交差点 (ハチ公前・QFRONT・109前交差点)": {
+    en: "Shibuya Scramble Crossing (Hachiko / QFRONT / 109)",
+    zh: "涩谷十字路口 (八公前・QFRONT・109前交叉口)",
   },
-  "並木橋・八幡通り連絡路 (渋谷区道)": {
-    en: "Namikibashi / Hachiman-dori Connector (Shibuya Ward Rd)",
-    zh: "并木桥・八幡通联络路 (涩谷区道)",
+  "道玄坂 (都道413号・SHIBUYA109〜道玄坂上坂道区間)": {
+    en: "Dogenzaka Ave. (Pref. Rte 413 / SHIBUYA109–Dogenzaka-ue)",
+    zh: "道玄坂 (东京都道413号・SHIBUYA109〜道玄坂上坡道段)",
   },
-  "宮下公園・美竹通り連絡路 (渋谷区道)": {
-    en: "Miyashita Park / Mitake-dori Connector (Shibuya Ward Rd)",
-    zh: "宫下公园・美竹通联络路 (涩谷区道)",
+  "文化村通り (渋谷109〜東急本店〜松濤二丁目連絡路)": {
+    en: "Bunkamura-dori Ave. (SHIBUYA109–Tokyu Honten–Shoto)",
+    zh: "文化村通 (涩谷109〜东急总店〜松涛二丁目联络路)",
   },
-  "渋谷西口・桜丘ウエスト通り (渋谷区道)": {
-    en: "Shibuya West / Sakuragaoka West St. (Shibuya Ward Rd)",
-    zh: "涩谷西口・樱丘西通 (涩谷区道)",
+  "渋谷公園通り (神南一丁目〜PARCO〜渋谷区役所・NHK方面)": {
+    en: "Shibuya Koen-dori Ave. (Jinnan / PARCO / Ward Office / NHK)",
+    zh: "涩谷公园通 (神南一丁目〜PARCO〜涩谷区役所・NHK方向)",
   },
-  "金王坂・渋谷三丁目イースト通り (渋谷区道)": {
-    en: "Konnozaka / Shibuya 3-Chome East St. (Shibuya Ward Rd)",
-    zh: "金王坂・涩谷三丁目东通 (涩谷区道)",
+  "井の頭通り・オルガン坂 (スクランブル北西〜宇田川町〜PARCO前)": {
+    en: "Inokashira-dori / Organ-zaka (Udagawacho / PARCO)",
+    zh: "井之头通・风琴坂 (十字路口西北〜宇田川町〜PARCO前)",
+  },
+  "玉川通り・国道246号西進 (セルリアンタワー〜道玄坂上〜神泉町〜山手通り)": {
+    en: "Tamagawa-dori / Route 246 West (Cerulean–Shinsen–Yamate)",
+    zh: "玉川通・国道246号西进 (蓝塔〜道玄坂上〜神泉町〜山手通)",
+  },
+  "円山町・神泉仲通り (道玄坂上〜神泉駅前〜松濤二丁目)": {
+    en: "Maruyamacho / Shinsen Naka-dori St. (Shinsen Sta. / Shoto)",
+    zh: "圆山町・神泉仲通 (道玄坂上〜神泉站前〜松涛二丁目)",
+  },
+  "桜丘さくら坂 (セルリアンタワー〜インフォスタワー〜玉川通り周回路)": {
+    en: "Sakuragaoka Sakurazaka St. (Cerulean / Infoss Loop)",
+    zh: "樱丘樱坂 (蓝塔〜Infoss塔〜玉川通环路)",
+  },
+  "宮益坂 (都道413号・宮益坂下〜宮益坂上〜表参道方面)": {
+    en: "Miyamasuzaka Ave. (Pref. Rte 413 / Miyamasuzaka–Omotesando)",
+    zh: "宫益坂 (东京都道413号・宫益坂下〜宫益坂上〜表参道方向)",
+  },
+  "神南二丁目連絡路 (宮下公園北〜勤労福祉会館前)": {
+    en: "Jinnan 2-Chome Connector (Miyashita Park North–Hall)",
+    zh: "神南二丁目联络路 (宫下公园北〜勤劳福利会馆前)",
   },
   "首都高速3号渋谷線 (国道246号・渋谷高架橋)": {
     en: "Shutoko Expwy Route 3 Shibuya Line (Route 246 Viaduct)",
     zh: "首都高速3号涩谷线 (国道246号・涩谷高架桥)",
   },
-  "渋谷スクランブル交差点 (ハチ公前・QFRONT・109前交差点)": {
-    en: "Shibuya Scramble Crossing (Hachiko / QFRONT / 109)",
-    zh: "涩谷全向十字路口 (八公前・QFRONT・109前)",
-  },
-  "道玄坂 (都道413号・SHIBUYA109〜道玄坂上)": {
-    en: "Dogenzaka (Pref. Rte 413 / SHIBUYA109 to Dogenzaka-ue)",
-    zh: "道玄坂 (东京都道413号・SHIBUYA109〜道玄坂上)",
-  },
-  "宮益坂 (都道413号・渋谷駅東口〜宮益坂上・青山通り)": {
-    en: "Miyamasuzaka (Pref. Rte 413 / Shibuya East to Aoyama-dori)",
-    zh: "宫益坂 (东京都道413号・涩谷站东口〜宫益坂上・青山通)",
-  },
-  "文化村通り (渋谷109〜Bunkamura・松濤方面)": {
-    en: "Bunkamura-dori Ave. (SHIBUYA109 to Bunkamura / Shoto)",
-    zh: "文化村通 (涩谷109〜Bunkamura・松涛方向)",
+  "明治通り・都道305号芝新宿王子線 (GSI experimental_rdcl 渋谷区間)": {
+    en: "Meiji-dori Ave. (Pref. Rte 305 / GSI Shibuya Exp.)",
+    zh: "明治通・东京都道305号 (GSI experimental_rdcl 涩谷区间)",
   },
 };
 

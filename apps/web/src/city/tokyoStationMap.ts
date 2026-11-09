@@ -749,175 +749,31 @@ export class TokyoStationMap {
       this.group.add(lawnMesh);
     }
 
-    // --- I. 渋谷駅周辺街中グリッド道路網（明治通り x = -750 / 国道246号 z = 95 / 稲荷橋通り z = -95 / 並木橋通り z = -200 / 宮下公園通り z = 195 / 桜丘西通り x = -855 / 金王坂通り x = -645） ---
-    // Why 明治通りを4箇所の交差点（z = -200, -95, +95, +195）で3区間に分割するか:
-    // 1本の長尺セグメントで生成すると歩道縁石・ガードレールコライダーが稲荷橋（渋谷ストリーム前 z=-95）や並木橋（z=-200）、
-    // 宮下公園前（z=+195）の交差点を完全に塞いでしまい、街中への右左折進入ができなくなるため。
-    for (const meijiSeg of [
-      { cz: -147.5, len: 83 }, // z = -189 .. -106（並木橋〜稲荷橋・渋谷三丁目街区）
-      { cz: 0.0, len: 164 }, // z = -82 .. +82（渋谷ストリーム・サクラステージ・フクラス正面街区）
-      { cz: 146.5, len: 75 }, // z = +109 .. +184（渋谷駅東口・ヒカリエ・スクランブルスクエア街区）
-      { cz: 221.5, len: 41 }, // z = +201 .. +242（宮下公園前〜宮益坂下交差点南）
-    ]) {
-      addRoadSegment(
-        {
-          name: "Meiji-dori-Shibuya",
-          lanesPerDirection: 3,
-          laneWidth: 3.5,
-          shoulderWidth: 1.5,
-          sidewalkWidth: 4.5,
-          curbHeight: 0.15,
-          length: meijiSeg.len,
-          hasYellowCenterLine: false,
-          hasWhiteDashedLines: true,
-          hasCrosswalk: true,
-          hasGuardrails: true,
-          hasManholes: true,
-          hasTrafficLights: true,
-          speedLimitSign: 50,
-        },
-        new THREE.Vector3(-750, 0.011, meijiSeg.cz),
-        0,
-      );
-    }
-
-    // 国道246号・玉川通り・青山通り渋谷区間（z = 95: フクラス西 x=-844 〜 明治通り西 x=-767、および明治通り東 x=-733 〜 金王坂交差点西 x=-656）
-    // Why x = -632 以東をここで直線生成しないか:
-    // 金王坂交差点（x = -645, z = 95）より東側の青山通り区間（x = -632 .. -283）は国土地理院オープンデータの曲線道路コリドー（nav-road-route246）として
-    // 緩やかなS字カーブで生成されるため、渋谷街中グリッド内の2区間のみ直線セグメントで構築して金王坂交差点を開口させる。
-    for (const r246Seg of [
-      { cx: -805.5, len: 77, rot: Math.PI / 2 }, // x = -844 .. -767
-      { cx: -694.5, len: 77, rot: -Math.PI / 2 }, // x = -733 .. -656
-    ]) {
-      addRoadSegment(
-        {
-          name: "Route-246-Shibuya",
-          lanesPerDirection: 2,
-          laneWidth: 3.5,
-          shoulderWidth: 1.5,
-          sidewalkWidth: 4.0,
-          curbHeight: 0.15,
-          length: r246Seg.len,
-          hasYellowCenterLine: false,
-          hasWhiteDashedLines: true,
-          hasCrosswalk: true,
-          hasGuardrails: true,
-          hasManholes: true,
-          hasTrafficLights: true,
-          speedLimitSign: 50,
-        },
-        new THREE.Vector3(r246Seg.cx, 0.012, 95),
-        r246Seg.rot,
-      );
-    }
-
-    // I-2. 渋谷街中東西ストリート（稲荷橋通り z = -95 / 並木橋通り z = -200 / 宮下公園・美竹通り z = 195）
-    // How: 渋谷ストリーム・サクラステージ・スクランブルスクエア・ヒカリエ・渋谷三丁目ビルの周囲を回遊できるよう東西街路を開通させる。
-    for (const ewStreet of [
-      { z: -95, name: "Shibuya-Inaribashi-St" },
-      { z: -200, name: "Shibuya-Namikibashi-St" },
-      { z: 195, name: "Shibuya-Miyashita-Mitake-St" },
-    ]) {
-      for (const xSeg of [
-        { cx: -805.5, len: 77, rot: Math.PI / 2 }, // x = -844 .. -767（西街区）
-        { cx: -694.5, len: 77, rot: -Math.PI / 2 }, // x = -733 .. -656（東街区・渋谷川横断）
-      ]) {
-        addRoadSegment(
-          {
-            name: ewStreet.name,
-            lanesPerDirection: 1,
-            laneWidth: 3.25,
-            shoulderWidth: 1.0,
-            sidewalkWidth: 2.5,
-            curbHeight: 0.15,
-            length: xSeg.len,
-            hasYellowCenterLine: false,
-            hasWhiteDashedLines: true,
-            hasCrosswalk: true,
-            hasGuardrails: false,
-            hasManholes: true,
-            hasTrafficLights: true,
-            speedLimitSign: 30,
-          },
-          new THREE.Vector3(xSeg.cx, 0.012, ewStreet.z),
-          xSeg.rot,
-        );
-      }
-    }
-
-    // I-3. 渋谷西口・桜丘ウエスト通り（x = -855: サクラステージ・フクラス・スクランブルスクエア西側）
-    // ※ z = -200 .. -95 区間は国土地理院曲線道路コリドー（nav-road-shibuya-sakuragaoka-loop）として生成されるため、z = -95 以北を構築する
-    for (const westSeg of [
-      { cz: 0.0, len: 164 }, // z = -82 .. +82
-      { cz: 146.5, len: 75 }, // z = +109 .. +184
-    ]) {
-      addRoadSegment(
-        {
-          name: "Shibuya-Sakuragaoka-West-St",
-          lanesPerDirection: 1,
-          laneWidth: 3.25,
-          shoulderWidth: 1.0,
-          sidewalkWidth: 2.5,
-          curbHeight: 0.15,
-          length: westSeg.len,
-          hasYellowCenterLine: false,
-          hasWhiteDashedLines: true,
-          hasCrosswalk: true,
-          hasGuardrails: true,
-          hasManholes: true,
-          hasTrafficLights: true,
-          speedLimitSign: 30,
-        },
-        new THREE.Vector3(-855, 0.011, westSeg.cz),
-        0,
-      );
-    }
-
-    // I-4. 金王坂・渋谷三丁目イースト通り（x = -645: 渋谷ストリーム・ヒカリエ・渋谷三丁目ビル東側）
-    for (const eastSeg of [
-      { cz: -147.5, len: 83 }, // z = -189 .. -106
-      { cz: 0.0, len: 164 }, // z = -82 .. +82
-      { cz: 146.5, len: 75 }, // z = +109 .. +184
-    ]) {
-      addRoadSegment(
-        {
-          name: "Shibuya-Konnozaka-East-St",
-          lanesPerDirection: 1,
-          laneWidth: 3.25,
-          shoulderWidth: 1.0,
-          sidewalkWidth: 2.5,
-          curbHeight: 0.15,
-          length: eastSeg.len,
-          hasYellowCenterLine: false,
-          hasWhiteDashedLines: true,
-          hasCrosswalk: true,
-          hasGuardrails: true,
-          hasManholes: true,
-          hasTrafficLights: true,
-          speedLimitSign: 30,
-        },
-        new THREE.Vector3(-645, 0.011, eastSeg.cz),
-        0,
-      );
-    }
-
-    // I-5. 渋谷エリア全12交差点（x ∈ {-855, -750, -645} × z ∈ {-200, -95, +95, +195}）フラットアスファルト接続パッド＆路面標示
-    const shibuyaIntersectionXs = [
-      { x: -855, width: 22, lanesX: 1 },
-      { x: -750, width: 32, lanesX: 3 },
-      { x: -645, width: 22, lanesX: 1 },
-    ];
-    const shibuyaIntersectionZs = [
-      { z: -200, depth: 20, lanesZ: 1 },
-      { z: -95, depth: 22, lanesZ: 1 },
-      { z: 95, depth: 26, lanesZ: 2 },
-      { z: 195, depth: 20, lanesZ: 1 },
-    ];
-    for (const sx of shibuyaIntersectionXs) {
-      for (const sz of shibuyaIntersectionZs) {
-        addIntersectionPadAndMarkings(sx.x, sz.z, sx.width, sz.depth, sx.lanesX, sz.lanesZ, true);
-      }
-    }
+    // --- I. 渋谷エリア実在幹線道路網: 明治通り（都道305号）渋谷駅前本線 ---
+    // Why not: 直角碁盤の目（z = -200, -95, +95, +195 や x = -855, -645）は実在しない仮置き街路であり、
+    // 有機的な放射状曲線道路網（道玄坂、文化村通り、公園通り、井の頭通り、玉川通り、さくら坂、神泉仲通り、宮益坂）が
+    // 渋谷の本来の主軸道路網であるため、格子状街路を完全廃止し、明治通り本線は南端（z = -210: 恵比寿方面）から
+    // 北端（z = +236: 宮益坂下交差点南）まで途切れのない3車線幹線道路として構築する。
+    addRoadSegment(
+      {
+        name: "Meiji-dori-Shibuya",
+        lanesPerDirection: 3,
+        laneWidth: 3.5,
+        shoulderWidth: 1.5,
+        sidewalkWidth: 4.5,
+        curbHeight: 0.15,
+        length: 446,
+        hasYellowCenterLine: false,
+        hasWhiteDashedLines: true,
+        hasCrosswalk: true,
+        hasGuardrails: true,
+        hasManholes: true,
+        hasTrafficLights: true,
+        speedLimitSign: 50,
+      },
+      new THREE.Vector3(-750, 0.011, 13.0),
+      0,
+    );
 
     // I-5b. 渋谷駅前東西連絡路（宮益坂下交差点西 x = -766 〜 スクランブル交差点東 x = -794、z = 248）
     addRoadSegment(
@@ -969,6 +825,30 @@ export class TokyoStationMap {
 
     // 永代通り×国道246号T字交差点（x = -268 × z = 95）フラットアスファルト接続パッド＆路面標示
     addIntersectionPadAndMarkings(-268, 95, 26, 26, 2, 2, true);
+
+    // I-6. 渋谷周辺4倍拡大エリア新設交差点フラットアスファルト接続パッド＆路面標示
+    // How: 109前Y字分岐、道玄坂上、神泉町、東急本店前、松濤二丁目、神南一丁目、渋谷PARCO前、勤労福祉会館前、渋谷区役所・NHK前、宇田川町、さくら坂上、宮益坂上の全交差点を滑らかに平坦接続する
+    const shibuyaRadialIntersections = [
+      { x: -830, z: 252, w: 36, d: 34, lx: 2, lz: 2 }, // SHIBUYA109前Y字路（道玄坂・文化村通り分岐）
+      { x: -1080, z: 140, w: 36, d: 32, lx: 2, lz: 2 }, // 道玄坂上交差点（玉川通り合流）
+      { x: -1250, z: 150, w: 34, d: 32, lx: 2, lz: 2 }, // 神泉町交差点（旧山手通り交差）
+      { x: -940, z: 345, w: 30, d: 28, lx: 2, lz: 2 }, // 東急本店前交差点（松濤文化村通り）
+      { x: -1060, z: 370, w: 28, d: 26, lx: 1, lz: 1 }, // 松濤二丁目交差点（円山町連絡路接続）
+      { x: -790, z: 265, w: 30, d: 28, lx: 2, lz: 2 }, // 神南一丁目交差点（公園通り入口）
+      { x: -798, z: 360, w: 28, d: 28, lx: 2, lz: 1 }, // 渋谷PARCO前交差点（オルガン坂合流）
+      { x: -805, z: 440, w: 28, d: 26, lx: 2, lz: 1 }, // 勤労福祉会館前交差点（神南連絡路接続）
+      { x: -810, z: 520, w: 32, d: 30, lx: 2, lz: 2 }, // 渋谷区役所・NHK放送センター前交差点
+      { x: -875, z: 320, w: 26, d: 24, lx: 1, lz: 1 }, // 宇田川町交番前交差点（井の頭通り・オルガン坂）
+      { x: -950, z: -60, w: 26, d: 24, lx: 1, lz: 1 }, // さくら坂上・インフォスタワー前交差点
+      { x: -560, z: 248, w: 32, d: 28, lx: 2, lz: 2 }, // 宮益坂上交差点
+      { x: -400, z: 248, w: 30, d: 28, lx: 2, lz: 2 }, // 青山通り・表参道方面接続交差点
+      { x: -1350, z: 150, w: 32, d: 28, lx: 3, lz: 2 }, // 山手通り・神泉町交差点（玉川通り西進合流）
+      { x: -855, z: 95, w: 32, d: 28, lx: 2, lz: 2 }, // セルリアンタワー前・玉川通り（国道246号・さくら坂入口）
+      { x: -750, z: 95, w: 28, d: 24, lx: 3, lz: 2 }, // 渋谷駅東口（明治通り×国道246号・青山通り分岐交差点）
+    ];
+    for (const ri of shibuyaRadialIntersections) {
+      addIntersectionPadAndMarkings(ri.x, ri.z, ri.w, ri.d, ri.lx, ri.lz, true);
+    }
 
     // --- J. 国土地理院 道路中心線 (experimental_rdcl) & PLATEAU 道路網オープンデータに基づく曲線・屈曲道路区間 ---
     const curvedRoadCorridors = getOpenDataCurvedRoadCorridors();
@@ -1063,33 +943,12 @@ export class TokyoStationMap {
       );
     }
 
-    // 3. 道玄坂上〜神泉〜山手通り（東西大通り: z = 95）
-    addRoadSegment(
-      {
-        name: "Dogenzaka-Shinsen-Connector",
-        lanesPerDirection: 2,
-        laneWidth: 3.5,
-        shoulderWidth: 1.2,
-        sidewalkWidth: 3.5,
-        curbHeight: 0.15,
-        length: 468,
-        hasYellowCenterLine: false,
-        hasWhiteDashedLines: true,
-        hasCrosswalk: true,
-        hasGuardrails: true,
-        hasManholes: true,
-        hasTrafficLights: true,
-        speedLimitSign: 50,
-      },
-      new THREE.Vector3(-1100, 0.012, 95),
-      Math.PI / 2,
-    );
-
-    // 4. 山手通り（環状6号線: x = -1350 南北縦断幹線）
+    // 3. 山手通り（環状6号線: x = -1350 南北縦断幹線）
+    // 玉川通り西進（国道246号・神泉町交差点 z = 150）とシームレスに平面交差接続する
     for (const yamateSeg of [
       { cz: -706.5, len: 287 }, // 南端 z=-850 .. 駒沢通り z=-563
-      { cz: -227.5, len: 619 }, // 駒沢通り z=-537 .. 神泉交差点 z=82
-      { cz: 322.5, len: 429 }, // 神泉 z=108 .. 富ヶ谷交差点 z=537
+      { cz: -200.0, len: 674 }, // 駒沢通り z=-537 .. 神泉交差点 z=137
+      { cz: 350.0, len: 374 }, // 神泉 z=163 .. 富ヶ谷交差点 z=537
       { cz: 706.5, len: 287 }, // 富ヶ谷 z=563 .. 北端 z=850
     ]) {
       addRoadSegment(
@@ -2991,9 +2850,43 @@ export class TokyoStationMap {
       viaductGroup.add(soundWallEast);
     }
 
-    // 首都高3号渋谷線の緑案内標識パネル（signX < 145 は渋谷コア区間、signX >= 145 は青山通り東側区間）
-    for (const signX of [-30, 0, 42, 160]) {
-      const isCoreSign = signX < 145;
+    // 1C. 玉川通り西側延長区間（x = -1250 .. -865, 長さ 385m: セルリアンタワー前〜道玄坂上〜神泉町交差点）
+    const westSpanLenX = 385;
+    const westSpanCenterX = -337.5; // viaductGroup (-720) 基準で -530..-145 -> worldX = -1250..-865
+    const steelGirderWest = new THREE.Mesh(
+      new THREE.BoxGeometry(westSpanLenX, 1.8, deckWidthZ - 2.0),
+      darkSteelMat,
+    );
+    steelGirderWest.name = "ShutokoSteelBoxGirderWest";
+    steelGirderWest.position.set(westSpanCenterX, 12.3, 0);
+    steelGirderWest.castShadow = true;
+    steelGirderWest.receiveShadow = true;
+    viaductGroup.add(steelGirderWest);
+
+    const concreteDeckWest = new THREE.Mesh(
+      new THREE.BoxGeometry(westSpanLenX, 1.1, deckWidthZ),
+      concretePierMat,
+    );
+    concreteDeckWest.name = "ShutokoConcreteDeckWest";
+    concreteDeckWest.position.set(westSpanCenterX, 13.65, 0);
+    concreteDeckWest.castShadow = true;
+    concreteDeckWest.receiveShadow = true;
+    viaductGroup.add(concreteDeckWest);
+
+    for (const sideZ of [-deckWidthZ * 0.5 + 0.35, deckWidthZ * 0.5 - 0.35]) {
+      const soundWallWest = new THREE.Mesh(
+        new THREE.BoxGeometry(westSpanLenX, 2.8, 0.55),
+        concretePierMat,
+      );
+      soundWallWest.name = "ShutokoSoundBarrierWallWest";
+      soundWallWest.position.set(westSpanCenterX, 15.6, sideZ);
+      soundWallWest.castShadow = true;
+      viaductGroup.add(soundWallWest);
+    }
+
+    // 首都高3号渋谷線の緑案内標識パネル（signX < 145 && signX > -145 は渋谷コア区間、その他は東西延長区間）
+    for (const signX of [-450, -280, -30, 0, 42, 160]) {
+      const isCoreSign = signX < 145 && signX > -145;
       const greenSignBoard = new THREE.Mesh(
         new THREE.BoxGeometry(13.5, 2.3, 0.45),
         shutokoGreenSignMat,
@@ -3018,12 +2911,13 @@ export class TokyoStationMap {
       }
     }
 
-    // 高架下アンバーナトリウム道路照明列
-    for (let lx = -140; lx <= 420; lx += 30) {
+    // 高架下アンバーナトリウム道路照明列（神泉町 x=-1250 〜 青山通り x=-265 全域）
+    for (let lx = -510; lx <= 420; lx += 30) {
       const underLight = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.25, 8.0), underpassLightMat);
       underLight.position.set(lx, 11.35, 0);
       underLight.userData.lodDetailTier = "medium";
-      if (lx <= 140) {
+      const isCoreLight = lx <= 140 && lx >= -140;
+      if (isCoreLight) {
         registerCoreFallbackMesh(underLight);
       } else {
         viaductGroup.add(underLight);
@@ -3032,7 +2926,10 @@ export class TokyoStationMap {
 
     // 首都高ラーメン橋脚＆Rapier物理コライダー（国道246号の歩道外側 z = 80.5, 109.5 に配置し車道を完全クリア）
     // -830..-618 は GLB 内橋脚座標（by = -135, -87, -33, +23, +77 -> worldX = -830, -782, -728, -672, -618）と完全一致
-    const pierWorldXList = [-830, -782, -728, -672, -618, -540, -450, -360];
+    // 西側は神泉町（-1230）、東側は青山通り（-360）まで完全架橋
+    const pierWorldXList = [
+      -1230, -1150, -1070, -990, -910, -830, -782, -728, -672, -618, -540, -450, -360,
+    ];
     const shutokoPierBody = world.createRigidBody(
       rapier.RigidBodyDesc.fixed().setTranslation(-720, 0, 95),
     );

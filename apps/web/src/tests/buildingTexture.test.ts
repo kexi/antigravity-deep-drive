@@ -225,9 +225,9 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     }
   });
 
-  it("ShibuyaTextureManager が全13種の実写ストリートビューおよびPLATEAU LOD2テクスチャと各種マテリアル生成を正常に行うことを保証する", async () => {
+  it("ShibuyaTextureManager が全15種の実写ストリートビューおよびPLATEAU LOD2テクスチャと各種マテリアル生成を正常に行うことを保証する", async () => {
     const textureIds = Object.keys(SHIBUYA_TEXTURE_CONFIGS) as ShibuyaTextureId[];
-    expect(textureIds).toHaveLength(13);
+    expect(textureIds).toHaveLength(15);
 
     for (const id of textureIds) {
       const tex = shibuyaTextureManager.getTexture(id);
@@ -261,6 +261,21 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     const plateauLod2MatNight = shibuyaTextureManager.createPlateauLod2Material(true);
     expect(plateauLod2MatNight.emissiveIntensity).toBe(
       SHIBUYA_TEXTURE_CONFIGS.plateauLod2Facade.emissiveIntensityNight,
+    );
+
+    // PLATEAU LOD2 1F路面店舗・街路樹映り込みマテリアル
+    const plateauStorefrontMatDay =
+      shibuyaTextureManager.createPlateauLod2StorefrontMaterial(false);
+    expect(plateauStorefrontMatDay.name).toBe("PlateauLod2StorefrontMat");
+    expect(plateauStorefrontMatDay.emissiveIntensity).toBe(
+      SHIBUYA_TEXTURE_CONFIGS.plateauLod2Storefront.emissiveIntensityDay,
+    );
+
+    // PLATEAU LOD2 屋上・パラペット・エレベーター塔屋マテリアル
+    const plateauRoofMatDay = shibuyaTextureManager.createPlateauLod2RoofMaterial(false);
+    expect(plateauRoofMatDay.name).toBe("PlateauLod2RoofMat");
+    expect(plateauRoofMatDay.emissiveIntensity).toBe(
+      SHIBUYA_TEXTURE_CONFIGS.plateauLod2Roof.emissiveIntensityDay,
     );
 
     // PLATEAU LOD2 遠景軽量プロキシマテリアル

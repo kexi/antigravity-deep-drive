@@ -1041,7 +1041,7 @@
       "lat": 35.66215,
       "lon": 139.70195,
       "localX": -695,
-      "localZ": 248,
+      "localZ": 320,
       "width": 46,
       "depth": 72
     },
@@ -1080,10 +1080,10 @@
       "groundElevationM": 17.5,
       "lat": 35.65985,
       "lon": 139.70035,
-      "localX": -815,
-      "localZ": 248,
-      "width": 48,
-      "depth": 52
+      "localX": -818,
+      "localZ": 285,
+      "width": 32,
+      "depth": 32
     },
     {
       "buildingId": "13113-bldg-shibuya-solasta",
@@ -2110,78 +2110,153 @@
       }
     },
     {
-      "rID": "533935-shibuya-rdcl-inaribashi-st",
-      "rdCtg": "市区町村道等",
-      "rnkWidth": "5.5m-13m未満",
-      "displayName": "稲荷橋通り・サクラステージ南通り (渋谷区道)",
-      "routeCode": "渋谷区道稲荷橋線",
+      "rID": "533935-shibuya-rdcl-scramble",
+      "rdCtg": "主要地方道等",
+      "rnkWidth": "19.5m以上",
+      "displayName": "渋谷スクランブル交差点 (ハチ公前・QFRONT・109前交差点)",
+      "routeCode": "東京都道305号・413号交点",
       "start": {
-        "x": -855,
-        "z": -95
+        "x": -835,
+        "z": 248
       },
       "end": {
-        "x": -645,
-        "z": -95
+        "x": -795,
+        "z": 248
       }
     },
     {
-      "rID": "533935-shibuya-rdcl-namikibashi-st",
-      "rdCtg": "市区町村道等",
-      "rnkWidth": "5.5m-13m未満",
-      "displayName": "並木橋・八幡通り連絡路 (渋谷区道)",
-      "routeCode": "渋谷区道並木橋線",
+      "rID": "533935-shibuya-rdcl-dogenzaka",
+      "rdCtg": "主要地方道等",
+      "rnkWidth": "13m-19.5m未満",
+      "displayName": "道玄坂 (都道413号・SHIBUYA109〜道玄坂上坂道区間)",
+      "routeCode": "東京都道413号赤坂杉並線",
       "start": {
-        "x": -855,
-        "z": -200
+        "x": -830,
+        "z": 248
       },
       "end": {
-        "x": -645,
-        "z": -200
+        "x": -1080,
+        "z": 140
       }
     },
     {
-      "rID": "533935-shibuya-rdcl-miyashita-st",
+      "rID": "533935-shibuya-rdcl-bunkamura",
+      "rdCtg": "市区町村道等",
+      "rnkWidth": "13m-19.5m未満",
+      "displayName": "文化村通り (渋谷109〜東急本店〜松濤二丁目連絡路)",
+      "routeCode": "渋谷区道文化村通線",
+      "start": {
+        "x": -828,
+        "z": 258
+      },
+      "end": {
+        "x": -1060,
+        "z": 370
+      }
+    },
+    {
+      "rID": "533935-shibuya-rdcl-koen-dori",
+      "rdCtg": "主要地方道等",
+      "rnkWidth": "13m-19.5m未満",
+      "displayName": "渋谷公園通り (神南一丁目〜PARCO〜渋谷区役所・NHK方面)",
+      "routeCode": "渋谷区道公園通線",
+      "start": {
+        "x": -790,
+        "z": 265
+      },
+      "end": {
+        "x": -810,
+        "z": 520
+      }
+    },
+    {
+      "rID": "533935-shibuya-rdcl-inokashira-organ",
       "rdCtg": "市区町村道等",
       "rnkWidth": "5.5m-13m未満",
-      "displayName": "宮下公園・美竹通り連絡路 (渋谷区道)",
+      "displayName": "井の頭通り・オルガン坂 (スクランブル北西〜宇田川町〜PARCO前)",
+      "routeCode": "渋谷区道井の頭線",
+      "start": {
+        "x": -840,
+        "z": 265
+      },
+      "end": {
+        "x": -798,
+        "z": 360
+      }
+    },
+    {
+      "rID": "533935-shibuya-rdcl-tamagawa-west",
+      "rdCtg": "国道",
+      "rnkWidth": "19.5m以上",
+      "displayName": "玉川通り・国道246号西進 (セルリアンタワー〜道玄坂上〜神泉町〜山手通り)",
+      "routeCode": "国道246号",
+      "start": {
+        "x": -855,
+        "z": 95
+      },
+      "end": {
+        "x": -1350,
+        "z": 150
+      }
+    },
+    {
+      "rID": "533935-shibuya-rdcl-shinsen-nakadori",
+      "rdCtg": "市区町村道等",
+      "rnkWidth": "5.5m-13m未満",
+      "displayName": "円山町・神泉仲通り (道玄坂上〜神泉駅前〜松濤二丁目)",
+      "routeCode": "渋谷区特別区道",
+      "start": {
+        "x": -1080,
+        "z": 140
+      },
+      "end": {
+        "x": -1060,
+        "z": 370
+      }
+    },
+    {
+      "rID": "533935-shibuya-rdcl-sakurazaka",
+      "rdCtg": "市区町村道等",
+      "rnkWidth": "5.5m-13m未満",
+      "displayName": "桜丘さくら坂 (セルリアンタワー〜インフォスタワー〜玉川通り周回路)",
+      "routeCode": "渋谷区特別区道",
+      "start": {
+        "x": -855,
+        "z": 95
+      },
+      "end": {
+        "x": -940,
+        "z": 115
+      }
+    },
+    {
+      "rID": "533935-shibuya-rdcl-miyamasuzaka",
+      "rdCtg": "主要地方道等",
+      "rnkWidth": "13m-19.5m未満",
+      "displayName": "宮益坂 (都道413号・宮益坂下〜宮益坂上〜表参道方面)",
+      "routeCode": "東京都道413号赤坂杉並線",
+      "start": {
+        "x": -745,
+        "z": 248
+      },
+      "end": {
+        "x": -400,
+        "z": 248
+      }
+    },
+    {
+      "rID": "533935-shibuya-rdcl-jinnan-cross",
+      "rdCtg": "市区町村道等",
+      "rnkWidth": "5.5m-13m未満",
+      "displayName": "神南二丁目連絡路 (宮下公園北〜勤労福祉会館前)",
       "routeCode": "渋谷区道美竹線",
       "start": {
-        "x": -855,
-        "z": 195
-      },
-      "end": {
-        "x": -645,
-        "z": 195
-      }
-    },
-    {
-      "rID": "533935-shibuya-rdcl-west-loop",
-      "rdCtg": "市区町村道等",
-      "rnkWidth": "5.5m-13m未満",
-      "displayName": "渋谷西口・桜丘ウエスト通り (渋谷区道)",
-      "routeCode": "渋谷区道桜丘西線",
-      "start": {
-        "x": -855,
-        "z": -200
+        "x": -750,
+        "z": 440
       },
       "end": {
         "x": -855,
-        "z": 195
-      }
-    },
-    {
-      "rID": "533935-shibuya-rdcl-east-konnozaka",
-      "rdCtg": "市区町村道等",
-      "rnkWidth": "5.5m-13m未満",
-      "displayName": "金王坂・渋谷三丁目イースト通り (渋谷区道)",
-      "routeCode": "渋谷区道金王坂線",
-      "start": {
-        "x": -645,
-        "z": -200
-      },
-      "end": {
-        "x": -645,
-        "z": 195
+        "z": 440
       }
     },
     {

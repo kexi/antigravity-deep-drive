@@ -4,6 +4,7 @@ import { JapaneseRoadBuilder } from "../roads/roadBuilder";
 import { JapaneseRoadMaterial } from "../roads/japaneseRoadMaterial";
 import { RoadProps } from "../roads/roadProps";
 import type { JapaneseRoadSegmentConfig } from "../roads/types";
+import { getOpenDataCurvedRoadCorridors } from "../openData/gsiPlateauLoader";
 
 describe("日本の道路作成システムの仕様検証", () => {
   it("道路構造令に基づき視覚メッシュ（凸凹シェーダー）と完全平坦コライダーが生成されることを保証する", () => {
@@ -201,6 +202,84 @@ describe("日本の道路作成システムの仕様検証", () => {
     );
     expect(hasFlatRoadCollider).toBe(true);
     expect(hasGuardrailCollider).toBe(true);
+  });
+
+  it("渋谷エリア実在放射状曲線道路網（道玄坂・文化村通り・玉川通り西進等）が buildPolylineSegment で正常に物理コライダーおよび路面メッシュを生成することを保証する", () => {
+    const createdColliders: Array<{ width: number; height: number; depth: number }> = [];
+    const mockBody = {} as any;
+    const mockWorld = {
+      createRigidBody: () => mockBody,
+      createCollider: (desc: any) => {
+        createdColliders.push(desc.halfExtents);
+        return { handle: createdColliders.length } as any;
+      },
+    } as any;
+
+    const mockRapier = {
+      RigidBodyDesc: {
+        fixed: () => ({
+          setTranslation: () => ({
+            setRotation: () => ({}),
+          }),
+        }),
+      },
+      ColliderDesc: {
+        cuboid: (hx: number, hy: number, hz: number) => ({
+          halfExtents: { width: hx * 2, height: hy * 2, depth: hz * 2 },
+          setTranslation: function () {
+            return this;
+          },
+          setFriction: function () {
+            return this;
+          },
+          setRestitution: function () {
+            return this;
+          },
+        }),
+      },
+      Quaternion: class {
+        constructor(
+          public x: number,
+          public y: number,
+          public z: number,
+          public w: number,
+        ) {}
+      },
+    } as any;
+
+    const builder = new JapaneseRoadBuilder();
+    const curvedCorridors = getOpenDataCurvedRoadCorridors();
+    const shibuyaRadial = curvedCorridors.filter((c) => c.id.startsWith("nav-road-shibuya-"));
+    expect(shibuyaRadial.length).toBeGreaterThanOrEqual(9);
+
+    for (const c of shibuyaRadial) {
+      const result = builder.buildPolylineSegment(
+        {
+          name: c.displayName,
+          lanesPerDirection: 1,
+          laneWidth: c.widthMeters * 0.25,
+          shoulderWidth: 1.0,
+          sidewalkWidth: 2.5,
+          curbHeight: 0.15,
+          length: 100,
+          hasYellowCenterLine: c.hasMedianLine,
+          hasWhiteDashedLines: false,
+          hasCrosswalk: false,
+          hasGuardrails: true,
+          hasManholes: false,
+          hasTrafficLights: false,
+          points: c.points,
+        },
+        c.points,
+        mockWorld,
+        mockRapier,
+      );
+
+      expect(result.group.children.length).toBeGreaterThan(0);
+      expect(result.group.userData.isRoadInfrastructure).toBe(true);
+      expect(result.materials.length).toBeGreaterThanOrEqual(1);
+      expect(result.colliders.length).toBeGreaterThanOrEqual(c.points.length - 1);
+    }
   });
 
   it("日本の道路標識令に準拠した案内・規制・警戒・指示・通称名標識が正常に生成されることを保証する", async () => {

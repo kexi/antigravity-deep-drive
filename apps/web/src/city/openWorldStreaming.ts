@@ -291,8 +291,8 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     centerX: -1260,
     centerZ: 0,
     bounds: { minX: -1600, maxX: -920, minZ: -320, maxZ: 320 },
-    estimatedMemoryMb: 16,
-    associatedGlbModelIds: ["street_tree"],
+    estimatedMemoryMb: 24,
+    associatedGlbModelIds: ["shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: false,
   },
   {

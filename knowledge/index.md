@@ -51,3 +51,5 @@ trust_signals:
 - [036-shibuya-plateau-dogenzaka-miyamasuzaka-photorealistic-modeling.md](./036-shibuya-plateau-dogenzaka-miyamasuzaka-photorealistic-modeling.md): Project PLATEAU 渋谷区実在都市データ統合とスクランブル交差点・道玄坂・宮益坂の実写フォトリアルモデリング
 - [037-plateau-lod2-textures-and-distance-lod-optimization.md](./037-plateau-lod2-textures-and-distance-lod-optimization.md): PLATEAU LOD2 写真実写テクスチャ適用と距離ベース多段階LOD（Level of Detail）による遠景軽量化
 - [038-tenfold-map-expansion-open-world-tokyo.md](./038-tenfold-map-expansion-open-world-tokyo.md): マップの10倍大拡張と大東京・首都圏オープンワールド道路網アーキテクチャ
+- [039-shibuya-radial-road-network-and-lod2-alignment.md](./039-shibuya-radial-road-network-and-lod2-alignment.md): 渋谷周辺エリア4倍拡大と実在放射状曲線道路網の再現およびPLATEAU LOD2建築モデリング・テクスチャ整合化
+- [040-shibuya-grid-abolition-and-organic-radial-network.md](./040-shibuya-grid-abolition-and-organic-radial-network.md): 渋谷エリア直角碁盤の目（格子グリッド）の完全廃止と実在有機的放射状曲線道路網への完全移行

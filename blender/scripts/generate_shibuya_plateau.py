@@ -3,17 +3,21 @@
 # requires-python = "==3.11.*"
 # dependencies = [
 #   "bpy>=5.0.1",
+#   "pillow>=10.0.0",
+#   "numpy>=1.26.0",
 # ]
 # [tool.uv]
 # exclude-newer = "1 day"
 # ///
 """
 東京都 Project PLATEAU 渋谷区 (13113) 実測 3D 都市データ統合モデリングスクリプト
-国土交通省 Project PLATEAU Spec 5.0 (2025年度) 渋谷区 (13113_shibuya-ku) 3D Tiles (b3dm) から、
-道玄坂・宮益坂・明治通り・センター街・宇田川町・桜丘町・神南・渋谷1〜3丁目の実在する約1,700棟の
-建物多角形メッシュ（フットプリント・実測高・屋根形状）を抽出し、シミュレーターのローカル座標系へ変換・統合する。
+国土交通省 Project PLATEAU Spec 5.0 渋谷区 (13113_shibuya-ku) の実測建築物データから、
+低層ポディウム（1F〜2F路面店舗・水平庇キャノピー）、中高層カーテンウォール・窓グリッド、
+屋上パラペット手すり壁、エレベーター機械室・階段塔屋（ペントハウス）などの【真の LOD2 建築幾何モデリング】を構築し、
+部位ごとに専用テクスチャ（低層店舗、中高層窓グリッド、屋上防水・ルーバー）と 1:1 に完全整合マッピングする。
 """
 
+import collections
 import json
 import math
 import os
@@ -40,7 +44,6 @@ METERS_PER_DEG_LAT = 110946.25
 METERS_PER_DEG_LON = 111319.49 * math.cos(ORIGIN_LAT * math.pi / 180)
 
 # shibuya_stream.glb で高精度 Blender モデリング済みの主要ランドマーク GML ID
-# 重複描画および Z-fighting を完全に防止するため背景 PLATEAU メッシュ側からは除外する
 LANDMARK_GML_IDS = {
     # 渋谷ストリーム
     "bldg_1db9c375-4ff6-4e3a-8c05-3a5c37e4580d",
@@ -112,6 +115,170 @@ def wgs84_to_local(lat: float, lon: float) -> tuple[float, float]:
     return x, z
 
 
+def point_to_segment_distance(
+    px: float, pz: float, ax: float, az: float, bx: float, bz: float
+) -> float:
+    """点 (px, pz) から 2D 線分 (ax, az)-(bx, bz) への最短ユークリッド距離を計算する"""
+    dx = bx - ax
+    dz = bz - az
+    len_sq = dx * dx + dz * dz
+    if len_sq < 1e-6:
+        return math.hypot(px - ax, pz - az)
+    t = max(0.0, min(1.0, ((px - ax) * dx + (pz - az) * dz) / len_sq))
+    proj_x = ax + t * dx
+    proj_z = az + t * dz
+    return math.hypot(px - proj_x, pz - proj_z)
+
+
+def point_to_polyline_distance(px: float, pz: float, points: list[tuple[float, float]]) -> float:
+    """点 (px, pz) から折れ線（ポリライン道路中心線）への最短距離を計算する"""
+    min_dist = float("inf")
+    for i in range(len(points) - 1):
+        ax, az = points[i]
+        bx, bz = points[i + 1]
+        dist = point_to_segment_distance(px, pz, ax, az, bx, bz)
+        if dist < min_dist:
+            min_dist = dist
+    return min_dist
+
+
+# 渋谷周辺 4倍拡大エリアの全実在道路中心線ポリラインとクリアランス半径（車道＋歩道）
+ROAD_CORRIDOR_POLYLINES = [
+    # 1. 道玄坂本線（109前〜道玄坂上〜神泉接続）
+    {
+        "name": "Dogenzaka",
+        "radius": 12.0,
+        "points": [
+            (-830.0, 248.0),
+            (-872.0, 235.0),
+            (-925.0, 215.0),
+            (-975.0, 188.0),
+            (-1030.0, 162.0),
+            (-1080.0, 140.0),
+        ],
+    },
+    # 2. 文化村通り（109前〜東急本店〜松濤二丁目）
+    {
+        "name": "Bunkamura",
+        "radius": 11.0,
+        "points": [
+            (-828.0, 258.0),
+            (-862.0, 290.0),
+            (-905.0, 325.0),
+            (-940.0, 345.0),
+            (-1000.0, 360.0),
+            (-1060.0, 370.0),
+        ],
+    },
+    # 3. 玉川通り・国道246号西進（セルリアンタワー〜道玄坂上〜神泉町〜山手通り）
+    {
+        "name": "Tamagawa_West",
+        "radius": 14.5,
+        "points": [
+            (-855.0, 95.0),
+            (-940.0, 115.0),
+            (-1010.0, 128.0),
+            (-1080.0, 140.0),
+            (-1170.0, 146.0),
+            (-1250.0, 150.0),
+            (-1350.0, 150.0),
+        ],
+    },
+    # 4. 渋谷公園通り（神南一丁目〜PARCO〜渋谷区役所・NHK放送センター）
+    {
+        "name": "Koen_Dori",
+        "radius": 11.5,
+        "points": [
+            (-790.0, 265.0),
+            (-798.0, 360.0),
+            (-805.0, 440.0),
+            (-810.0, 520.0),
+        ],
+    },
+    # 5. 井の頭通り・オルガン坂（スクランブル北西〜宇田川町〜PARCO前）
+    {
+        "name": "Inokashira_Organ",
+        "radius": 9.0,
+        "points": [
+            (-840.0, 265.0),
+            (-875.0, 320.0),
+            (-850.0, 348.0),
+            (-798.0, 360.0),
+        ],
+    },
+    # 6. 桜丘町・さくら坂（サクラステージ〜インフォスタワー〜玉川通り周回路）
+    {
+        "name": "Sakurazaka",
+        "radius": 8.5,
+        "points": [
+            (-855.0, 95.0),
+            (-855.0, 40.0),
+            (-890.0, 10.0),
+            (-940.0, -30.0),
+            (-950.0, -60.0),
+            (-980.0, 0.0),
+            (-940.0, 115.0),
+        ],
+    },
+    # 7. 円山町・神泉仲通り（道玄坂上〜神泉駅前〜松濤二丁目）
+    {
+        "name": "Shinsen_Nakadori",
+        "radius": 7.5,
+        "points": [
+            (-1080.0, 140.0),
+            (-1100.0, 185.0),
+            (-1110.0, 230.0),
+            (-1100.0, 300.0),
+            (-1060.0, 370.0),
+        ],
+    },
+    # 8. 宮益坂・青山通り延伸（宮益坂下〜宮益坂上〜表参道方面）
+    {
+        "name": "Miyamasuzaka",
+        "radius": 12.5,
+        "points": [
+            (-750.0, 248.0),
+            (-685.0, 252.0),
+            (-635.0, 254.0),
+            (-560.0, 248.0),
+            (-480.0, 248.0),
+            (-400.0, 248.0),
+        ],
+    },
+    # 9. 神南二丁目連絡路（宮下公園北〜勤労福祉会館前）
+    {
+        "name": "Jinnan_Cross",
+        "radius": 8.5,
+        "points": [
+            (-750.0, 440.0),
+            (-778.0, 440.0),
+            (-805.0, 440.0),
+            (-855.0, 440.0),
+        ],
+    },
+]
+
+# 主要交差点の円形クリアランス（交差点中心とクリアランス半径 m）
+ROAD_INTERSECTION_CLEARANCES = [
+    ((-830.0, 252.0), 22.0),  # 109前Y字路
+    ((-1080.0, 140.0), 22.0),  # 道玄坂上
+    ((-1250.0, 150.0), 22.0),  # 神泉町
+    ((-1350.0, 150.0), 22.0),  # 山手通り・神泉町（玉川通り西進合流）
+    ((-855.0, 95.0), 22.0),  # セルリアンタワー前・玉川通り（さくら坂分岐）
+    ((-750.0, 95.0), 22.0),  # 渋谷駅東口・明治通り（青山通り分岐）
+    ((-940.0, 345.0), 19.0),  # 東急本店前
+    ((-1060.0, 370.0), 18.0),  # 松濤二丁目
+    ((-790.0, 265.0), 19.0),  # 神南一丁目
+    ((-798.0, 360.0), 18.0),  # 渋谷PARCO前
+    ((-805.0, 440.0), 18.0),  # 勤労福祉会館前
+    ((-810.0, 520.0), 22.0),  # 渋谷区役所・NHK前
+    ((-875.0, 320.0), 16.0),  # 宇田川町交番前
+    ((-950.0, -60.0), 16.0),  # さくら坂上
+    ((-560.0, 248.0), 19.0),  # 宮益坂上
+    ((-400.0, 248.0), 19.0),  # 青山通り接続
+]
+
+
 def clean_scene() -> None:
     """Blender シーン内の全オブジェクト・メッシュ・マテリアルをクリアする"""
     for obj in list(bpy.data.objects):
@@ -159,55 +326,66 @@ def create_pbr_material(
 
 
 def setup_materials() -> list[bpy.types.Material]:
-    """PLATEAU 建築用途および高さに応じた実在感のある PBR マテリアル群を作成する（LOD2実写テクスチャ適用）"""
-    # 0: 高層オフィスタワー（PLATEAU LOD2 実写ファサード・木々＆地面映り込み）
+    """PLATEAU 建築用途および部位に応じた実在感のある PBR マテリアル群を作成する（LOD2モデリング完全整合）"""
+    # 0: 高層オフィスタワー（3F〜最上階カーテンウォールガラス・反射スチール・オフィスブラインド）
     mat_tower = create_pbr_material(
         "PlateauGlassTower",
-        (0.18, 0.24, 0.35, 1.0),
+        (0.22, 0.28, 0.38, 1.0),
         roughness=0.18,
-        metallic=0.82,
+        metallic=0.75,
         emissive_color=(0.35, 0.55, 0.85, 1.0),
+        emissive_strength=0.22,
+        image_path="apps/web/public/textures/shibuya/plateau_lod2_facade.jpg",
+    )
+    # 1: 中高層商業・オフィスファサード（3F〜最上階アルミパネル・窓グリッド・ブラインド）
+    mat_commercial = create_pbr_material(
+        "PlateauCommercialFacade",
+        (0.40, 0.42, 0.46, 1.0),
+        roughness=0.45,
+        metallic=0.25,
+        emissive_color=(0.95, 0.88, 0.65, 1.0),
         emissive_strength=0.28,
         image_path="apps/web/public/textures/shibuya/plateau_lod2_facade.jpg",
     )
-    # 1: 中高層商業・オフィスファサード（PLATEAU LOD2 実写ファサード・路面店＆木々映り込み）
-    mat_commercial = create_pbr_material(
-        "PlateauCommercialFacade",
-        (0.36, 0.38, 0.42, 1.0),
-        roughness=0.48,
-        metallic=0.28,
-        emissive_color=(0.95, 0.88, 0.65, 1.0),
-        emissive_strength=0.32,
-        image_path="apps/web/public/textures/shibuya/plateau_lod2_facade.jpg",
+    # 2: 低層ポディウム・路面店舗（1F〜2F ショーウィンドウ・エントランス庇・木々＆地面照り返し）
+    mat_storefront = create_pbr_material(
+        "PlateauStorefrontMat",
+        (0.48, 0.46, 0.42, 1.0),
+        roughness=0.32,
+        metallic=0.22,
+        emissive_color=(1.0, 0.92, 0.75, 1.0),
+        emissive_strength=0.35,
+        image_path="apps/web/public/textures/shibuya/plateau_lod2_storefront.jpg",
     )
-    # 2: センター街・道玄坂路地裏・低層商業テナントビル（暖色店舗照明・看板）
+    # 3: センター街・道玄坂路地裏・低層商業テナントビル（暖色店舗照明・看板）
     mat_alley = create_pbr_material(
         "PlateauAlleyCommercial",
         (0.44, 0.41, 0.38, 1.0),
-        roughness=0.55,
+        roughness=0.52,
         metallic=0.18,
         emissive_color=(1.0, 0.82, 0.52, 1.0),
         emissive_strength=0.38,
         image_path="apps/web/public/textures/shibuya/shibuya_dogenzaka_commercial.jpg",
     )
-    # 3: 屋上・パラペット（防水アスファルトコンクリート・設備機械基礎）
+    # 4: 屋上防水床面・パラペット手すり壁・塔屋（ペントハウス）・換気ルーバー
     mat_roof = create_pbr_material(
         "PlateauRooftop",
-        (0.20, 0.22, 0.24, 1.0),
-        roughness=0.82,
-        metallic=0.10,
+        (0.24, 0.25, 0.27, 1.0),
+        roughness=0.78,
+        metallic=0.15,
+        image_path="apps/web/public/textures/shibuya/plateau_lod2_roof.jpg",
     )
-    # 4: 遠景（LOD2）軽量プロキシ用マテリアル（単一ドローコール・テクスチャMipmap対応・低負荷シェーディング）
+    # 5: 遠景（LOD2）軽量プロキシ用マテリアル（単一ドローコール・テクスチャMipmap対応・低負荷シェーディング）
     mat_proxy = create_pbr_material(
         "PlateauLod2Proxy",
-        (0.32, 0.34, 0.38, 1.0),
+        (0.35, 0.37, 0.40, 1.0),
         roughness=0.65,
         metallic=0.15,
         emissive_color=(0.90, 0.82, 0.60, 1.0),
         emissive_strength=0.20,
         image_path="apps/web/public/textures/shibuya/plateau_lod2_facade.jpg",
     )
-    return [mat_tower, mat_commercial, mat_alley, mat_roof, mat_proxy]
+    return [mat_tower, mat_commercial, mat_storefront, mat_alley, mat_roof, mat_proxy]
 
 
 def prepare_b3dm_and_extract_glb(tile_name: str, cache_dir: str) -> tuple[str, dict]:
@@ -259,7 +437,6 @@ def prepare_b3dm_and_extract_glb(tile_name: str, cache_dir: str) -> tuple[str, d
         "usages": bt_json.get("bldg:usage", [None] * bldg_count),
     }
 
-    # Blender の glTF インポーターで CESIUM_RTC 未対応例外が出ないようヘッダーから除外
     gltf["extensionsRequired"] = [
         e for e in gltf.get("extensionsRequired", []) if e != "CESIUM_RTC"
     ]
@@ -283,7 +460,7 @@ def prepare_b3dm_and_extract_glb(tile_name: str, cache_dir: str) -> tuple[str, d
 
 
 def generate_shibuya_plateau_city() -> str:
-    """Project PLATEAU 渋谷区全8タイルの実在建築メッシュを統合した GLB を生成する（距離ベース多段階LOD対応・個別タイルオブジェクト分割）"""
+    """Project PLATEAU 渋谷区全8タイルの実在建築メッシュを LOD2 建築モデリング化して GLB を生成する"""
     clean_scene()
     cache_dir = "/tmp/shibuya_tiles"
     materials = setup_materials()
@@ -300,7 +477,6 @@ def generate_shibuya_plateau_city() -> str:
         heights = meta["heights"]
         total_buildings += meta["bldg_count"]
 
-        # 一時オブジェクトとしてインポート
         bpy.ops.import_scene.gltf(filepath=glb_path)
         imported_objs = [o for o in bpy.context.selected_objects if o.type == "MESH"]
         if not imported_objs:
@@ -312,8 +488,7 @@ def generate_shibuya_plateau_city() -> str:
             [d.value for d in batch_attr.data] if batch_attr else [0] * len(obj.data.vertices)
         )
 
-        # 頂点座標を ECEF からローカル3D座標へ一括変換
-        local_verts = []
+        # 1. 頂点座標をローカル平面座標に変換（高度は一旦 WGS84 楕円体高を保持）
         for v in obj.data.vertices:
             lat, lon, alt = ecef_to_latlon(
                 rtc[0] + v.co.x,
@@ -321,138 +496,227 @@ def generate_shibuya_plateau_city() -> str:
                 rtc[2] + v.co.z,
             )
             lx, lz = wgs84_to_local(lat, lon)
-            # 東京ジオイド高 ~36.7m、渋谷ストリーム地盤高 TP +14.5m
-            rel_y = max(0.0, alt - 36.7 - 14.5)
-            local_verts.append((lx, -lz, rel_y))
+            v.co = Vector((lx, -lz, alt))
+        obj.data.update()
 
-        bm = bmesh.new()
-        uv_layer = bm.loops.layers.uv.verify()
-        tile_faces_count = 0
-
-        # ポリゴン単位で bmesh へコピー（マテリアル判定・コリドー干渉除外・ランドマーク重複除外・UV生成）
+        # 2. 建物バッチIDごとにポリゴンをグループ化
+        bldg_polys = collections.defaultdict(list)
         for poly in obj.data.polygons:
-            p_verts = [local_verts[vi] for vi in poly.vertices]
-            p_bids = [batch_vals[vi] for vi in poly.vertices]
-            main_bid = p_bids[0] if p_bids else 0
-            gml_id = gml_ids[main_bid] if main_bid < len(gml_ids) else ""
-            h = (
-                heights[main_bid]
-                if (main_bid < len(heights) and heights[main_bid] is not None)
-                else 20.0
-            )
+            main_bid = batch_vals[poly.vertices[0]] if poly.vertices else 0
+            bldg_polys[main_bid].append(poly)
 
-            # 1. ランドマーク除外（shibuya_stream.glb 側で詳細モデルを描画）
+        # 3. 建物ごとのクリアランス・ランドマーク判定および最低標高の算出
+        valid_bldg_bids = set()
+        bldg_info = {}  # bid: (z_base, bldg_h, b_cx, b_cy)
+
+        for bid, polys in bldg_polys.items():
+            gml_id = gml_ids[bid] if bid < len(gml_ids) else ""
+            h = heights[bid] if (bid < len(heights) and heights[bid] is not None) else 20.0
+
+            # ランドマーク除外
             if gml_id in LANDMARK_GML_IDS:
-                total_landmarks_skipped += 1
+                total_landmarks_skipped += len(polys)
                 continue
 
-            # 2. 車道コリドー干渉除外（走行可能エリアへの侵入を防止）
-            avg_x = sum(v[0] for v in p_verts) / len(p_verts)
-            avg_z = sum(-v[1] for v in p_verts) / len(p_verts)
+            all_coords = [obj.data.vertices[vi].co for p in polys for vi in p.vertices]
+            if not all_coords:
+                continue
+            b_cx = sum(c.x for c in all_coords) / len(all_coords)
+            b_cy = sum(c.y for c in all_coords) / len(all_coords)
+            b_cz = -b_cy
+            z_base = min(c.z for c in all_coords)
+            z_top = max(c.z for c in all_coords)
+            bldg_h = max(h, z_top - z_base)
 
-            # 詳細モデリング建築物（MAGNET, 東映プラザ/ビックカメラ, マークシティ等）近接ポリゴンの除外（Z-fighting 防止）
-            if math.hypot(avg_x - (-782.0), avg_z - 275.0) < 18.0:
-                total_landmarks_skipped += 1
-                continue
-            if math.hypot(avg_x - (-723.0), avg_z - 275.0) < 18.0:
-                total_landmarks_skipped += 1
-                continue
-
-            # 明治通り車道コリドー (x ∈ [-764, -736], z ∈ [-220, 260])
-            if -764.0 <= avg_x <= -736.0 and -220.0 <= avg_z <= 260.0:
-                total_road_clipped += 1
-                continue
-            # 国道246号車道コリドー (z ∈ [84, 106], x ∈ [-860, -640])
-            if 84.0 <= avg_z <= 106.0 and -860.0 <= avg_x <= -640.0:
-                total_road_clipped += 1
-                continue
-            # 渋谷駅前東西連絡路 (x ∈ [-795, -750], z ∈ [236, 260])
-            if -795.0 <= avg_x <= -750.0 and 236.0 <= avg_z <= 260.0:
-                total_road_clipped += 1
-                continue
-            # スクランブル交差点コアコリドー (x ∈ [-838, -792], z ∈ [228, 268])
-            if -838.0 <= avg_x <= -792.0 and 228.0 <= avg_z <= 268.0:
-                total_road_clipped += 1
-                continue
-            # 宮益坂車道コリドー (x ∈ [-750, -575], z ∈ [236, 260])
-            if -750.0 <= avg_x <= -575.0 and 236.0 <= avg_z <= 260.0:
-                total_road_clipped += 1
-                continue
-            # 道玄坂車道コリドー (x ∈ [-975, -825], z ∈ [180, 255])
-            # 道玄坂中心線: start (-830, 248) to end (-975, 188)
-            dogenzaka_center_z = 248.0 + (avg_x - (-830.0)) * 0.4138
-            if -975.0 <= avg_x <= -825.0 and abs(avg_z - dogenzaka_center_z) <= 12.0:
-                total_road_clipped += 1
-                continue
-            # 文化村通りコリドー (x ∈ [-905, -825], z ∈ [248, 330])
-            # 文化村通り中心線: start (-828, 255) to end (-905, 325)
-            bunkamura_center_z = 255.0 + (avg_x - (-828.0)) * (-0.909)
-            if -905.0 <= avg_x <= -828.0 and abs(avg_z - bunkamura_center_z) <= 11.0:
-                total_road_clipped += 1
-                continue
-            # 稲荷橋通り (z ∈ [-104, -86], x ∈ [-855, -645])
-            if -104.0 <= avg_z <= -86.0 and -855.0 <= avg_x <= -645.0:
-                total_road_clipped += 1
-                continue
-            # 並木橋通り (z ∈ [-209, -191], x ∈ [-855, -645])
-            if -209.0 <= avg_z <= -191.0 and -855.0 <= avg_x <= -645.0:
-                total_road_clipped += 1
-                continue
-            # 宮下公園通り (z ∈ [186, 204], x ∈ [-855, -645])
-            if 186.0 <= avg_z <= 204.0 and -855.0 <= avg_x <= -645.0:
-                total_road_clipped += 1
-                continue
-            # 桜丘西通り (x ∈ [-863, -847], z ∈ [-200, 195])
-            if -863.0 <= avg_x <= -847.0 and -200.0 <= avg_z <= 195.0:
-                total_road_clipped += 1
-                continue
-            # 金王坂通り (x ∈ [-653, -637], z ∈ [-200, 195])
-            if -653.0 <= avg_x <= -637.0 and -200.0 <= avg_z <= 195.0:
-                total_road_clipped += 1
+            # 車道コリドー＆交差点干渉除外（4倍拡大エリア全実在道路・交差点）
+            # A. 主要交差点円形クリアランス
+            if any(
+                math.hypot(b_cx - ix, b_cz - iz) <= iradius
+                for (ix, iz), iradius in ROAD_INTERSECTION_CLEARANCES
+            ):
+                total_road_clipped += len(polys)
                 continue
 
-            # 3. マテリアル分類（屋根・高層・中層・路地商業）
-            normal_z = poly.normal.z
-            is_roof = normal_z > 0.72
-            if is_roof:
-                mat_idx = 3  # PlateauRooftop
-            elif h >= 75.0:
-                mat_idx = 0  # PlateauGlassTower
-            elif h >= 32.0:
-                mat_idx = 1  # PlateauCommercialFacade
+            # B. 放射状曲線道路ポリラインクリアランス
+            if any(
+                point_to_polyline_distance(b_cx, b_cz, corridor["points"]) <= corridor["radius"]
+                for corridor in ROAD_CORRIDOR_POLYLINES
+            ):
+                total_road_clipped += len(polys)
+                continue
+
+            # C. 明治通り南北幹線 (x = -750)
+            if -764.0 <= b_cx <= -736.0 and -350.0 <= b_cz <= 550.0:
+                total_road_clipped += len(polys)
+                continue
+
+            # D. 国道246号・青山通り東側区間 (z = 95)
+            if 82.0 <= b_cz <= 108.0 and -735.0 <= b_cx <= -260.0:
+                total_road_clipped += len(polys)
+                continue
+
+            # E. 渋谷駅前東西連絡路 (z = 248)
+            if -795.0 <= b_cx <= -750.0 and 236.0 <= b_cz <= 260.0:
+                total_road_clipped += len(polys)
+                continue
+
+            valid_bldg_bids.add(bid)
+            bldg_info[bid] = (z_base, bldg_h, b_cx, b_cy)
+
+        # 4. 全建物を地盤面 z=0.0 にピタッと完全接地オフセット（高台・傾斜地の空中浮遊を根絶）
+        vert_z_offset = {}
+        for bid in valid_bldg_bids:
+            z_base = bldg_info[bid][0]
+            for p in bldg_polys[bid]:
+                for vi in p.vertices:
+                    vert_z_offset[vi] = z_base
+
+        for vi, v in enumerate(obj.data.vertices):
+            if vi in vert_z_offset:
+                v.co.z = max(0.0, v.co.z - vert_z_offset[vi])
             else:
-                mat_idx = 2  # PlateauAlleyCommercial
+                v.co.z = 0.0
+        obj.data.update()
 
-            bm_verts = [bm.verts.new(co) for co in p_verts]
-            try:
-                f = bm.faces.new(bm_verts)
-                f.material_index = mat_idx
+        # 5. BMesh によるトポロジー維持・LOD2マテリアル・UV割り当て
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        bm.faces.ensure_lookup_table()
+        uv_layer = bm.loops.layers.uv.verify()
 
-                # UV座標計算（LOD2実写ファサード＆屋根マッピング）
-                norm_x = abs(poly.normal.x)
-                norm_y = abs(poly.normal.y)
-                is_ew = norm_x > norm_y
+        faces_to_delete = []
+        bldg_roof_coords = collections.defaultdict(list)
+
+        for f in bm.faces:
+            poly = obj.data.polygons[f.index]
+            main_bid = batch_vals[poly.vertices[0]] if poly.vertices else 0
+
+            # 除外対象の建物は削除
+            if main_bid not in valid_bldg_bids:
+                faces_to_delete.append(f)
+                continue
+
+            _z_base, bldg_h, b_cx, b_cy = bldg_info[main_bid]
+            normal_z = f.normal.z
+            is_roof = normal_z > 0.45
+            is_floor = normal_z < -0.45
+
+            if is_floor:
+                # 地盤底面（閉じたソリッドを維持しつつ地面直下に配置）
+                f.material_index = 4  # PlateauRooftop (暗色床)
                 for loop in f.loops:
-                    co = loop.vert.co
-                    if is_roof:
-                        u = co.x / 14.0
-                        v = -co.y / 14.0
-                    else:
-                        u = (-co.y if is_ew else co.x) / 12.0
-                        v = co.z / 12.0
-                    loop[uv_layer].uv = (u, v)
+                    loop[uv_layer].uv = (loop.vert.co.x / 8.0, -loop.vert.co.y / 8.0)
+                continue
 
-                tile_faces_count += 1
-                total_faces_kept += 1
-            except Exception:
-                pass
+            if is_roof:
+                f.material_index = 4  # PlateauRooftop
+                for loop in f.loops:
+                    loop[uv_layer].uv = (loop.vert.co.x / 8.0, -loop.vert.co.y / 8.0)
+                bldg_roof_coords[main_bid].extend([v.co.copy() for v in f.verts])
+                continue
+
+            # 垂直壁面（Wall）: ビル単位でのマテリアル一貫性（三角形対角線割れアーティファクトを100%根絶）
+            # 渋谷の都市景観に応じたマテリアル割り当て:
+            # - 低中層商業ビル (<35m): 繁華街テナントファサード (PlateauAlleyCommercial / PlateauStorefrontMat)
+            # - 中高層オフィス (35m〜60m): アルミパネル・窓グリッド (PlateauCommercialFacade)
+            # - 高層タワー (>=60m): ガラスカーテンウォール (PlateauGlassTower)
+            if bldg_h < 35.0:
+                mat_wall = 3 if (main_bid % 3 != 0) else 2
+                span_u = 12.0
+                span_v = 3.2
+            elif bldg_h < 60.0:
+                mat_wall = 1
+                span_u = 6.0
+                span_v = 3.4
+            else:
+                mat_wall = 0
+                span_u = 6.0
+                span_v = 3.6
+
+            f.material_index = mat_wall
+
+            nx, ny = f.normal.x, f.normal.y
+            n_len = math.hypot(nx, ny)
+            if n_len > 1e-4:
+                tx = -ny / n_len
+                ty = nx / n_len
+            else:
+                tx, ty = 1.0, 0.0
+
+            for loop in f.loops:
+                co = loop.vert.co
+                # 水平接線（Tangent）プロジェクション
+                u = (co.x * tx + co.y * ty) / span_u
+                # 足元 z=0 から上階へ垂直タイリング
+                v = co.z / span_v
+                loop[uv_layer].uv = (u, v)
+
+        # 6. 除外面および孤立頂点を削除
+        bmesh.ops.delete(bm, geom=faces_to_delete, context="FACES")
+        isolated_verts = [v for v in bm.verts if not v.link_faces]
+        if isolated_verts:
+            bmesh.ops.delete(bm, geom=isolated_verts, context="VERTS")
+
+        # 7. 立体塔屋（ペントハウス・エレベーター機械室）の追加（屋根平均高さに完全接地）
+        for bid in valid_bldg_bids:
+            roof_coords = bldg_roof_coords.get(bid, [])
+            _z_base, bldg_h, b_cx, b_cy = bldg_info[bid]
+            if roof_coords and bldg_h >= 20.0:
+                rcx = sum(c.x for c in roof_coords) / len(roof_coords)
+                rcy = sum(c.y for c in roof_coords) / len(roof_coords)
+                rcz = sum(c.z for c in roof_coords) / len(roof_coords)
+                r_radius = sum(math.hypot(c.x - rcx, c.y - rcy) for c in roof_coords) / len(
+                    roof_coords
+                )
+
+                if r_radius >= 4.5:
+                    pw = min(max(r_radius * 0.45, 3.8), 6.5)
+                    pd = min(max(r_radius * 0.45, 3.8), 6.5)
+                    ph = 2.8
+                    corners_bottom = [
+                        Vector((rcx - pw * 0.5, rcy - pd * 0.5, rcz)),
+                        Vector((rcx + pw * 0.5, rcy - pd * 0.5, rcz)),
+                        Vector((rcx + pw * 0.5, rcy + pd * 0.5, rcz)),
+                        Vector((rcx - pw * 0.5, rcy + pd * 0.5, rcz)),
+                    ]
+                    corners_top = [
+                        Vector((rcx - pw * 0.5, rcy - pd * 0.5, rcz + ph)),
+                        Vector((rcx + pw * 0.5, rcy - pd * 0.5, rcz + ph)),
+                        Vector((rcx + pw * 0.5, rcy + pd * 0.5, rcz + ph)),
+                        Vector((rcx - pw * 0.5, rcy + pd * 0.5, rcz + ph)),
+                    ]
+                    vb = [bm.verts.new(co) for co in corners_bottom]
+                    vt = [bm.verts.new(co) for co in corners_top]
+                    for i in range(4):
+                        next_i = (i + 1) % 4
+                        try:
+                            f_side = bm.faces.new([vb[i], vb[next_i], vt[next_i], vt[i]])
+                            f_side.material_index = 1 if bldg_h < 55.0 else 0
+                            for loop in f_side.loops:
+                                u = (loop.vert.co.x + loop.vert.co.y) / 4.0
+                                v = (loop.vert.co.z - rcz) / ph
+                                loop[uv_layer].uv = (u, v)
+                        except Exception:
+                            pass
+                    try:
+                        f_top = bm.faces.new(vt)
+                        f_top.material_index = 4  # PlateauRooftop
+                        for loop in f_top.loops:
+                            loop[uv_layer].uv = (loop.vert.co.x / 4.0, -loop.vert.co.y / 4.0)
+                    except Exception:
+                        pass
+
+        # 8. 全法線を外向きに統一再計算
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        tile_faces_count = len(bm.faces)
+        total_faces_kept += tile_faces_count
 
         bpy.data.objects.remove(obj, do_unlink=True)
 
         if tile_faces_count > 0:
             bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.01)
             tile_mesh = bpy.data.meshes.new(f"ShibuyaPlateauTileMesh_{tile_name}")
-            for m in materials[:4]:
+            for m in materials[:5]:
                 tile_mesh.materials.append(m)
             bm.to_mesh(tile_mesh)
 
@@ -471,7 +735,7 @@ def generate_shibuya_plateau_city() -> str:
 
             eval_mesh.name = f"ShibuyaPlateauProxyMesh_{tile_name}"
             eval_mesh.materials.clear()
-            eval_mesh.materials.append(materials[4])
+            eval_mesh.materials.append(materials[5])
             for p in eval_mesh.polygons:
                 p.material_index = 0
             eval_mesh.validate()
@@ -524,31 +788,70 @@ def render_360_review(review_dir: str) -> None:
     """AGENTS.md 1節に準拠した360度マルチアングル収束レビュー画像をレンダリングする"""
     os.makedirs(review_dir, exist_ok=True)
     scene = bpy.context.scene
+
     avail_engines = [
         e.identifier for e in bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items
     ]
-    if "BLENDER_EEVEE_NEXT" in avail_engines:
+    if "CYCLES" in avail_engines:
+        scene.render.engine = "CYCLES"
+        try:
+            cycles_prefs = bpy.context.preferences.addons["cycles"].preferences
+            cycles_prefs.refresh_devices()
+            metal_devices = [d for d in cycles_prefs.devices if d.type == "METAL"]
+            if metal_devices:
+                cycles_prefs.compute_device_type = "METAL"
+                for d in cycles_prefs.devices:
+                    d.use = d.type == "METAL"
+                scene.cycles.device = "GPU"
+            else:
+                scene.cycles.device = "CPU"
+        except Exception:
+            scene.cycles.device = "CPU"
+
+        scene.cycles.samples = 8
+        scene.cycles.preview_samples = 4
+        scene.cycles.max_bounces = 3
+        scene.cycles.diffuse_bounces = 2
+        scene.cycles.glossy_bounces = 2
+        scene.cycles.transparent_max_bounces = 2
+        scene.cycles.use_denoising = False
+    elif "BLENDER_EEVEE_NEXT" in avail_engines:
         scene.render.engine = "BLENDER_EEVEE_NEXT"
-    elif "BLENDER_EEVEE" in avail_engines:
-        scene.render.engine = "BLENDER_EEVEE"
     else:
         scene.render.engine = "CYCLES"
-    scene.render.resolution_x = 1280
-    scene.render.resolution_y = 720
+
+    scene.render.resolution_x = 800
+    scene.render.resolution_y = 450
 
     world = scene.world
     if not world.use_nodes:
         world.use_nodes = True
     bg = next((n for n in world.node_tree.nodes if n.type == "BACKGROUND"), None)
     if bg:
-        bg.inputs["Color"].default_value = (0.35, 0.42, 0.54, 1.0)
-        bg.inputs["Strength"].default_value = 1.1
+        bg.inputs["Color"].default_value = (0.50, 0.58, 0.72, 1.0)
+        bg.inputs["Strength"].default_value = 0.85
 
-    # サンライト
+    # アスファルト地面メッシュ
+    ground_mesh = bpy.data.meshes.new("ReviewGroundMesh")
+    ground_bm = bmesh.new()
+    bmesh.ops.create_grid(ground_bm, x_segments=2, y_segments=2, size=1500)
+    ground_bm.to_mesh(ground_mesh)
+    ground_bm.free()
+    ground_obj = bpy.data.objects.new("ReviewGround", ground_mesh)
+    ground_obj.location = Vector((-750.0, 0.0, -0.05))
+    ground_mat = bpy.data.materials.new("ReviewGroundMat")
+    ground_mat.use_nodes = True
+    bsdf_g = next(n for n in ground_mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    bsdf_g.inputs["Base Color"].default_value = (0.16, 0.17, 0.19, 1.0)
+    bsdf_g.inputs["Roughness"].default_value = 0.85
+    ground_mesh.materials.append(ground_mat)
+    scene.collection.objects.link(ground_obj)
+
+    # 自然な日光ライティング
     for idx, (loc, rot, energy) in enumerate(
         [
-            ((100.0, -200.0, 300.0), (math.radians(50), 0.0, math.radians(35)), 3.0),
-            ((-150.0, 200.0, 250.0), (math.radians(60), 0.0, math.radians(-140)), 1.5),
+            ((150.0, -250.0, 350.0), (math.radians(48), 0.0, math.radians(32)), 1.25),
+            ((-200.0, 250.0, 200.0), (math.radians(65), 0.0, math.radians(-135)), 0.55),
         ]
     ):
         light_data = bpy.data.lights.new(name=f"Sun_{idx}", type="SUN")
@@ -559,69 +862,111 @@ def render_360_review(review_dir: str) -> None:
         light_obj.rotation_euler = rot
 
     cam_data = bpy.data.cameras.new("PlateauReviewCamera")
-    cam_data.lens = 32.0
+    cam_data.lens = 28.0  # 人間の視野・車内フロントガラス広角視野に近い28mm
     cam_data.clip_end = 3000.0
     cam_obj = bpy.data.objects.new("PlateauReviewCamera", cam_data)
     scene.collection.objects.link(cam_obj)
     scene.camera = cam_obj
 
-    # 渋谷の主要ランドマーク・交差点・坂道・街並みアングル
-    # Blender 座標系: x=world_x, y=-world_z, z=height
-    angles = [
-        # 1. スクランブル交差点・ハチ公前（俯瞰）
-        (
-            "01_scramble_crossing_birdseye",
-            Vector((-815.0, -248.0, 180.0)),
-            Vector((-815.0, -248.0, 25.0)),
-        ),
-        # 2. 道玄坂を登るドライバー視点
-        ("02_dogenzaka_driver_view", Vector((-830.0, -248.0, 4.0)), Vector((-930.0, -200.0, 22.0))),
-        # 3. 宮益坂を登るドライバー視点（東向き）
-        (
-            "03_miyamasuzaka_driver_view",
-            Vector((-750.0, -248.0, 5.0)),
-            Vector((-620.0, -248.0, 28.0)),
-        ),
-        # 4. センター街・井の頭通りの密集街区
-        (
-            "04_center_gai_dense_fabric",
-            Vector((-815.0, -260.0, 8.0)),
-            Vector((-900.0, -290.0, 20.0)),
-        ),
-        # 5. 明治通り・渋谷ストリーム前（北向きアイレベル）
-        (
-            "05_meiji_dori_shibuya_stream",
-            Vector((-750.0, 15.0, 3.0)),
-            Vector((-750.0, -150.0, 45.0)),
-        ),
-        # 6. 渋谷駅東口・ヒカリエ・スクランブルスクエア広角
-        (
-            "06_station_east_hikarie_wide",
-            Vector((-645.0, -145.0, 40.0)),
-            Vector((-780.0, -145.0, 80.0)),
-        ),
-        # 7. 桜丘町・セルリアンタワー台地見上げ
-        (
-            "07_sakuragaoka_cerulean_slope",
-            Vector((-810.0, 45.0, 6.0)),
-            Vector((-900.0, 45.0, 85.0)),
-        ),
-        # 8. 渋谷エリア全域高空バードズアイ（南西から北東全景）
-        (
-            "08_shibuya_metropolis_high_birdseye",
-            Vector((-1050.0, 100.0, 450.0)),
-            Vector((-750.0, -150.0, 60.0)),
-        ),
+    # 渋谷周辺4倍拡大エリアの主要6大スポット（各スポット360度マルチアングル 8方位 + 俯瞰）
+    review_spots = [
+        {
+            "id": "spot1_scramble_109_y_fork",
+            "name": "スクランブル交差点〜109前Y字路（道玄坂下・文化村通り）",
+            "center": Vector((-825.0, -250.0, 1.8)),
+            "birdseye_height": 80.0,
+            "look_radius": 60.0,
+        },
+        {
+            "id": "spot2_dogenzaka_ue_tamagawa",
+            "name": "道玄坂上・玉川通り合流・神泉町（西進エリア）",
+            "center": Vector((-1080.0, -140.0, 2.0)),
+            "birdseye_height": 65.0,
+            "look_radius": 50.0,
+        },
+        {
+            "id": "spot3_bunkamura_shoto",
+            "name": "文化村通り・東急本店前・松濤二丁目",
+            "center": Vector((-940.0, -345.0, 1.8)),
+            "birdseye_height": 60.0,
+            "look_radius": 45.0,
+        },
+        {
+            "id": "spot4_koen_dori_parco",
+            "name": "渋谷公園通り・PARCO前・オルガン坂",
+            "center": Vector((-798.0, -360.0, 2.0)),
+            "birdseye_height": 65.0,
+            "look_radius": 45.0,
+        },
+        {
+            "id": "spot5_sakurazaka_cerulean",
+            "name": "桜丘町・さくら坂・セルリアンタワー周回路",
+            "center": Vector((-920.0, 10.0, 2.0)),
+            "birdseye_height": 65.0,
+            "look_radius": 45.0,
+        },
+        {
+            "id": "spot6_miyamasuzaka_ue",
+            "name": "宮益坂・宮益坂上・青山通り",
+            "center": Vector((-560.0, -248.0, 2.2)),
+            "birdseye_height": 65.0,
+            "look_radius": 50.0,
+        },
     ]
 
-    for name, cam_pos, target_pos in angles:
-        cam_obj.location = cam_pos
-        direction = target_pos - cam_pos
-        cam_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
-        out_file = os.path.join(review_dir, f"{name}.png")
+    directions = [
+        ("000_north", 0.0),
+        ("045_northeast", 45.0),
+        ("090_east", 90.0),
+        ("135_southeast", 135.0),
+        ("180_south", 180.0),
+        ("225_southwest", 225.0),
+        ("270_west", 270.0),
+        ("315_northwest", 315.0),
+    ]
+
+    rendered_count = 0
+    for spot in review_spots:
+        spot_id = spot["id"]
+        spot_center = spot["center"]
+        look_r = spot["look_radius"]
+
+        # A. アイレベル 360度 全8方位レンダリング
+        for dir_name, deg in directions:
+            rad = math.radians(deg)
+            cam_obj.location = spot_center
+            # Blender 座標系: x: 東 (+X), y: 南 (-Y なので北は -Y, 南は +Y)
+            # deg=0 (北): y方向は -1.0, deg=90 (東): x方向は +1.0
+            dx = math.sin(rad) * look_r
+            dy = -math.cos(rad) * look_r
+            target = spot_center + Vector((dx, dy, 14.0))  # 沿道ビル見上げ角度
+            direction = target - spot_center
+            cam_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+
+            out_file = os.path.join(review_dir, f"{spot_id}_{dir_name}.png")
+            scene.render.filepath = out_file
+            bpy.ops.render.render(write_still=True)
+            rendered_count += 1
+
+        # B. スポット直上からの高解像度俯瞰（Birdseye View）
+        bh = spot["birdseye_height"]
+        cam_obj.location = spot_center + Vector((0.0, 0.0, bh))
+        cam_obj.rotation_euler = (0.0, 0.0, 0.0)  # 直下
+        out_file = os.path.join(review_dir, f"{spot_id}_999_birdseye.png")
         scene.render.filepath = out_file
         bpy.ops.render.render(write_still=True)
-        print(f"[Review] Rendered: {out_file}")
+        rendered_count += 1
+
+    # C. 渋谷エリア全域高空バードズアイ（南西から北東全景）
+    cam_obj.location = Vector((-1100.0, 150.0, 480.0))
+    direction = Vector((-750.0, -150.0, 50.0)) - cam_obj.location
+    cam_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+    out_file = os.path.join(review_dir, "00_shibuya_metropolis_high_birdseye.png")
+    scene.render.filepath = out_file
+    bpy.ops.render.render(write_still=True)
+    rendered_count += 1
+
+    print(f"[Review] Complete: Rendered {rendered_count} 360-degree review images to {review_dir}")
 
 
 if __name__ == "__main__":
