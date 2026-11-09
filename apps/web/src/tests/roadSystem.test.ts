@@ -831,6 +831,57 @@ describe("日本の道路作成システムの仕様検証", () => {
     expect(markingGroup.children.length).toBeGreaterThan(20);
   });
 
+  it("渋谷スクランブル交差点の対角線X字型スクランブル横断歩道（斜め横断歩道）が正しい本数とPBRマテリアルで生成されることを保証する", () => {
+    const builder = new JapaneseRoadBuilder();
+    const scramble = builder.buildScrambleDiagonalCrosswalks(44);
+    expect(scramble.name).toBe("ShibuyaScrambleDiagonalCrosswalks");
+    expect(scramble.userData.isRoadInfrastructure).toBe(true);
+    expect(scramble.children.length).toBeGreaterThanOrEqual(30);
+    const firstStripe = scramble.children[0] as THREE.Mesh;
+    expect(firstStripe.userData.markingType).toBe("CrosswalkStripe");
+    const mat = firstStripe.material as THREE.MeshStandardMaterial;
+    expect(mat.isMeshStandardMaterial).toBe(true);
+    expect(mat.name).toBe("RoadMarking_WhitePaint");
+
+    // 各ストライプが進行方向厚み 0.45m、横断歩道幅員 4.2m であり、対角線上を重ならずに 1.1m 間隔で並ぶことを保証する
+    expect(firstStripe.userData.stripeWidth).toBe(0.45);
+    expect(firstStripe.userData.stripeLength).toBe(4.2);
+
+    const neSwStripes = scramble.children.filter(
+      (c) => (c as THREE.Mesh).userData.diagonalDir === 1,
+    ) as THREE.Mesh[];
+    expect(neSwStripes.length).toBeGreaterThanOrEqual(15);
+    // 連続する2ストライプ間の距離が 1.1m (stepDist) であり、厚み 0.45m より大きいため 0.65m のアスファルト隙間があり重なり合わないこと
+    for (let i = 1; i < neSwStripes.length; i++) {
+      const prev = neSwStripes[i - 1];
+      const curr = neSwStripes[i];
+      const dist = Math.hypot(curr.position.x - prev.position.x, curr.position.z - prev.position.z);
+      expect(dist).toBeCloseTo(1.1, 2);
+      expect(dist).toBeGreaterThan(0.45);
+    }
+  });
+
+  it("渋谷スクランブル交差点の交差点標示（4面外周横断歩道）において中央ダイヤ標示（◇）および南北誘導破線が無効化されることを保証する", () => {
+    const builder = new JapaneseRoadBuilder();
+    const scrambleMarkings = builder.buildIntersectionMarkingGroup(44, 44, {
+      lanesX: 3,
+      lanesZ: 3,
+      hasCrosswalks: true,
+      hasCenterDiamond: false,
+      hasGuideDots: false,
+    });
+    expect(scrambleMarkings.name).toBe("IntersectionMarkings");
+    // 4面の外周横断歩道が存在すること
+    expect(scrambleMarkings.getObjectByName("IntersectionCrosswalk_NS_North")).toBeDefined();
+    expect(scrambleMarkings.getObjectByName("IntersectionCrosswalk_NS_South")).toBeDefined();
+    expect(scrambleMarkings.getObjectByName("IntersectionCrosswalk_EW_East")).toBeDefined();
+    expect(scrambleMarkings.getObjectByName("IntersectionCrosswalk_EW_West")).toBeDefined();
+    // 対角線横断歩道と衝突する中央ダイヤ（◇）および誘導破線が生成されていないこと
+    expect(scrambleMarkings.getObjectByName("IntersectionCenterDiamond_Edge")).toBeUndefined();
+    expect(scrambleMarkings.getObjectByName("IntersectionGuideDot_NS")).toBeUndefined();
+    expect(scrambleMarkings.getObjectByName("IntersectionGuideDot_EW")).toBeUndefined();
+  });
+
   it("路面ダイヤ標示（◇）が × 印ではなく閉じた中抜きひし形になり、横断歩道区間を中央線・破線が貫通せず、停止線が進行方向片側車線のみに引かれることを保証する", async () => {
     const { RoadMarkings } = await import("../roads/roadMarkings");
     const markings = new RoadMarkings();

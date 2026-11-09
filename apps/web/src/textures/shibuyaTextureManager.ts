@@ -325,7 +325,7 @@ export class ShibuyaTextureManager {
    * スクランブル交差点・屋外大型LEDビジョン用の発光マテリアルを生成する
    */
   public createBillboardMaterial(
-    type: "qfront" | "billboards" = "billboards",
+    type: "qfront" | "billboards" | "magnet" = "billboards",
     isNight = false,
   ): THREE.MeshStandardMaterial {
     const tex = this.getTexture(type);
@@ -340,7 +340,8 @@ export class ShibuyaTextureManager {
         ? (cfg.emissiveIntensityNight ?? 1.15)
         : (cfg.emissiveIntensityDay ?? 0.35),
     });
-    mat.name = `Shibuya${type === "qfront" ? "Qfront" : "Billboard"}Mat`;
+    const typeLabel = type === "qfront" ? "Qfront" : type === "magnet" ? "Magnet" : "Billboard";
+    mat.name = `Shibuya${typeLabel}Mat`;
     return mat;
   }
 

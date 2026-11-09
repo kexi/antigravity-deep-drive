@@ -446,6 +446,42 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
       }
     }
 
+    // ハチ公前広場インフラおよびスクランブル交差点対角線横断歩道が構築されていること
+    const hachikoPlaza = cityMap.group.getObjectByName("ShibuyaHachikoPlazaInfrastructure");
+    expect(hachikoPlaza).toBeDefined();
+    const hachikoMonument = cityMap.group.getObjectByName("ShibuyaHachikoStatueMonument");
+    expect(hachikoMonument).toBeDefined();
+
+    // 忠犬ハチ公像モニュメントが車道（z >= 226）にめり込まず、歩行者広場内（z <= 224）に配置されていること
+    const monumentWorldPos = new THREE.Vector3();
+    hachikoMonument!.getWorldPosition(monumentWorldPos);
+    expect(monumentWorldPos.z).toBeLessThanOrEqual(224);
+    expect(monumentWorldPos.x).toBeCloseTo(-802, 1);
+
+    // ハチ公前広場舗装（HachikoPlazaPavement）の北端が車道南端（z = 226）を越えないこと
+    const plazaPavement = cityMap.group.getObjectByName("HachikoPlazaPavement") as THREE.Mesh;
+    expect(plazaPavement).toBeDefined();
+    const pavementWorldPos = new THREE.Vector3();
+    plazaPavement.getWorldPosition(pavementWorldPos);
+    const pavementHalfDepth = (plazaPavement.geometry as THREE.PlaneGeometry).parameters.height / 2;
+    expect(pavementWorldPos.z + pavementHalfDepth).toBeLessThanOrEqual(226.01);
+
+    // スクランブル交差点対角線横断歩道が外周横断歩道上面（y = 0.0335）と完全に整合した高さで生成されていること
+    const scrambleCrosswalks = cityMap.group.getObjectByName("ShibuyaScrambleDiagonalCrosswalks");
+    expect(scrambleCrosswalks).toBeDefined();
+    expect(scrambleCrosswalks!.position.y).toBeGreaterThanOrEqual(0.033);
+
+    // スクランブル交差点（Intersection_-815_248）に斜め横断歩道と衝突する中央ダイヤ・誘導破線が存在しないこと
+    const scrambleInter = cityMap.group.getObjectByName("Intersection_-815_248");
+    expect(scrambleInter).toBeDefined();
+    expect(scrambleInter!.getObjectByName("IntersectionCenterDiamond_Edge")).toBeUndefined();
+    expect(scrambleInter!.getObjectByName("IntersectionGuideDot_NS")).toBeUndefined();
+    expect(scrambleInter!.getObjectByName("IntersectionGuideDot_EW")).toBeUndefined();
+
+    // 109前および神南一丁目がスクランブル交差点パッドと重複して架空交差点パッドを生成していないこと
+    expect(cityMap.group.getObjectByName("Intersection_-830_252")).toBeUndefined();
+    expect(cityMap.group.getObjectByName("Intersection_-790_265")).toBeUndefined();
+
     // 昼間モード: 全エントリの emissiveIntensity が dayIntensity であること
     cityMap.setNightMode(false);
     const internalMap = cityMap as unknown as {

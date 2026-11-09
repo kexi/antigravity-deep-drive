@@ -49,6 +49,17 @@ export class JapaneseRoadBuilder {
     return this.markings.createIntersectionMarkings(widthX, depthZ, options);
   }
 
+  /**
+   * 渋谷スクランブル交差点の対角線X字型スクランブル横断歩道（斜め横断歩道）を構築する
+   */
+  public buildScrambleDiagonalCrosswalks(padSize = 44): THREE.Group {
+    return this.markings.createScrambleDiagonalCrosswalks(padSize);
+  }
+
+  public getMarkings(): RoadMarkings {
+    return this.markings;
+  }
+
   public buildSegment(
     config: JapaneseRoadSegmentConfig,
     world: RAPIER.World,

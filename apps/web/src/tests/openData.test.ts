@@ -442,5 +442,24 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
     expect(intersections.some((i) => i.id === "nav-int-shibuya-109-y")).toBe(true);
     expect(intersections.some((i) => i.id === "nav-int-shibuya-miyamasuzaka-shita")).toBe(true);
     expect(intersections.some((i) => i.id === "nav-int-shibuya-cerulean-tamagawa")).toBe(true);
+
+    // 7. 渋谷スクランブル交差点連絡路（nav-road-shibuya-scramble）が幅員22m・100m以上でナビゲーションコリドーに登録され、109前〜スクランブル中心〜ハチ公前北〜宮益坂下を網羅すること
+    const scrambleNav = navCorridors.find((c) => c.id === "nav-road-shibuya-scramble");
+    expect(
+      scrambleNav,
+      "Missing nav-road-shibuya-scramble in getNavigationRoadCorridors",
+    ).toBeDefined();
+    expect(scrambleNav!.widthMeters).toBe(22);
+    expect(scrambleNav!.points.length).toBeGreaterThanOrEqual(4);
+    expect(scrambleNav!.points[0].x).toBe(-835);
+    expect(scrambleNav!.points[scrambleNav!.points.length - 1].x).toBe(-732);
+    let scrambleLen = 0;
+    for (let i = 1; i < scrambleNav!.points.length; i++) {
+      scrambleLen += Math.hypot(
+        scrambleNav!.points[i].x - scrambleNav!.points[i - 1].x,
+        scrambleNav!.points[i].z - scrambleNav!.points[i - 1].z,
+      );
+    }
+    expect(scrambleLen).toBeGreaterThanOrEqual(100);
   });
 });

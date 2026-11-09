@@ -198,6 +198,7 @@ export class RoadMarkings {
     // また JIS K 5665 路面標示用塗料（ガラスビーズ混入）の再帰反射輝度を emissive で担保し、
     // 濡れたアスファルト路面や浅い俯角でも白線・黄線が黒いシルエットにならず鮮明に視認できるようにする。
     this.whitePaintMat = new THREE.MeshStandardMaterial({
+      name: "RoadMarking_WhitePaint",
       color: 0xf8fafc,
       emissive: 0xe2e8f0,
       emissiveIntensity: 0.42,
@@ -210,6 +211,7 @@ export class RoadMarkings {
     this.applyRoadMarking3DTexture(this.whitePaintMat, "white-paint");
 
     this.yellowPaintMat = new THREE.MeshStandardMaterial({
+      name: "RoadMarking_YellowPaint",
       color: 0xf59e0b, // 日本の道路規制標示オレンジイエロー
       emissive: 0xf59e0b,
       emissiveIntensity: 0.45,
@@ -222,6 +224,7 @@ export class RoadMarkings {
     this.applyRoadMarking3DTexture(this.yellowPaintMat, "yellow-paint");
 
     this.brailleTileMat = new THREE.MeshStandardMaterial({
+      name: "RoadMarking_BrailleTile",
       color: 0xeab308, // 点字ブロック警戒色イエロー（JIS T 9251）
       emissive: 0xeab308,
       emissiveIntensity: 0.35,
@@ -1011,6 +1014,56 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
     }
 
     return group;
+  }
+
+  public getWhitePaintMaterial(): THREE.MeshStandardMaterial {
+    return this.whitePaintMat;
+  }
+
+  /**
+   * 渋谷スクランブル交差点の対角線X字型スクランブル横断歩道（斜め横断歩道）を構築する
+   * How: 44m交差点フラットパッドの対角線（北東-南西、北西-南東）に沿って、
+   * 3Dボリュームテクスチャ（white-paint）適用済みの白色PBRマテリアルによる斜めゼブラストライプを整然と展開する。
+   */
+  public createScrambleDiagonalCrosswalks(
+    padSize = 44,
+    stripeLength = 4.2,
+    stripeWidth = 0.45,
+    stepDist = 1.1,
+  ): THREE.Group {
+    const scrambleInterGroup = new THREE.Group();
+    scrambleInterGroup.name = "ShibuyaScrambleDiagonalCrosswalks";
+    scrambleInterGroup.userData.isRoadInfrastructure = true;
+    scrambleInterGroup.position.set(0, 0, 0);
+
+    const halfSpan = padSize * 0.42;
+    const count = Math.floor(halfSpan / stepDist) * 2;
+
+    for (const dir of [1, -1]) {
+      const diagAngle = (dir * Math.PI) / 4;
+      for (let i = -count / 2; i <= count / 2; i++) {
+        const offset = i * stepDist;
+        // Why stripeLength in X and stripeWidth in Z:
+        // PlaneGeometry を rotateX(-PI/2) すると X が横幅、Z が縦長になる。
+        // diagAngle で回転させると Z軸方向が対角線歩行方向と一致するため、
+        // 歩行方向（Z）の厚みを stripeWidth (0.45m)、横断歩道の幅員（X）を stripeLength (4.2m) に設定することで、
+        // 対角線歩行路上で各ストライプが重なり合わず、進行方向と直交する美しい 4.2m 幅のゼブラ帯を形成する。
+        const stripeGeo = new THREE.PlaneGeometry(stripeLength, stripeWidth);
+        stripeGeo.rotateX(-Math.PI / 2);
+        stripeGeo.rotateY(diagAngle);
+        const stripeMesh = new THREE.Mesh(stripeGeo, this.whitePaintMat);
+        stripeMesh.name = `ScrambleDiagonalStripe_${dir > 0 ? "NE_SW" : "NW_SE"}_${i}`;
+        stripeMesh.userData.markingType = "CrosswalkStripe";
+        stripeMesh.userData.stripeLength = stripeLength;
+        stripeMesh.userData.stripeWidth = stripeWidth;
+        stripeMesh.userData.diagonalDir = dir;
+        stripeMesh.userData.stripeIndex = i;
+        stripeMesh.position.set(offset * Math.cos(diagAngle), 0, offset * Math.sin(diagAngle));
+        stripeMesh.receiveShadow = true;
+        scrambleInterGroup.add(stripeMesh);
+      }
+    }
+    return scrambleInterGroup;
   }
 
   /**

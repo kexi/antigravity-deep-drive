@@ -755,6 +755,14 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
     en: "Shibuya Scramble Crossing (Hachiko / QFRONT / 109)",
     zh: "涩谷十字路口 (八公前・QFRONT・109前交叉口)",
   },
+  "渋谷スクランブル交差点連絡路 (109前〜スクランブル中心〜ハチ公前北〜宮益坂下連絡路)": {
+    en: "Shibuya Scramble Crossing Corridor (109–Crossing–Hachiko–Miyamasuzaka)",
+    zh: "涩谷全向十字路口联络路 (109前〜十字路口中心〜八公前北〜宫益坂下联络路)",
+  },
+  "渋谷スクランブル交差点連絡路（109前〜スクランブル中心〜ハチ公前北〜宮益坂下）": {
+    en: "Shibuya Scramble Crossing Corridor (109–Crossing–Hachiko–Miyamasuzaka)",
+    zh: "涩谷全向十字路口联络路 (109前〜十字路口中心〜八公前北〜宫益坂下)",
+  },
   "道玄坂 (都道413号・SHIBUYA109〜道玄坂上坂道区間)": {
     en: "Dogenzaka Ave. (Pref. Rte 413 / SHIBUYA109–Dogenzaka-ue)",
     zh: "道玄坂 (东京都道413号・SHIBUYA109〜道玄坂上坡道段)",

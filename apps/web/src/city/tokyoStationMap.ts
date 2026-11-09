@@ -639,6 +639,14 @@ export class TokyoStationMap {
       lanesX: number,
       lanesZ: number,
       hasCrosswalks = true,
+      options?: {
+        hasCenterDiamond?: boolean;
+        hasGuideDots?: boolean;
+        crosswalkN?: boolean;
+        crosswalkS?: boolean;
+        crosswalkE?: boolean;
+        crosswalkW?: boolean;
+      },
     ): void => {
       const interGroup = new THREE.Group();
       interGroup.name = `Intersection_${ix}_${iz}`;
@@ -656,7 +664,12 @@ export class TokyoStationMap {
         lanesX,
         lanesZ,
         hasCrosswalks,
-        hasCenterDiamond: lanesX >= 2 && lanesZ >= 2,
+        hasCenterDiamond: options?.hasCenterDiamond ?? (lanesX >= 2 && lanesZ >= 2),
+        hasGuideDots: options?.hasGuideDots ?? true,
+        crosswalkN: options?.crosswalkN,
+        crosswalkS: options?.crosswalkS,
+        crosswalkE: options?.crosswalkE,
+        crosswalkW: options?.crosswalkW,
       });
       interMarkings.userData.isRoadInfrastructure = true;
       interGroup.add(interMarkings);
@@ -798,43 +811,34 @@ export class TokyoStationMap {
     );
 
     // 渋谷スクランブル交差点（x = -815, z = 248）および宮益坂下交差点（x = -750, z = 248）
-    addIntersectionPadAndMarkings(-815, 248, 42, 42, 2, 2, true);
+    // Why not hasCenterDiamond / hasGuideDots:
+    // スクランブル交差点内部は対角線X字型横断歩道が交差する全方向歩行者専用領域であり、
+    // 中央ダイヤ標示（◇）や南北誘導破線を描画すると斜め横断歩道白線と十字に衝突・貫通して視覚的ノイズとなるため無効化する。
+    addIntersectionPadAndMarkings(-815, 248, 44, 44, 3, 3, true, {
+      hasCenterDiamond: false,
+      hasGuideDots: false,
+    });
     addIntersectionPadAndMarkings(-750, 248, 32, 24, 3, 2, true);
 
     // 渋谷スクランブル交差点 象徴の対角線X字型スクランブル横断歩道（斜め横断歩道）
-    const scrambleInterGroup = new THREE.Group();
-    scrambleInterGroup.name = "ShibuyaScrambleDiagonalCrosswalks";
-    scrambleInterGroup.userData.isRoadInfrastructure = true;
-    scrambleInterGroup.position.set(-815, 0.024, 248);
-    const diagonalStripeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    for (const dir of [1, -1]) {
-      const diagAngle = (dir * Math.PI) / 4;
-      const count = 28;
-      const stepDist = 1.1;
-      for (let i = -count / 2; i <= count / 2; i++) {
-        const offset = i * stepDist;
-        const stripeGeo = new THREE.PlaneGeometry(0.45, 3.8);
-        stripeGeo.rotateX(-Math.PI / 2);
-        stripeGeo.rotateY(diagAngle);
-        const stripeMesh = new THREE.Mesh(stripeGeo, diagonalStripeMat);
-        stripeMesh.position.set(offset * Math.cos(diagAngle), 0, offset * Math.sin(diagAngle));
-        scrambleInterGroup.add(stripeMesh);
-      }
-    }
-    this.group.add(scrambleInterGroup);
+    // 外周横断歩道上面（world y = 0.0115 + 0.022 = 0.0335）と完全に揃えた y = 0.0336 で重畳
+    const scrambleDiagonalCrosswalks = this.roadBuilder.buildScrambleDiagonalCrosswalks(44);
+    scrambleDiagonalCrosswalks.position.set(-815, 0.0336, 248);
+    this.group.add(scrambleDiagonalCrosswalks);
 
     // 永代通り×国道246号T字交差点（x = -268 × z = 95）フラットアスファルト接続パッド＆路面標示
     addIntersectionPadAndMarkings(-268, 95, 26, 26, 2, 2, true);
 
     // I-6. 渋谷周辺4倍拡大エリア新設交差点フラットアスファルト接続パッド＆路面標示
-    // How: 109前Y字分岐、道玄坂上、神泉町、東急本店前、松濤二丁目、神南一丁目、渋谷PARCO前、勤労福祉会館前、渋谷区役所・NHK前、宇田川町、さくら坂上、宮益坂上の全交差点を滑らかに平坦接続する
+    // Why not (-830, 252: 109前Y字路) および (-790, 265: 神南一丁目) をここで重複生成しないか:
+    // スクランブル交差点パッド（x = -815, 44m x 44m: x ∈ [-837, -793], z ∈ [226, 270]）が既に 109前分岐および公園通り入口を
+    // 完全包含しており、ここで同座標に個別交差点パッドを重複配置すると、4方向横断歩道（特にスクランブル中央を東西南北に貫通する架空横断歩道）
+    // や中央ダイヤ・誘導破線・アスファルト板の同一平面 Z-fighting・物理コライダー重複を引き起こすため。
     const shibuyaRadialIntersections = [
-      { x: -830, z: 252, w: 36, d: 34, lx: 2, lz: 2 }, // SHIBUYA109前Y字路（道玄坂・文化村通り分岐）
       { x: -1080, z: 140, w: 36, d: 32, lx: 2, lz: 2 }, // 道玄坂上交差点（玉川通り合流）
       { x: -1250, z: 150, w: 34, d: 32, lx: 2, lz: 2 }, // 神泉町交差点（旧山手通り交差）
       { x: -940, z: 345, w: 30, d: 28, lx: 2, lz: 2 }, // 東急本店前交差点（松濤文化村通り）
       { x: -1060, z: 370, w: 28, d: 26, lx: 1, lz: 1 }, // 松濤二丁目交差点（円山町連絡路接続）
-      { x: -790, z: 265, w: 30, d: 28, lx: 2, lz: 2 }, // 神南一丁目交差点（公園通り入口）
       { x: -798, z: 360, w: 28, d: 28, lx: 2, lz: 1 }, // 渋谷PARCO前交差点（オルガン坂合流）
       { x: -805, z: 440, w: 28, d: 26, lx: 2, lz: 1 }, // 勤労福祉会館前交差点（神南連絡路接続）
       { x: -810, z: 520, w: 32, d: 30, lx: 2, lz: 2 }, // 渋谷区役所・NHK放送センター前交差点
@@ -849,6 +853,9 @@ export class TokyoStationMap {
     for (const ri of shibuyaRadialIntersections) {
       addIntersectionPadAndMarkings(ri.x, ri.z, ri.w, ri.d, ri.lx, ri.lz, true);
     }
+
+    // I-7. 渋谷ハチ公前広場インフラ（忠犬ハチ公像・石畳舗装・植栽・ベンチ・照明灯・JR駅前キャノピー）
+    this.buildHachikoPlazaInfrastructure(world, rapier, groundBody);
 
     // --- J. 国土地理院 道路中心線 (experimental_rdcl) & PLATEAU 道路網オープンデータに基づく曲線・屈曲道路区間 ---
     const curvedRoadCorridors = getOpenDataCurvedRoadCorridors();
@@ -3024,6 +3031,28 @@ export class TokyoStationMap {
     });
     this.applyArchitecture3DTexture(billboardMat, "curtain_glass");
 
+    const qfrontBillboardMat = shibuyaTextureManager.createBillboardMaterial(
+      "qfront",
+      this.isNightActive,
+    );
+    this.shibuyaStreamEmissiveEntries.push({
+      material: qfrontBillboardMat,
+      dayIntensity: 0.35,
+      nightIntensity: 1.65,
+    });
+    this.applyArchitecture3DTexture(qfrontBillboardMat, "curtain_glass");
+
+    const magnetBillboardMat = shibuyaTextureManager.createBillboardMaterial(
+      "magnet",
+      this.isNightActive,
+    );
+    this.shibuyaStreamEmissiveEntries.push({
+      material: magnetBillboardMat,
+      dayIntensity: 0.45,
+      nightIntensity: 1.85,
+    });
+    this.applyArchitecture3DTexture(magnetBillboardMat, "curtain_glass");
+
     const steelBracketMat = new THREE.MeshStandardMaterial({
       color: 0x334155,
       roughness: 0.45,
@@ -3077,16 +3106,74 @@ export class TokyoStationMap {
     }
 
     // 2. 渋谷スクランブル交差点・駅前広場 屋外大型LEDビジョン＆ビルボード群
-    // ストリートビューから見える実写広告・電子ビジョン
+    // ストリートビューから見える実写広告・電子ビジョン（QFRONT、MAGNET by SHIBUYA109 等と完全ビジュアル整合）
     const crossingBillboards = [
+      // MAGNET by SHIBUYA109 スクランブル交差点北東・大型LEDビジョン（南西向き・交差点中心を一望）
+      {
+        x: -788.0,
+        y: 28.0,
+        z: 272.0,
+        w: 16.0,
+        h: 10.5,
+        d: 0.8,
+        rotY: -2.35,
+        mat: magnetBillboardMat,
+      },
+      // QFRONT スクランブル交差点北面正面大型湾曲LEDビジョン「Q'S EYE」（南向き・ハチ公前広場正対）
+      {
+        x: -818.0,
+        y: 28.0,
+        z: 270.0,
+        w: 18.0,
+        h: 11.0,
+        d: 0.8,
+        rotY: 0.05,
+        mat: qfrontBillboardMat,
+      },
       // スクランブル交差点 北東向き大型屋上ビジョン
-      { x: -788.0, y: 34.0, z: 212.0, w: 16.0, h: 9.5, d: 0.8, rotY: 0.45 },
+      {
+        x: -788.0,
+        y: 34.0,
+        z: 212.0,
+        w: 16.0,
+        h: 9.5,
+        d: 0.8,
+        rotY: 0.45,
+        mat: billboardMat,
+      },
       // スクランブル交差点 南向き（ハチ公広場正面）大型ファサードビジョン
-      { x: -822.0, y: 28.0, z: 228.0, w: 18.0, h: 10.5, d: 0.8, rotY: 0.15 },
+      {
+        x: -822.0,
+        y: 28.0,
+        z: 228.0,
+        w: 18.0,
+        h: 10.5,
+        d: 0.8,
+        rotY: 0.15,
+        mat: billboardMat,
+      },
       // 国道246号・玉川通り 沿道大型ロードサイド看板（東行・渋谷流入車両向き）
-      { x: -725.0, y: 22.0, z: 42.0, w: 14.0, h: 7.5, d: 0.7, rotY: Math.PI / 2 },
+      {
+        x: -725.0,
+        y: 22.0,
+        z: 42.0,
+        w: 14.0,
+        h: 7.5,
+        d: 0.7,
+        rotY: Math.PI / 2,
+        mat: billboardMat,
+      },
       // 渋谷駅東口広場・明治通り交差点 大型ビジョン
-      { x: -768.0, y: 25.0, z: 125.0, w: 15.0, h: 8.0, d: 0.7, rotY: -0.35 },
+      {
+        x: -768.0,
+        y: 25.0,
+        z: 125.0,
+        w: 15.0,
+        h: 8.0,
+        d: 0.7,
+        rotY: -0.35,
+        mat: billboardMat,
+      },
     ];
 
     const billboardGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -3094,7 +3181,7 @@ export class TokyoStationMap {
 
     for (let i = 0; i < crossingBillboards.length; i++) {
       const b = crossingBillboards[i];
-      const bMesh = new THREE.Mesh(billboardGeo, billboardMat);
+      const bMesh = new THREE.Mesh(billboardGeo, b.mat);
       bMesh.scale.set(b.w, b.h, b.d);
       bMesh.position.set(b.x, b.y, b.z);
       bMesh.rotation.y = b.rotY;
@@ -3111,6 +3198,272 @@ export class TokyoStationMap {
 
     signsGroup.userData.isRoadInfra = true;
     this.group.add(signsGroup);
+  }
+
+  /**
+   * 渋谷ハチ公前広場インフラ（忠犬ハチ公像・石畳舗装・植栽・ベンチ・照明灯・JR駅前キャノピー・歩行者平坦コライダー）を構築する
+   * How: スクランブル交差点南東（x = -795, z = 225）に石畳広場メッシュを敷設し、
+   * 象徴的なハチ公像モニュメント、緑化植栽、案内施設を配置して、スクランブル交差点と一体の歩行者・都市空間を再現する。
+   */
+  private buildHachikoPlazaInfrastructure(
+    world: RAPIER.World,
+    rapier: typeof RAPIER,
+    groundBody: RAPIER.RigidBody,
+  ): void {
+    const plazaGroup = new THREE.Group();
+    plazaGroup.name = "ShibuyaHachikoPlazaInfrastructure";
+    plazaGroup.userData.isRoadInfrastructure = true;
+    plazaGroup.position.set(-795, 0.023, 225);
+
+    // 1. ハチ公前広場 石畳・タイル舗装（PuddleMaterial）
+    // Why z=226 以南に配置するか:
+    // スクランブル交差点車道パッド（z=248, 44m幅: z ∈ [226, 270]）および南側横断歩道（z=228.85）の南端外縁（z=226）に
+    // 歩道縁石・広場敷石の境界を厳密に揃えることで、車道への広場メッシュめり込みや、
+    // 車両通行帯上での Rapier 物理コライダー重複・段差バンプ跳ね上がりを防止する。
+    const plazaWidth = 38;
+    const plazaDepth = 28;
+    const plazaGeo = new THREE.PlaneGeometry(plazaWidth, plazaDepth, 8, 8);
+    plazaGeo.rotateX(-Math.PI / 2);
+    const plazaMat = new PuddleMaterial({
+      baseColor: 0x5a6578,
+      baseRoughness: 0.68,
+      baseMetalness: 0.08,
+      puddleThreshold: 0.42,
+    });
+    this.puddleMaterials.push(plazaMat);
+    const plazaMesh = new THREE.Mesh(plazaGeo, plazaMat);
+    plazaMesh.name = "HachikoPlazaPavement";
+    plazaMesh.userData.isRoadInfrastructure = true;
+    plazaMesh.position.set(0, 0, -13);
+    plazaMesh.receiveShadow = true;
+    plazaGroup.add(plazaMesh);
+
+    // 平坦路面コライダー（上面高さ y = 0.023 で段差なくスムーズに接続、z ∈ [198, 226] で車道と完全整合）
+    const plazaColDesc = rapier.ColliderDesc.cuboid(plazaWidth / 2, 0.25, plazaDepth / 2)
+      .setTranslation(-795, 0.523 - 0.25, 212)
+      .setFriction(0.85)
+      .setRestitution(0.02);
+    this.registerCollider(world.createCollider(plazaColDesc, groundBody), false);
+
+    // 2. 忠犬ハチ公像（Hachiko Bronze Statue & Monument Pedestal）
+    // スクランブル交差点正面を向く北西端（広場内相対座標: x = -7.0, z = -3.0 -> ワールド座標: x = -802, z = 222）
+    // 車道南縁 z=226 から 4m 南側、対角線横断歩道終点から約 13.5m 離れた歩行者広場内に正対配置
+    const monumentGroup = new THREE.Group();
+    monumentGroup.name = "ShibuyaHachikoStatueMonument";
+    monumentGroup.userData.isRoadInfrastructure = true;
+    monumentGroup.position.set(-7.0, 0, -3.0);
+
+    // 御影石の台座（Granite Pedestal）
+    const pedestalMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.72,
+      metalness: 0.12,
+    });
+    const pedestalGeo = new THREE.BoxGeometry(1.2, 1.1, 1.4);
+    const pedestalMesh = new THREE.Mesh(pedestalGeo, pedestalMat);
+    pedestalMesh.name = "HachikoStatuePedestal";
+    pedestalMesh.position.set(0, 0.55, 0);
+    pedestalMesh.castShadow = true;
+    pedestalMesh.receiveShadow = true;
+    monumentGroup.add(pedestalMesh);
+
+    // 台座銘板（Bronze Memorial Plaque）
+    const plaqueMat = new THREE.MeshStandardMaterial({
+      color: 0x92400e,
+      roughness: 0.35,
+      metalness: 0.8,
+    });
+    const plaqueGeo = new THREE.PlaneGeometry(0.55, 0.35);
+    const plaqueMesh = new THREE.Mesh(plaqueGeo, plaqueMat);
+    plaqueMesh.name = "HachikoMemorialPlaque";
+    plaqueMesh.position.set(0, 0.65, 0.71);
+    monumentGroup.add(plaqueMesh);
+
+    // ブロンズハチ公像（Bronze Dog Sculpture）
+    const bronzeMat = new THREE.MeshStandardMaterial({
+      color: 0x3b2d22,
+      roughness: 0.38,
+      metalness: 0.85,
+    });
+    // 胴体
+    const bodyGeo = new THREE.BoxGeometry(0.48, 0.44, 0.76);
+    const bodyMesh = new THREE.Mesh(bodyGeo, bronzeMat);
+    bodyMesh.name = "HachikoBronzeBody";
+    bodyMesh.position.set(0, 1.32, -0.05);
+    bodyMesh.rotation.x = -0.12;
+    bodyMesh.castShadow = true;
+    monumentGroup.add(bodyMesh);
+
+    // 首・頭部
+    const headGeo = new THREE.BoxGeometry(0.32, 0.32, 0.36);
+    const headMesh = new THREE.Mesh(headGeo, bronzeMat);
+    headMesh.name = "HachikoBronzeHead";
+    headMesh.position.set(0, 1.62, 0.32);
+    headMesh.castShadow = true;
+    monumentGroup.add(headMesh);
+
+    // 耳（特徴的な左耳の垂れと立ち耳）
+    const earGeo = new THREE.ConeGeometry(0.08, 0.18, 4);
+    const rightEar = new THREE.Mesh(earGeo, bronzeMat);
+    rightEar.position.set(0.12, 1.82, 0.28);
+    rightEar.rotation.z = -0.25;
+    monumentGroup.add(rightEar);
+    const leftEar = new THREE.Mesh(earGeo, bronzeMat);
+    leftEar.position.set(-0.12, 1.8, 0.28);
+    leftEar.rotation.z = 0.55;
+    monumentGroup.add(leftEar);
+
+    // 巻き尾（Tail）
+    const tailGeo = new THREE.CylinderGeometry(0.06, 0.05, 0.4, 6);
+    const tailMesh = new THREE.Mesh(tailGeo, bronzeMat);
+    tailMesh.position.set(0, 1.5, -0.42);
+    tailMesh.rotation.x = -0.65;
+    monumentGroup.add(tailMesh);
+
+    // 脚部（4本）
+    const legGeo = new THREE.CylinderGeometry(0.08, 0.09, 0.45, 6);
+    for (const [lx, lz] of [
+      [0.16, 0.25],
+      [-0.16, 0.25],
+      [0.18, -0.28],
+      [-0.18, -0.28],
+    ]) {
+      const legMesh = new THREE.Mesh(legGeo, bronzeMat);
+      legMesh.position.set(lx, 1.25, lz);
+      monumentGroup.add(legMesh);
+    }
+    plazaGroup.add(monumentGroup);
+
+    // 3. シンボル広場植栽（Raised Planters & Trees）
+    const planterMat = new THREE.MeshStandardMaterial({
+      color: 0x475569,
+      roughness: 0.8,
+      metalness: 0.1,
+    });
+    const foliageMat = new THREE.MeshStandardMaterial({
+      color: 0x166534,
+      roughness: 0.85,
+      metalness: 0.05,
+    });
+    const planterPositions = [
+      { x: 5.0, z: -8.0 },
+      { x: -9.0, z: -16.0 },
+      { x: 8.0, z: -18.0 },
+    ];
+    for (let i = 0; i < planterPositions.length; i++) {
+      const p = planterPositions[i];
+      const planterBox = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.5, 4.2), planterMat);
+      planterBox.name = `HachikoPlanter_${i}`;
+      planterBox.position.set(p.x, 0.25, p.z);
+      planterBox.receiveShadow = true;
+      plazaGroup.add(planterBox);
+
+      // 広場のシンボル樹木（Foliage Crown）
+      const trunkMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.22, 0.28, 4.0, 8),
+        new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.9 }),
+      );
+      trunkMesh.position.set(p.x, 2.5, p.z);
+      trunkMesh.castShadow = true;
+      plazaGroup.add(trunkMesh);
+
+      const foliageCrown = new THREE.Mesh(new THREE.DodecahedronGeometry(2.4, 1), foliageMat);
+      foliageCrown.name = `HachikoTreeFoliage_${i}`;
+      foliageCrown.position.set(p.x, 5.2, p.z);
+      foliageCrown.castShadow = true;
+      plazaGroup.add(foliageCrown);
+    }
+
+    // 4. 広場ベンチ（Plaza Park Benches）
+    const benchWoodMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.65 });
+    const benchLegMat = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,
+      roughness: 0.4,
+      metalness: 0.8,
+    });
+    const benchPositions = [
+      { x: -3.0, z: -6.0, rotY: 0 },
+      { x: 2.0, z: -14.0, rotY: Math.PI / 2 },
+      { x: -5.0, z: -12.0, rotY: 0.4 },
+    ];
+    for (let i = 0; i < benchPositions.length; i++) {
+      const b = benchPositions[i];
+      const benchGroup = new THREE.Group();
+      benchGroup.name = `HachikoBench_${i}`;
+      benchGroup.position.set(b.x, 0, b.z);
+      benchGroup.rotation.y = b.rotY;
+
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.08, 0.5), benchWoodMat);
+      seat.position.set(0, 0.45, 0);
+      seat.castShadow = true;
+      benchGroup.add(seat);
+
+      for (const lx of [-0.85, 0.85]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.45, 0.46), benchLegMat);
+        leg.position.set(lx, 0.225, 0);
+        benchGroup.add(leg);
+      }
+      plazaGroup.add(benchGroup);
+    }
+
+    // 5. 広場LED照明灯（Plaza Warm LED Lampposts）
+    const lampPoleMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.35,
+      metalness: 0.85,
+    });
+    const lampLightMat = new THREE.MeshStandardMaterial({
+      color: 0xffedd5,
+      emissive: new THREE.Color(0xffedd5),
+      emissiveIntensity: this.isNightActive ? 2.2 : 0.2,
+      roughness: 0.2,
+    });
+    this.shibuyaStreamEmissiveEntries.push({
+      material: lampLightMat,
+      dayIntensity: 0.2,
+      nightIntensity: 2.2,
+    });
+    for (const [lx, lz] of [
+      [-12.0, -4.0],
+      [12.0, -12.0],
+      [-12.0, -20.0],
+    ]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 5.0, 8), lampPoleMat);
+      pole.position.set(lx, 2.5, lz);
+      pole.castShadow = true;
+      plazaGroup.add(pole);
+
+      const lampHead = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 12), lampLightMat);
+      lampHead.name = "HachikoPlazaLamp";
+      lampHead.position.set(lx, 5.0, lz);
+      plazaGroup.add(lampHead);
+    }
+
+    // 6. JR渋谷駅 ハチ公改札口キャノピー（Station Entrance Canopy）
+    const canopyMat = new THREE.MeshStandardMaterial({
+      color: 0x1e3a5f,
+      roughness: 0.3,
+      metalness: 0.6,
+    });
+    const canopyMesh = new THREE.Mesh(new THREE.BoxGeometry(10.0, 0.4, 5.0), canopyMat);
+    canopyMesh.name = "ShibuyaStationHachikoEntranceCanopy";
+    canopyMesh.position.set(13.0, 4.2, -10.0);
+    canopyMesh.castShadow = true;
+    plazaGroup.add(canopyMesh);
+
+    for (const [cx, cz] of [
+      [8.5, -12.0],
+      [8.5, -8.0],
+      [17.5, -12.0],
+      [17.5, -8.0],
+    ]) {
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 4.2, 8), lampPoleMat);
+      pillar.position.set(cx, 2.1, cz);
+      pillar.castShadow = true;
+      plazaGroup.add(pillar);
+    }
+
+    this.group.add(plazaGroup);
   }
 
   /**

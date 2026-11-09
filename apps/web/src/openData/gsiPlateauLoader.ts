@@ -758,10 +758,11 @@ export const SHIBUYA_GSI_ROAD_SEGMENTS: readonly GsiRoadSegmentRecord[] = [
     rID: "533935-shibuya-rdcl-scramble",
     rdCtg: "主要地方道等",
     rnkWidth: "19.5m以上",
-    displayName: "渋谷スクランブル交差点 (ハチ公前・QFRONT・109前交差点)",
+    displayName:
+      "渋谷スクランブル交差点連絡路 (109前〜スクランブル中心〜ハチ公前北〜宮益坂下連絡路)",
     routeCode: "東京都道305号・413号交点",
     start: { x: -835, z: 248 },
-    end: { x: -795, z: 248 },
+    end: { x: -732, z: 248 },
   },
   {
     rID: "533935-shibuya-rdcl-dogenzaka",
@@ -1534,6 +1535,20 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
 
   // 2b. 渋谷エリア実在放射状曲線道路網 (major_avenue / local_street / national_highway)
   {
+    id: "nav-road-shibuya-scramble",
+    displayName: "渋谷スクランブル交差点連絡路（109前〜スクランブル中心〜ハチ公前北〜宮益坂下）",
+    routeCode: "東京都道305号・413号交点",
+    category: "major_avenue",
+    widthMeters: 22.0,
+    hasMedianLine: false,
+    points: [
+      { x: -835, z: 252 },
+      { x: -815, z: 248 },
+      { x: -780, z: 248 },
+      { x: -732, z: 248 },
+    ],
+  },
+  {
     id: "nav-road-shibuya-dogenzaka",
     displayName: "道玄坂（都道413号・SHIBUYA109〜道玄坂上坂道区間）",
     routeCode: "東京都道413号",
@@ -2292,7 +2307,7 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 16.0,
       hasMedianLine: true,
       points: [
-        { x: -830, z: 248 },
+        { x: -837, z: 248 },
         { x: -872, z: 235 },
         { x: -925, z: 215 },
         { x: -975, z: 188 },
@@ -2340,7 +2355,7 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 15.0,
       hasMedianLine: true,
       points: [
-        { x: -790, z: 265 },
+        { x: -791, z: 270 },
         { x: -798, z: 360 },
         { x: -805, z: 440 },
         { x: -810, z: 520 },

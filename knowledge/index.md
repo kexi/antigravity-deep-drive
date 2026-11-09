@@ -53,3 +53,4 @@ trust_signals:
 - [038-tenfold-map-expansion-open-world-tokyo.md](./038-tenfold-map-expansion-open-world-tokyo.md): マップの10倍大拡張と大東京・首都圏オープンワールド道路網アーキテクチャ
 - [039-shibuya-radial-road-network-and-lod2-alignment.md](./039-shibuya-radial-road-network-and-lod2-alignment.md): 渋谷周辺エリア4倍拡大と実在放射状曲線道路網の再現およびPLATEAU LOD2建築モデリング・テクスチャ整合化
 - [040-shibuya-grid-abolition-and-organic-radial-network.md](./040-shibuya-grid-abolition-and-organic-radial-network.md): 渋谷エリア直角碁盤の目（格子グリッド）の完全廃止と実在有機的放射状曲線道路網への完全移行
+- [041-shibuya-scramble-crossing-and-hachiko-plaza.md](./041-shibuya-scramble-crossing-and-hachiko-plaza.md): 渋谷スクランブル交差点（五差路・対角線X字型横断歩道・ハチ公前広場）の完全カバーと都市オープンデータ・3Dインフラ統合
