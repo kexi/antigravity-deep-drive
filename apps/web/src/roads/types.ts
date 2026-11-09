@@ -23,6 +23,8 @@ export interface JapaneseRoadSegmentConfig {
   hasStreetLights?: boolean; // 街灯の有無
   hasTrafficLights?: boolean; // 信号機の有無
   speedLimitSign?: number; // 速度制限標識値
+  startTrimMeters?: number; // 曲線道路の始端白線トリム長（交差点パッド手前での白線停止長、m）
+  endTrimMeters?: number; // 曲線道路の終端白線トリム長（交差点パッド手前での白線停止長、m）
   points?: ReadonlyArray<{ x: number; z: number }>; // オープンデータ道路中心線ポリライン頂点列 (ワールドまたはローカル座標)
 }
 

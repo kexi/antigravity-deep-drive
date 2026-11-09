@@ -1225,7 +1225,8 @@ if (curbCamDist < 36.0) {
           const b = i * 2 + 1;
           const c = (i + 1) * 2;
           const d = (i + 1) * 2 + 1;
-          indices.push(a, b, c, b, d, c);
+          // 反時計回り（CCW: 上向き法線）
+          indices.push(a, c, b, b, c, d);
         }
       }
 
@@ -1249,22 +1250,132 @@ if (curbCamDist < 36.0) {
     group.add(roadMesh);
 
     // 3. 曲線道路標示（中央線・車線境界線・外側線）
-    // Why markingEndTrim = 3.2m を設けるか:
-    // 曲線道路の両端は直線幹線道路や交差点パッドと接続するため、始終端まで中央線・路肩線を描画すると
-    // 接続先の横断歩道や交差点標示と重なってしまうのを防ぐ。
-    const markingEndTrim = Math.min(3.2, totalSplineLength * 0.12);
+    // Why 交差点手前トリム（14m〜20m）を設けるか:
+    // スプライン曲線道路の端点は交差点パッド（スクランブル交差点 44m×44m、宮益坂下 32m×24m 等）の内部にある。
+    // 白線（中央線・外側線・車線境界線）を端点まで伸ばすと、交差点の中心深くまで複数の道路の白線が突入し、
+    // 十字・X字に交差して「白線のジャングル」と激しい Z-fighting を引き起こす。
+    // 日本の道路構造基準・警察庁交通規制基準に基づき、交差点手前（停止線手前）で車線標示を終了させ、
+    // 交差点内部は平滑なアスファルト舗装面と横断歩道のみを整然と保つ。
+    const defaultTrim = Math.min(18.0, totalSplineLength * 0.25);
+    const startMarkingTrim = config.startTrimMeters ?? defaultTrim;
+    const endMarkingTrim = config.endTrimMeters ?? defaultTrim;
+
+    // フレーム配列から任意の弧長（arcLen）における位置・接線・法線を滑らかに補間するヘルパー
+    const getInterpolatedFrame = (targetArc: number): SampleFrame => {
+      const clampedArc = Math.max(0, Math.min(totalSplineLength, targetArc));
+      let low = 0;
+      let high = frames.length - 1;
+      while (low <= high) {
+        const mid = (low + high) >> 1;
+        if (frames[mid].arcLen < clampedArc) {
+          low = mid + 1;
+        } else {
+          high = mid - 1;
+        }
+      }
+      const idx0 = Math.max(0, low - 1);
+      const idx1 = Math.min(frames.length - 1, low);
+      if (idx0 === idx1) {
+        return frames[idx0];
+      }
+      const f0 = frames[idx0];
+      const f1 = frames[idx1];
+      const span = f1.arcLen - f0.arcLen;
+      const ratio = span > 0.0001 ? (clampedArc - f0.arcLen) / span : 0;
+
+      const pos = new THREE.Vector3().lerpVectors(f0.pos, f1.pos, ratio);
+      const tangent = new THREE.Vector3().lerpVectors(f0.tangent, f1.tangent, ratio).normalize();
+      const normal = new THREE.Vector3().lerpVectors(f0.normal, f1.normal, ratio).normalize();
+      return { pos, tangent, normal, arcLen: clampedArc };
+    };
+
+    // 曲線道路に沿って滑らかに湾曲する破線レーン境界線リボンメッシュを生成する
+    // Why PlaneGeometry の直線板ではなくスプライン追従リボンメッシュか:
+    // 1. 直線板（PlaneGeometry）だとカーブ区間で接線方向に直線で飛び出し、車線を横切る。
+    // 2. Three.js のオイラー角の評価順（XYZ）により、rotation.x = -PI/2 の後の rotation.z 設定が
+    //    ワールド Z 軸回りのロール回転となり、道路が北から傾くにつれて地面からバンクして立ち上がり、めり込みと浮きが発生していた。
+    // 3. スプライン法線から直接頂点座標を計算するリボンメッシュなら法線が真上（0, 1, 0）で地面と完全に平行となり、
+    //    カーブに沿って完璧に曲がる日本規格（白破線: 長さ5.0m、間隙5.0m、幅0.15m）の整然とした車線境界線を実現できる。
+    const buildDashedRibbonGeometry = (
+      centerOffset: number,
+      lineWidth: number,
+      yHeight: number,
+      dashLength = 5.0,
+      gapLength = 5.0,
+      startTrim = 0,
+      endTrim = 0,
+    ): THREE.BufferGeometry => {
+      const halfW = lineWidth * 0.5;
+      const offsetLeft = centerOffset - halfW;
+      const offsetRight = centerOffset + halfW;
+      const cycle = dashLength + gapLength;
+      const minArc = startTrim;
+      const maxArc = totalSplineLength - endTrim;
+      const totalDashable = maxArc - minArc;
+      if (totalDashable <= dashLength) {
+        return new THREE.BufferGeometry();
+      }
+
+      const positions: number[] = [];
+      const normals: number[] = [];
+      const uvs: number[] = [];
+      const indices: number[] = [];
+
+      let vertCount = 0;
+      for (let s = minArc; s + dashLength <= maxArc; s += cycle) {
+        const segStart = s;
+        const segSubdivs = 4;
+        const segStartIndex = vertCount / 3;
+
+        for (let j = 0; j <= segSubdivs; j++) {
+          const tSeg = j / segSubdivs;
+          const arc = segStart + tSeg * dashLength;
+          const frame = getInterpolatedFrame(arc);
+
+          const lx = frame.pos.x + frame.normal.x * offsetLeft;
+          const lz = frame.pos.z + frame.normal.z * offsetLeft;
+          const rx = frame.pos.x + frame.normal.x * offsetRight;
+          const rz = frame.pos.z + frame.normal.z * offsetRight;
+
+          positions.push(lx, yHeight, lz, rx, yHeight, rz);
+          normals.push(0, 1, 0, 0, 1, 0);
+          uvs.push(0, tSeg, 1, tSeg);
+          vertCount += 6;
+
+          if (j < segSubdivs) {
+            const a = segStartIndex + j * 2;
+            const b = segStartIndex + j * 2 + 1;
+            const c = segStartIndex + (j + 1) * 2;
+            const d = segStartIndex + (j + 1) * 2 + 1;
+            // 反時計回り（CCW: 上向き法線）で両三角形を構成
+            indices.push(a, c, b, b, c, d);
+          }
+        }
+      }
+
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+      geom.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
+      geom.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
+      geom.setIndex(indices);
+      geom.computeBoundingSphere();
+      return geom;
+    };
+
     // Why not applyCurb3DTexture を流用するか:
     // 縁石用マテリアルには polygonOffset が設定されておらず、路面メッシュと深度競合（Z-fighting）して
     // 走行中に白い点滅を引き起こすため、polygonOffset 付きかつガラスビーズ再帰反射対応の RoadMarkings シェーダーを適用する。
+    // また side: THREE.DoubleSide を設定し、急勾配や急カーブでもバックフェースカリングによる白線の消失を構造的に防ぐ。
     const whiteLineMat = new THREE.MeshStandardMaterial({
-      color: 0xf8fafc,
-      emissive: 0xe2e8f0,
-      emissiveIntensity: 0.42,
-      roughness: 0.4,
+      color: 0xffffff,
+      emissive: 0xf1f5f9,
+      emissiveIntensity: 0.45,
+      roughness: 0.35,
       metalness: 0.05,
+      side: THREE.DoubleSide,
       polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
     });
     this.markings.applyRoadMarking3DTexture(whiteLineMat, "white-paint");
 
@@ -1278,8 +1389,8 @@ if (curbCamDist < 36.0) {
         baseY + 0.02,
         1,
         0.2,
-        markingEndTrim,
-        markingEndTrim,
+        startMarkingTrim,
+        endMarkingTrim,
       );
       if (isMultiLaneCurved) {
         const centerLineMesh = new THREE.Mesh(centerGeom, whiteLineMat);
@@ -1294,9 +1405,10 @@ if (curbCamDist < 36.0) {
           emissiveIntensity: 0.45,
           roughness: 0.45,
           metalness: 0.05,
+          side: THREE.DoubleSide,
           polygonOffset: true,
-          polygonOffsetFactor: -2,
-          polygonOffsetUnits: -2,
+          polygonOffsetFactor: -3,
+          polygonOffsetUnits: -3,
         });
         this.markings.applyRoadMarking3DTexture(yellowMat, "yellow-paint");
         const centerLineMesh = new THREE.Mesh(centerGeom, yellowMat);
@@ -1317,8 +1429,8 @@ if (curbCamDist < 36.0) {
         baseY + 0.019,
         1,
         0.2,
-        markingEndTrim,
-        markingEndTrim,
+        startMarkingTrim,
+        endMarkingTrim,
       );
       const edgeMesh = new THREE.Mesh(edgeGeom, whiteLineMat);
       edgeMesh.name = `CurvedMarking_Shoulder_${sideSign > 0 ? "L" : "R"}`;
@@ -1326,26 +1438,24 @@ if (curbCamDist < 36.0) {
       group.add(edgeMesh);
     }
 
-    // 複数車線時の破線レーン境界線
+    // 複数車線時の破線レーン境界線（スプライン追従リボンメッシュ）
     const hasMultiLaneDashed = config.hasWhiteDashedLines && config.lanesPerDirection > 1;
     if (hasMultiLaneDashed) {
       for (const dirSign of [-1, 1]) {
         for (let lane = 1; lane < config.lanesPerDirection; lane++) {
           const laneOffset = dirSign * (medianW / 2 + lane * config.laneWidth);
-          for (let dist = 6; dist + 5 < totalSplineLength - 6; dist += 12) {
-            const tMid = (dist + 2.5) / totalSplineLength;
-            const pMid = spline.getPointAt(Math.min(1, Math.max(0, tMid)));
-            const tan = spline.getTangentAt(Math.min(1, Math.max(0, tMid))).normalize();
-            const norm = new THREE.Vector3(tan.z, 0, -tan.x).normalize();
-            const dashMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 5.0), whiteLineMat);
+          const dashedGeom = buildDashedRibbonGeometry(
+            laneOffset,
+            0.15,
+            baseY + 0.019,
+            5.0,
+            5.0,
+            startMarkingTrim,
+            endMarkingTrim,
+          );
+          if (dashedGeom.attributes.position && dashedGeom.attributes.position.count > 0) {
+            const dashMesh = new THREE.Mesh(dashedGeom, whiteLineMat);
             dashMesh.name = `CurvedMarking_LaneDivider_${dirSign > 0 ? "R" : "L"}_${lane}`;
-            dashMesh.rotation.x = -Math.PI / 2;
-            dashMesh.rotation.z = -Math.atan2(tan.x, tan.z);
-            dashMesh.position.set(
-              pMid.x + norm.x * laneOffset,
-              baseY + 0.019,
-              pMid.z + norm.z * laneOffset,
-            );
             dashMesh.receiveShadow = true;
             group.add(dashMesh);
           }

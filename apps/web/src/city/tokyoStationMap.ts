@@ -258,14 +258,16 @@ export class TokyoStationMap {
   public static getAreaSpawnTransform(area: DriveAreaId = "shibuya"): AreaSpawnTransform {
     const isShibuya = area === "shibuya";
     if (isShibuya) {
-      // Why x = -744.75 か:
-      // 明治通り（中心 x = -750、片側3車線・幅3.5m）において x = -746.5（localX = +3.5m）は
-      // 第1車線と第2車線の白破線境界線上になるため、第2車線中央（localX = +5.25m → x = -744.75）にスポーンさせる。
+      // Why x = -744.9, yawRadians = 0.018 か:
+      // 明治通りスプライン（中心線 x = -750、片側3車線・車線幅3.4m）において、
+      // 第2車線（中央走行車線）は法線オフセット +5.1m（3.4m 〜 6.8m の中央）に位置する。
+      // スプライン接線角（yaw ≈ 0.018 rad）に合わせることで、スポーン直後から車線境界破線（x = -746.6m および x = -743.2m）
+      // と完全に平行かつ車線中央に正対し、視界前方に整然としたレーンが伸びる。
       return {
         area: "shibuya",
         areaLabel: "渋谷 (渋谷ストリーム / 明治通り)",
-        position: new THREE.Vector3(-744.75, 0.9, -68.0),
-        yawRadians: 0.0,
+        position: new THREE.Vector3(-744.9, 0.9, -68.0),
+        yawRadians: 0.018,
       };
     }
 
@@ -836,24 +838,30 @@ export class TokyoStationMap {
     // --- J. 国土地理院 道路中心線 (experimental_rdcl) & PLATEAU 道路網オープンデータに基づく曲線・屈曲道路区間 ---
     const curvedRoadCorridors = getOpenDataCurvedRoadCorridors();
     for (const curvedCorridor of curvedRoadCorridors) {
+      const isScrambleLink = curvedCorridor.id === "nav-road-shibuya-scramble";
+      const isCenterGai = curvedCorridor.id === "nav-road-shibuya-center-gai";
       const lanesPerDir =
         curvedCorridor.widthMeters >= 20.0
           ? 3
           : Math.max(1, Math.min(3, Math.round(curvedCorridor.widthMeters / 8.5)));
       const isArterialCategory = curvedCorridor.category !== "local_street";
+      // Why isScrambleLink の白線・ガードレールを抑制するか:
+      // スクランブル交差点連絡路（109前〜スクランブル中心〜宮益坂下）は交差点内部を東西に貫通する。
+      // ここに東西の白破線やガードレールを描画すると、対角線X字型スクランブル横断歩道や歩行者広場と激しく衝突し、
+      // 交差点内部が「白線のジャングル」と化すため、平滑なアスファルト路面のみを供給する。
       const polyRes = this.roadBuilder.buildPolylineSegment(
         {
           name: curvedCorridor.displayName,
           lanesPerDirection: lanesPerDir,
           laneWidth: 3.4,
           shoulderWidth: 1.2,
-          sidewalkWidth: 3.2,
+          sidewalkWidth: isScrambleLink || isCenterGai ? 0 : 3.2,
           curbHeight: 0.15,
           length: 120,
-          hasYellowCenterLine: lanesPerDir === 1 && isArterialCategory,
-          hasWhiteDashedLines: lanesPerDir >= 2,
+          hasYellowCenterLine: lanesPerDir === 1 && isArterialCategory && !isScrambleLink,
+          hasWhiteDashedLines: lanesPerDir >= 2 && !isScrambleLink,
           hasCrosswalk: false,
-          hasGuardrails: isArterialCategory,
+          hasGuardrails: isArterialCategory && !isScrambleLink && !isCenterGai,
           hasManholes: false,
           hasTrafficLights: false,
           speedLimitSign: isArterialCategory ? 50 : 40,

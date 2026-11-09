@@ -56,3 +56,4 @@ trust_signals:
 - [041-shibuya-scramble-crossing-and-hachiko-plaza.md](./041-shibuya-scramble-crossing-and-hachiko-plaza.md): 渋谷スクランブル交差点（五差路・対角線X字型横断歩道・ハチ公前広場）の完全カバーと都市オープンデータ・3Dインフラ統合
 - [042-shibuya-hikarie-center-gai-and-landmarks.md](./042-shibuya-hikarie-center-gai-and-landmarks.md): 渋谷ヒカリエ・センター街（バスケットボール通り）および周辺主要ランドマーク群（セルリアンタワー・渋谷PARCO等）の3Dモデリング・実写テクスチャ・道路網完全カバー
 - [043-complete-elimination-of-shibuya-grid-geometry.md](./043-complete-elimination-of-shibuya-grid-geometry.md): 渋谷エリア残存格子グリッド道路幾何学・架空交差点の完全根絶とスプライン曲線幹線統合
+- [044-curved-road-markings-and-lane-divider-ribbon-system.md](./044-curved-road-markings-and-lane-divider-ribbon-system.md): 曲線道路標示（破線車線境界線・中央線・外側線）のスプライン追従リボンメッシュ化と交差点白線競合の完全排除
