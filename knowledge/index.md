@@ -57,3 +57,4 @@ trust_signals:
 - [042-shibuya-hikarie-center-gai-and-landmarks.md](./042-shibuya-hikarie-center-gai-and-landmarks.md): 渋谷ヒカリエ・センター街（バスケットボール通り）および周辺主要ランドマーク群（セルリアンタワー・渋谷PARCO等）の3Dモデリング・実写テクスチャ・道路網完全カバー
 - [043-complete-elimination-of-shibuya-grid-geometry.md](./043-complete-elimination-of-shibuya-grid-geometry.md): 渋谷エリア残存格子グリッド道路幾何学・架空交差点の完全根絶とスプライン曲線幹線統合
 - [044-curved-road-markings-and-lane-divider-ribbon-system.md](./044-curved-road-markings-and-lane-divider-ribbon-system.md): 曲線道路標示（破線車線境界線・中央線・外側線）のスプライン追従リボンメッシュ化と交差点白線競合の完全排除
+- [045-elimination-of-invisible-colliders-and-road-clearance.md](./045-elimination-of-invisible-colliders-and-road-clearance.md): 道路網における「見えない壁」（透明コライダー・交差点貫通ガードレール・重複ビル・残留物理形状）の完全根絶と道路空間クリアランス設計

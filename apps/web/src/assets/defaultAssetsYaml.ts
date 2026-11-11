@@ -381,8 +381,9 @@ signs:
 
   - id: "overhead_guide_shibuya_246_shutoko"
     type: "overhead_guide"
-    position: [-750.0, 0.0, 62.0]
+    position: [-744.5, 0.0, 62.0]
     rotationY: 0.0
+    spanWidth: 22.0
     label: "原宿 首都高3号・国道246号"
     subLabel: "Harajuku / Shutoko Rte 3 / Rte 246"
     arrowDirections: ["左折", "直進", "右折"]

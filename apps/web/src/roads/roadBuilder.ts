@@ -1490,7 +1490,15 @@ if (curbCamDist < 36.0) {
 
         const minCurb = Math.min(innerOff, curbOuterOff);
         const maxCurb = Math.max(innerOff, curbOuterOff);
-        const curbGeom = buildRibbonGeometry(minCurb, maxCurb, config.curbHeight, 1, 0.25);
+        const curbGeom = buildRibbonGeometry(
+          minCurb,
+          maxCurb,
+          config.curbHeight,
+          1,
+          0.25,
+          startMarkingTrim,
+          endMarkingTrim,
+        );
         const curbMesh = new THREE.Mesh(curbGeom, curbMat);
         curbMesh.name = `CurvedCurb_${sideSign > 0 ? "L" : "R"}`;
         curbMesh.receiveShadow = true;
@@ -1498,7 +1506,15 @@ if (curbCamDist < 36.0) {
 
         const minWalk = Math.min(curbOuterOff, walkOuterOff);
         const maxWalk = Math.max(curbOuterOff, walkOuterOff);
-        const walkGeom = buildRibbonGeometry(minWalk, maxWalk, config.curbHeight * 0.85, 1, 0.12);
+        const walkGeom = buildRibbonGeometry(
+          minWalk,
+          maxWalk,
+          config.curbHeight * 0.85,
+          1,
+          0.12,
+          startMarkingTrim,
+          endMarkingTrim,
+        );
         const walkMesh = new THREE.Mesh(walkGeom, sidewalkMat);
         walkMesh.name = `CurvedSidewalk_${sideSign > 0 ? "L" : "R"}`;
         walkMesh.receiveShadow = true;
@@ -1519,7 +1535,15 @@ if (curbCamDist < 36.0) {
         const railCenterOff = sideSign * (halfDriveable + 0.32);
         const minRail = Math.min(railCenterOff - 0.08, railCenterOff + 0.08);
         const maxRail = Math.max(railCenterOff - 0.08, railCenterOff + 0.08);
-        const railGeom = buildRibbonGeometry(minRail, maxRail, config.curbHeight + 0.62, 1, 0.2);
+        const railGeom = buildRibbonGeometry(
+          minRail,
+          maxRail,
+          config.curbHeight + 0.62,
+          1,
+          0.2,
+          startMarkingTrim,
+          endMarkingTrim,
+        );
         const railMesh = new THREE.Mesh(railGeom, railBeamMat);
         railMesh.name = `CurvedGuardrail_${sideSign > 0 ? "L" : "R"}`;
         railMesh.castShadow = true;
@@ -1552,6 +1576,10 @@ if (curbCamDist < 36.0) {
     }
 
     // 6. 物理エンジンのフラット路面コライダー＆両側歩道・ガードレールコライダー（各折れ線区間ごとに摩擦付き直方体を配置）
+    // Why 交差点開口トリム（startMarkingTrim / endMarkingTrim）内の側壁コライダーをスキップするか:
+    // 交差点（スクランブル交差点・宮益坂下交差点等）の接続部までガードレールや歩道縁石コライダーを延ばすと、
+    // 交差点の開口部を直方体コライダーが横切り、右左折や横断を試みた車両が「見えない壁」に激突して跳ね上がるため、
+    // 車道フラット路面コライダーのみを全区間に渡し、歩道縁石・ガードレールの立体コライダーは交差点手前で停止させる。
     const colliderChordCount = Math.max(4, Math.min(16, points.length * 2));
     for (let i = 0; i < colliderChordCount; i++) {
       const t0 = i / colliderChordCount;
@@ -1586,40 +1614,46 @@ if (curbCamDist < 36.0) {
       const roadCol = physicsWorld.createCollider(roadColliderDesc, roadBody);
       segmentColliders.push(roadCol);
 
-      if (hasSidewalks) {
-        const swWidth = config.sidewalkWidth + 0.22;
-        for (const sideSign of [-1, 1]) {
-          const swCenterX = sideSign * (halfDriveable + swWidth / 2);
-          const swColDesc = rapier.ColliderDesc.cuboid(
-            swWidth / 2,
-            config.curbHeight / 2,
-            segLen / 2,
-          )
-            .setTranslation(swCenterX, config.curbHeight / 2, 0)
-            .setFriction(0.8);
-          const swCol = physicsWorld.createCollider(swColDesc, roadBody);
-          segmentColliders.push(swCol);
-          obstacleColliderHandles.push(swCol.handle);
-        }
-      }
+      const segMidArc = (t0 + t1) * 0.5 * totalSplineLength;
+      const isInIntersectionTrim =
+        segMidArc < startMarkingTrim - 0.5 || segMidArc > totalSplineLength - endMarkingTrim + 0.5;
 
-      if (config.hasGuardrails) {
-        const railHeight = 0.85;
-        const railThickness = 0.28;
-        const railCenterY = config.curbHeight + railHeight / 2;
-        for (const sideSign of [-1, 1]) {
-          const railX = sideSign * (halfDriveable + 0.32);
-          const railColDesc = rapier.ColliderDesc.cuboid(
-            railThickness / 2,
-            railHeight / 2,
-            segLen / 2,
-          )
-            .setTranslation(railX, railCenterY, 0)
-            .setFriction(0.4)
-            .setRestitution(0.25);
-          const railCol = physicsWorld.createCollider(railColDesc, roadBody);
-          segmentColliders.push(railCol);
-          obstacleColliderHandles.push(railCol.handle);
+      if (!isInIntersectionTrim) {
+        if (hasSidewalks) {
+          const swWidth = config.sidewalkWidth + 0.22;
+          for (const sideSign of [-1, 1]) {
+            const swCenterX = sideSign * (halfDriveable + swWidth / 2);
+            const swColDesc = rapier.ColliderDesc.cuboid(
+              swWidth / 2,
+              config.curbHeight / 2,
+              segLen / 2,
+            )
+              .setTranslation(swCenterX, config.curbHeight / 2, 0)
+              .setFriction(0.8);
+            const swCol = physicsWorld.createCollider(swColDesc, roadBody);
+            segmentColliders.push(swCol);
+            obstacleColliderHandles.push(swCol.handle);
+          }
+        }
+
+        if (config.hasGuardrails) {
+          const railHeight = 0.85;
+          const railThickness = 0.28;
+          const railCenterY = config.curbHeight + railHeight / 2;
+          for (const sideSign of [-1, 1]) {
+            const railX = sideSign * (halfDriveable + 0.32);
+            const railColDesc = rapier.ColliderDesc.cuboid(
+              railThickness / 2,
+              railHeight / 2,
+              segLen / 2,
+            )
+              .setTranslation(railX, railCenterY, 0)
+              .setFriction(0.4)
+              .setRestitution(0.25);
+            const railCol = physicsWorld.createCollider(railColDesc, roadBody);
+            segmentColliders.push(railCol);
+            obstacleColliderHandles.push(railCol.handle);
+          }
         }
       }
     }

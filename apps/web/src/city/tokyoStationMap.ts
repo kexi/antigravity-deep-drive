@@ -116,6 +116,7 @@ export class TokyoStationMap {
   private proceduralMarkCityGroup: THREE.Group | null = null;
   private proceduralCenterGaiArchGroup: THREE.Group | null = null;
   private proceduralShutokoCoreMeshes: THREE.Mesh[] = [];
+  private proceduralGlbOverlappingColliders: RAPIER.Collider[] = [];
   private treeSlots: {
     slotGroup: THREE.Group;
     fallbackGroup: THREE.Group;
@@ -475,9 +476,10 @@ export class TokyoStationMap {
       );
     }
 
-    // --- D. 日比谷通り（z = 250: 国道1号・都道403号 神田橋・大手町 x=-480 〜 和田倉門 〜 馬場先門・日比谷 x=+480） ---
+    // --- D. 日比谷通り（z = 250: 国道1号・都道403号 大手町・和田倉門 〜 馬場先門・日比谷 x=-268..+480） ---
+    // Why not cx: -381（x = -480..-282）: 渋谷・宮益坂（x = -560..-400, z = 250..232）と衝突・貫通し、
+    // 宮益坂の車道中央にガードレールを生成してしまうため撤去。永代通り（x = -268）以東のみ直線維持。
     const hibiyaSegments: Array<{ cx: number; len: number; rot: number }> = [
-      { cx: -381, len: 198, rot: Math.PI / 2 },
       { cx: -210.5, len: 89, rot: Math.PI / 2 },
       { cx: -79.75, len: 132.5, rot: Math.PI / 2 },
       { cx: 79.75, len: 132.5, rot: -Math.PI / 2 },
@@ -861,7 +863,15 @@ export class TokyoStationMap {
           hasYellowCenterLine: lanesPerDir === 1 && isArterialCategory && !isScrambleLink,
           hasWhiteDashedLines: lanesPerDir >= 2 && !isScrambleLink,
           hasCrosswalk: false,
-          hasGuardrails: isArterialCategory && !isScrambleLink && !isCenterGai,
+          // Why tamagawa-west のガードレールを抑制するか:
+          // 玉川通り西進（セルリアンタワー〜神泉町）は首都高高架下の都市幹線であり、
+          // 南側から桜丘さくら坂（nav-road-shibuya-sakurazaka-loop: x=-940, z=115）が合流する。
+          // 連続金属ガードレールを敷くと合流口を塞ぎ「見えない壁」となるため、歩道縁石（curb）のみで自然に区切る。
+          hasGuardrails:
+            isArterialCategory &&
+            !isScrambleLink &&
+            !isCenterGai &&
+            curvedCorridor.id !== "nav-road-shibuya-tamagawa-west",
           hasManholes: false,
           hasTrafficLights: false,
           speedLimitSign: isArterialCategory ? 50 : 40,
@@ -938,7 +948,11 @@ export class TokyoStationMap {
           hasCrosswalk: true,
           hasGuardrails: true,
           hasManholes: true,
-          hasTrafficLights: true,
+          // Why hasTrafficLights: false:
+          // 直線板道路の自動信号機配置は、スプライン道路である国道246号連絡路（nav-road-route246: z=98, x=-371.4）
+          // や宮益坂（nav-road-shibuya-miyamasuzaka: z=235）の走行車線内に信号柱コライダーを突き刺し
+          // 「見えない壁」を発生させるため無効化する。
+          hasTrafficLights: false,
           speedLimitSign: 50,
         },
         new THREE.Vector3(-380, 0.011, gaienEastSeg.cz),
@@ -966,7 +980,7 @@ export class TokyoStationMap {
           hasCrosswalk: true,
           hasGuardrails: true,
           hasManholes: true,
-          hasTrafficLights: true,
+          hasTrafficLights: false,
           speedLimitSign: 60,
         },
         new THREE.Vector3(r246Main.cx, 0.012, 250),
@@ -1020,6 +1034,9 @@ export class TokyoStationMap {
     );
 
     // 3. 皇居東側・内堀通り（竹橋〜気象庁前〜大手門・大手町: x = 0）
+    // Why cz: 626, len: 420:
+    // 内堀通り皇居外苑カーブ区間（nav-road-uchibori-dori: z=390）との重複を解消し、
+    // 端部の制限速度標識（x=13.2, z=387.1）がカーブ車道内に突き刺さる「見えない壁」を防止する。
     addRoadSegment(
       {
         name: "Uchibori-dori-East-Otemon",
@@ -1028,16 +1045,15 @@ export class TokyoStationMap {
         shoulderWidth: 1.5,
         sidewalkWidth: 4.5,
         curbHeight: 0.15,
-        length: 456,
+        length: 420,
         hasYellowCenterLine: false,
         hasWhiteDashedLines: true,
         hasCrosswalk: true,
         hasGuardrails: true,
         hasManholes: true,
-        hasTrafficLights: true,
-        speedLimitSign: 50,
+        hasTrafficLights: false,
       },
-      new THREE.Vector3(0, 0.011, 606),
+      new THREE.Vector3(0, 0.011, 626),
       0,
     );
 
@@ -2053,21 +2069,27 @@ export class TokyoStationMap {
       rapier.RigidBodyDesc.fixed().setTranslation(streamCenterX, 90, streamCenterZ),
     );
     const streamCol = rapier.ColliderDesc.cuboid(21, 90, 27.5).setFriction(0.5).setRestitution(0.1);
-    this.registerCollider(world.createCollider(streamCol, streamBody), true);
+    const streamColInstance = world.createCollider(streamCol, streamBody);
+    this.registerCollider(streamColInstance, true);
+    this.proceduralGlbOverlappingColliders.push(streamColInstance);
 
     // 稲荷橋広場の大階段（Grand Staircase: worldX = -729.8..-716.0, worldZ = -8.3..+2.3）
     const grandStairsCol = rapier.ColliderDesc.cuboid(6.9, 7.25, 5.3)
       .setTranslation(-27.9, -82.75, 12.0)
       .setFriction(0.6)
       .setRestitution(0.05);
-    this.registerCollider(world.createCollider(grandStairsCol, streamBody), true);
+    const grandStairsColInstance = world.createCollider(grandStairsCol, streamBody);
+    this.registerCollider(grandStairsColInstance, true);
+    this.proceduralGlbOverlappingColliders.push(grandStairsColInstance);
 
     // 稲荷橋広場の路面アイレベル渋谷ストリーム案内モニュメントサイン（worldX = -726.2, worldZ = -21.0）
     const monolithSignCol = rapier.ColliderDesc.cuboid(0.8, 2.1, 4.4)
       .setTranslation(-31.2, -87.9, -6.0)
       .setFriction(0.5)
       .setRestitution(0.1);
-    this.registerCollider(world.createCollider(monolithSignCol, streamBody), true);
+    const monolithSignColInstance = world.createCollider(monolithSignCol, streamBody);
+    this.registerCollider(monolithSignColInstance, true);
+    this.proceduralGlbOverlappingColliders.push(monolithSignColInstance);
 
     // 2. 稲荷橋広場（Inaribashi Plaza）石畳＆大階段前プロムナード（x = -736..-712, z = -52..+76）
     // Why not z = -140..+75 まで延ばすか: 南側（z = -195..-55）は渋谷川の開渠区間であり、
@@ -2687,7 +2709,22 @@ export class TokyoStationMap {
       const bCol = rapier.ColliderDesc.cuboid(b.w / 2, b.h / 2, b.d / 2)
         .setFriction(0.5)
         .setRestitution(0.1);
-      this.registerCollider(world.createCollider(bCol, bBody), true);
+      const bColInstance = world.createCollider(bCol, bBody);
+      this.registerCollider(bColInstance, true);
+
+      const isOverlappingGlbBuilding =
+        isScrambleSquare ||
+        isHikarie ||
+        isSakuraStage ||
+        isFukuras ||
+        isMiyashitaPark ||
+        isQfront109 ||
+        isParco ||
+        isCerulean ||
+        isMarkCity;
+      if (isOverlappingGlbBuilding) {
+        this.proceduralGlbOverlappingColliders.push(bColInstance);
+      }
     }
 
     // 5. 首都高速3号渋谷線 高架橋（Shutoko Route 3 Shibuya Line Viaduct）＆ 渋谷駅東口歩道橋・鉄道高架のプロシージャル構造物＋歩道橋脚コライダー
@@ -2927,8 +2964,25 @@ export class TokyoStationMap {
     for (const worldX of pierWorldXList) {
       const localX = worldX - -720;
       const isCorePier = worldX >= -865 && worldX <= -575;
-      const crossBeam = new THREE.Mesh(new THREE.BoxGeometry(2.8, 1.7, 31.2), concretePierMat);
-      crossBeam.position.set(localX, 10.65, 0);
+
+      // 国道246号・玉川通りの車道カーブ（worldX <= -850 では z=108..115、worldX >= -730 では z=106..108）を跨ぐ安全な歩道クリアランス
+      let northLocalZ = 14.5;
+      let southLocalZ = -14.5;
+      if (worldX === -910) {
+        northLocalZ = 28.0; // 玉川通り北側歩道（worldZ = 123）
+        southLocalZ = -14.5; // 玉川通り南側歩道（worldZ = 80.5）
+      } else if (worldX === -672 || worldX === -618 || worldX === -540) {
+        northLocalZ = 28.0; // 国道246号東口連絡路北側歩道（worldZ = 123）
+        southLocalZ = -10.0; // 国道246号東口連絡路南側歩道（worldZ = 85）
+      } else if (isCorePier) {
+        northLocalZ = 26.0;
+        southLocalZ = -15.0;
+      }
+
+      const beamSpan = northLocalZ - southLocalZ + 2.8;
+      const beamCenterZ = (northLocalZ + southLocalZ) * 0.5;
+      const crossBeam = new THREE.Mesh(new THREE.BoxGeometry(2.8, 1.7, beamSpan), concretePierMat);
+      crossBeam.position.set(localX, 10.65, beamCenterZ);
       crossBeam.castShadow = true;
       if (isCorePier) {
         registerCoreFallbackMesh(crossBeam);
@@ -2936,7 +2990,7 @@ export class TokyoStationMap {
         viaductGroup.add(crossBeam);
       }
 
-      for (const localZ of [-14.5, 14.5]) {
+      for (const localZ of [southLocalZ, northLocalZ]) {
         const pierColMesh = new THREE.Mesh(new THREE.BoxGeometry(2.5, 10.6, 2.5), concretePierMat);
         pierColMesh.position.set(localX, 5.3, localZ);
         pierColMesh.castShadow = true;
@@ -2950,7 +3004,11 @@ export class TokyoStationMap {
         const pierCol = rapier.ColliderDesc.cuboid(1.25, 5.3, 1.25)
           .setTranslation(localX, 5.3, localZ)
           .setFriction(0.6);
-        this.registerCollider(world.createCollider(pierCol, shutokoPierBody), true);
+        const pierColInstance = world.createCollider(pierCol, shutokoPierBody);
+        this.registerCollider(pierColInstance, true);
+        if (isCorePier) {
+          this.proceduralGlbOverlappingColliders.push(pierColInstance);
+        }
       }
     }
 
@@ -3517,8 +3575,8 @@ export class TokyoStationMap {
     });
     this.applyArchitecture3DTexture(archSteelMat, "cast_iron");
 
-    // 左右スチール支柱（Pillars）
-    const halfSpan = streetWidth * 0.52;
+    // 左右スチール支柱（Pillars: センター街舗装幅 8.2m の外側歩道・ビル壁際に設置）
+    const halfSpan = 4.4;
     for (const side of [-1, 1]) {
       const colX = side * halfSpan;
       const colMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 7.8, 12), archSteelMat);
@@ -3532,16 +3590,24 @@ export class TokyoStationMap {
       baseMesh.castShadow = true;
       archGroup.add(baseMesh);
 
-      // 支柱障害物コライダー
-      const cosA = Math.cos(streetAngle);
-      const sinA = Math.sin(streetAngle);
-      const worldColX = -835 + colX * cosA;
-      const worldColZ = 268 - colX * sinA;
-      const pillarCol = world.createCollider(
-        rapier.ColliderDesc.cylinder(3.9, 0.3).setTranslation(worldColX, 3.9, worldColZ),
-        groundBody,
-      );
-      this.registerCollider(pillarCol, true);
+      // 支柱障害物コライダー（北東ツタヤ側支柱 side=1 のみ登録）
+      // Why side=-1（南西大盛堂側）のコライダーを登録しないか:
+      // 文化村通り（幅14m）とセンター街（幅10m）は鋭角Y字路を形成しており、入口では車道が近接している。
+      // 南西支柱は南側商業ビル（CenterGaiCommercialBuilding_South_1: 大盛堂書店敷地）の壁面に密着しており、
+      // ビル自体のコライダーで完全に保護される。独立した円柱コライダーを置くと文化村通り・オルガン坂の
+      // 車道端に1m突出して「見えない壁」となるため、歩道側（side=1）のみコライダーを生成する。
+      if (side === 1) {
+        const cosA = Math.cos(streetAngle);
+        const sinA = Math.sin(streetAngle);
+        const worldColX = -835 + colX * cosA;
+        const worldColZ = 268 - colX * sinA;
+        const pillarCol = world.createCollider(
+          rapier.ColliderDesc.cylinder(3.9, 0.3).setTranslation(worldColX, 3.9, worldColZ),
+          groundBody,
+        );
+        this.registerCollider(pillarCol, true);
+        this.proceduralGlbOverlappingColliders.push(pillarCol);
+      }
     }
 
     // 上部トラス梁（Cross Beam Truss）
@@ -5024,8 +5090,8 @@ export class TokyoStationMap {
         id: "exp-bldg-shoto-heights",
         name: "松濤レジデンスハイツ",
         nameEn: "Shoto Residence Heights",
-        x: -1080,
-        z: 140,
+        x: -1045,
+        z: 195,
         w: 48,
         d: 38,
         h: 46,
@@ -5039,7 +5105,7 @@ export class TokyoStationMap {
         name: "山手神泉センタービル",
         nameEn: "Yamate Shinsen Center Building",
         x: -1290,
-        z: 140,
+        z: 90,
         w: 54,
         d: 42,
         h: 96,
@@ -5548,8 +5614,13 @@ export class TokyoStationMap {
       this.createGinkgoTree(x, 165 + 9.2, treeIndex++, world, rapier, streetPropsBody);
     }
 
-    // 3. 日比谷通り（z = 250）＆ 内堀通り・皇居外苑（z = 365）の並木（大手町 x=-450 〜 日比谷 x=+450）
-    for (let x = -450; x <= 450; x += 36) {
+    // 3. 日比谷通り（z = 250）＆ 内堀通り・皇居外苑（z = 365）の並木（丸の内都心ブロック x=-240 〜 x=+240）
+    // Why x < -240 およびカーブ区間近傍の生成を抑制するか:
+    // x < -240（永代通り以西）は渋谷・宮益坂（都道413号: x=-480..-400, z=242..232）のスプライン車道と交差し、
+    // また皇居外苑・楠公通り曲線（nav-road-kokyo-gaien-plaza-curve: z=350..370, x=-30..0）および
+    // 内堀通りカーブ区間（nav-road-uchibori-dori）の走行車線内に街路樹の幹コライダーが
+    // 突き刺さって「見えない壁」となるため、安全な直線歩道上のみに限定配置する。
+    for (let x = -240; x <= 240; x += 36) {
       const isNearIntersection =
         Math.abs(x) < 24 ||
         Math.abs(x - -156) < 18 ||
@@ -5560,8 +5631,11 @@ export class TokyoStationMap {
         continue;
       }
       this.createGinkgoTree(x, 250 - 14.5, treeIndex++, world, rapier, streetPropsBody);
-      this.createGinkgoTree(x, 365 - 11.5, treeIndex++, world, rapier, streetPropsBody);
-      this.createGinkgoTree(x, 365 + 11.5, treeIndex++, world, rapier, streetPropsBody);
+      const isInsideKokyoPlazaCurve = Math.abs(x - -24) < 12 || Math.abs(x - -132) < 12;
+      if (Math.abs(x) < 160 && !isInsideKokyoPlazaCurve) {
+        this.createGinkgoTree(x, 365 - 11.5, treeIndex++, world, rapier, streetPropsBody);
+        this.createGinkgoTree(x, 365 + 11.5, treeIndex++, world, rapier, streetPropsBody);
+      }
     }
 
     // 4. 永代通り（x = -268）＆ 鍛冶橋通り・馬場先門通り（x = +270）の街路樹
@@ -5613,7 +5687,12 @@ export class TokyoStationMap {
       this.createStreetLamp(-12.8, z, world, rapier, streetPropsBody);
       this.createStreetLamp(12.8, z, world, rapier, streetPropsBody);
     }
-    for (let x = -400; x <= 400; x += 65) {
+    // 街灯（丸の内都心ブロック x=-240 〜 x=+240: 仲通り・日比谷通り・皇居外苑広場）
+    // Why x < -240 および |x| >= 160 の生成を抑制するか:
+    // x < -240 は渋谷・宮益坂（都道413号: x=-400, z=235.8）の走行車線内に街灯コライダーが突き刺さり、
+    // また |x| >= 160 は内堀通りカーブ区間（nav-road-uchibori-dori: x=±185..205, z=376.2）の車道内に
+    // 街灯が突き刺さる「見えない壁」となるため、安全な丸の内都心歩道上のみに限定配置する。
+    for (let x = -240; x <= 240; x += 65) {
       const isNearIntersection =
         Math.abs(x) < 22 ||
         Math.abs(x - -156) < 18 ||
@@ -5625,7 +5704,9 @@ export class TokyoStationMap {
       }
       this.createStreetLamp(x, 165 - 8.8, world, rapier, streetPropsBody);
       this.createStreetLamp(x, 250 - 14.2, world, rapier, streetPropsBody);
-      this.createStreetLamp(x, 365 + 11.2, world, rapier, streetPropsBody);
+      if (Math.abs(x) < 160) {
+        this.createStreetLamp(x, 365 + 11.2, world, rapier, streetPropsBody);
+      }
     }
     for (let z = -165; z <= 175; z += 42) {
       const isNearShibuyaCrossRoad =
@@ -6514,6 +6595,16 @@ export class TokyoStationMap {
       coreMesh.userData.permanentlyHiddenByGlb = isPermanentlyHidden;
       if (showProcedural && coreMesh.parent) {
         coreMesh.parent.userData.appliedLodTier = undefined;
+      }
+    }
+    // Why プロシージャル剛体・橋脚コライダーも showProcedural に連動させるか:
+    // shibuya_stream.glb が表示されている間、プロシージャル直方体コライダーが有効のままだと、
+    // GLB 側のモデル形状とプロシージャル Box の微小な差分により、何もない道路や広場空間に「見えない壁」が生じるため、
+    // GLB 表示中はプロシージャル側の物理コライダーも完全に無効化（setEnabled(false)）する。
+    for (let i = 0; i < this.proceduralGlbOverlappingColliders.length; i++) {
+      const col = this.proceduralGlbOverlappingColliders[i];
+      if (col && typeof col.setEnabled === "function") {
+        col.setEnabled(showProcedural);
       }
     }
   }
