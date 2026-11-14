@@ -14,6 +14,8 @@ export interface JapaneseRoadSegmentConfig {
   sidewalkWidth: number; // 歩道幅員 (日本標準: 2.5m - 4.5m)
   curbHeight: number; // 縁石マウントアップ高さ (日本標準: 0.15m - 0.20m)
   length: number; // セグメント長 (m)
+  hasCenterLine?: boolean; // 中央線描画の有無（既定: true。スクランブル交差点直下等で中央線を抑止）
+  hasShoulderLines?: boolean; // 路側帯実線描画の有無（既定: true）
   hasYellowCenterLine?: boolean; // 黄色追越禁止中央線の有無
   hasWhiteDashedLines?: boolean; // 白破線車線境界線の有無
   hasCrosswalk?: boolean; // 横断歩道の有無
@@ -25,6 +27,8 @@ export interface JapaneseRoadSegmentConfig {
   speedLimitSign?: number; // 速度制限標識値
   startTrimMeters?: number; // 曲線道路の始端白線トリム長（交差点パッド手前での白線停止長、m）
   endTrimMeters?: number; // 曲線道路の終端白線トリム長（交差点パッド手前での白線停止長、m）
+  medianExclusionZones?: ReadonlyArray<{ x: number; z: number; radius: number }>; // 中央分離帯を開口する交差点座標群
+  markingExclusionZones?: ReadonlyArray<{ x: number; z: number; radius: number }>; // 交差点中心付近で車線境界線・中央線・路側帯線を切るための除外ゾーン
   points?: ReadonlyArray<{ x: number; z: number }>; // オープンデータ道路中心線ポリライン頂点列 (ワールドまたはローカル座標)
 }
 

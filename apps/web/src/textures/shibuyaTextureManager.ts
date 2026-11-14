@@ -173,6 +173,7 @@ export const SHIBUYA_TEXTURE_CONFIGS: Record<ShibuyaTextureId, ShibuyaTextureCon
 export class ShibuyaTextureManager {
   private static instance: ShibuyaTextureManager | null = null;
   private textures = new Map<ShibuyaTextureId, THREE.Texture>();
+  private glbTextures = new Map<ShibuyaTextureId, THREE.Texture>();
   private loader: THREE.TextureLoader | null = null;
 
   public static getInstance(): ShibuyaTextureManager {
@@ -183,10 +184,47 @@ export class ShibuyaTextureManager {
   }
 
   /**
-   * テクスチャを取得する（キャッシュ済みなら即時返却・Mipmap完全対応）
+   * Vite BASE_URL を考慮して渋谷テクスチャURLを解決する
+   */
+  public resolveTextureUrl(rawUrl: string): string {
+    const isRemote = rawUrl.startsWith("http://") || rawUrl.startsWith("https://");
+    if (isRemote) {
+      return rawUrl;
+    }
+    const rawBaseUrl =
+      (typeof import.meta !== "undefined" &&
+        (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL) ||
+      "/";
+    const normalizedBaseUrl = rawBaseUrl.endsWith("/") ? rawBaseUrl : `${rawBaseUrl}/`;
+    return rawUrl.startsWith("/")
+      ? `${normalizedBaseUrl}${rawUrl.slice(1)}`
+      : `${normalizedBaseUrl}${rawUrl}`;
+  }
+
+  /**
+   * テクスチャを取得する（Three.js プロシージャルメッシュ用: flipY = true）
    */
   public getTexture(id: ShibuyaTextureId): THREE.Texture {
-    const cached = this.textures.get(id);
+    return this.getOrCreateTexture(id, true, this.textures);
+  }
+
+  /**
+   * GLB/glTF メッシュ用テクスチャを取得する（glTF UV原点規約に合わせ flipY = false）
+   * Why not getTexture(id) と同一テクスチャインスタンスを共有するか:
+   * Three.js の BoxGeometry/PlaneGeometry は上端 v=1 (flipY=true) 前提である一方、
+   * Blender glTF exporter が出力する GLB は上端 v=0 (flipY=false) のため、
+   * 同一画像でも flipY を分けなければ GLB 建物の看板文字や窓が上下反転する。
+   */
+  public getGlbTexture(id: ShibuyaTextureId): THREE.Texture {
+    return this.getOrCreateTexture(id, false, this.glbTextures);
+  }
+
+  private getOrCreateTexture(
+    id: ShibuyaTextureId,
+    flipY: boolean,
+    cache: Map<ShibuyaTextureId, THREE.Texture>,
+  ): THREE.Texture {
+    const cached = cache.get(id);
     if (cached) {
       return cached;
     }
@@ -199,6 +237,7 @@ export class ShibuyaTextureManager {
       // ヘッドレス・単体テスト環境: 1x1 ダミー DataTexture を生成して安定動作を保証
       const dummyData = new Uint8Array([200, 200, 200, 255]);
       texture = new THREE.DataTexture(dummyData, 1, 1, THREE.RGBAFormat);
+      texture.flipY = flipY;
       texture.generateMipmaps = true;
       texture.minFilter = THREE.LinearMipmapLinearFilter;
       texture.magFilter = THREE.LinearFilter;
@@ -207,7 +246,9 @@ export class ShibuyaTextureManager {
       if (!this.loader) {
         this.loader = new THREE.TextureLoader();
       }
-      texture = this.loader.load(cfg.url);
+      const resolvedUrl = this.resolveTextureUrl(cfg.url);
+      texture = this.loader.load(resolvedUrl);
+      texture.flipY = flipY;
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.wrapS = THREE.RepeatWrapping;
       texture.wrapT = THREE.RepeatWrapping;
@@ -219,8 +260,9 @@ export class ShibuyaTextureManager {
       }
     }
 
-    texture.name = `ShibuyaTex_${id}`;
-    this.textures.set(id, texture);
+    texture.anisotropy = 8;
+    texture.name = flipY ? `ShibuyaTex_${id}` : `ShibuyaTexGlb_${id}`;
+    cache.set(id, texture);
     return texture;
   }
 

@@ -325,23 +325,59 @@ def setup_materials() -> dict[str, bpy.types.Material]:
             emission_strength=0.25,
             image_path="apps/web/public/textures/shibuya/shibuya_dogenzaka_commercial.jpg",
         ),
+        # 27: 渋谷センター街 入口アーチメイン看板（CanvasTexture で「渋谷センター街 / SHIBUYA CENTER-GAI」を描画）
+        "ShibuyaCenterGaiArchSign": create_material(
+            "ShibuyaCenterGaiArchSign",
+            base_color=(0.08, 0.22, 0.52, 1.0),
+            roughness=0.22,
+            metallic=0.25,
+            emission_color=(0.95, 0.85, 0.65, 1.0),
+            emission_strength=0.35,
+        ),
+        # 28: 渋谷センター街 街路灯ハンギングフラッグバナー（CanvasTexture 描画用）
+        "ShibuyaCenterGaiBanner": create_material(
+            "ShibuyaCenterGaiBanner",
+            base_color=(0.14, 0.34, 0.72, 1.0),
+            roughness=0.45,
+            metallic=0.05,
+            emission_color=(0.65, 0.78, 0.98, 1.0),
+            emission_strength=0.22,
+        ),
     }
     return mats
 
 
-def add_box(bm: bmesh.types.BMesh, center: Vector, size: Vector, mat_idx: int = 0):
-    """指定中心・サイズの直方体を bmesh に追加する（自動平面UV展開付き）"""
+# 垂直壁面専用の建物テクスチャマテリアルインデックス（上面屋根に窓・看板が貼られるのを防止）
+FACADE_WALL_MAT_INDICES = {14, 15, 16, 17, 18, 19, 23, 24, 25, 26}
+# 4層×4スパン（16m×14m）でエッジ途切れなく整数倍反復するタイルファサードマテリアル
+REPEATABLE_FACADE_MAT_INDICES = {16, 19, 26}
+
+
+def add_box(
+    bm: bmesh.types.BMesh,
+    center: Vector,
+    size: Vector,
+    mat_idx: int = 0,
+    cap_mat_idx: int | None = None,
+):
+    """指定中心・サイズの直方体を bmesh に追加する（自動平面UV展開・屋上非ウォール保護付き）"""
     res = bmesh.ops.create_cube(bm, size=1.0)
     verts = res["verts"]
     bmesh.ops.scale(bm, vec=size, verts=verts)
     bmesh.ops.translate(bm, vec=center, verts=verts)
     uv_layer = bm.loops.layers.uv.verify()
+    resolved_cap_mat = (
+        cap_mat_idx
+        if cap_mat_idx is not None
+        else (2 if mat_idx in FACADE_WALL_MAT_INDICES else mat_idx)
+    )
     created_faces = set()
     for v in verts:
         for f in v.link_faces:
             if f not in created_faces:
                 created_faces.add(f)
-                f.material_index = mat_idx
+                is_cap_face = abs(f.normal.z) > 0.8
+                f.material_index = resolved_cap_mat if is_cap_face else mat_idx
                 ax, ay, az = abs(f.normal.x), abs(f.normal.y), abs(f.normal.z)
                 if ax >= ay and ax >= az:
                     coords = [(loop, loop.vert.co.y, loop.vert.co.z) for loop in f.loops]
@@ -355,8 +391,24 @@ def add_box(bm: bmesh.types.BMesh, center: Vector, size: Vector, mat_idx: int = 
                 max_v = max(c[2] for c in coords)
                 ru = max_u - min_u if (max_u - min_u) > 1e-5 else 1.0
                 rv = max_v - min_v if (max_v - min_v) > 1e-5 else 1.0
+                flip_u = (ax >= ay and ax >= az and f.normal.x < 0.0) or (
+                    ay > ax and ay >= az and f.normal.y > 0.0
+                )
+                rep_u = (
+                    float(max(1, round(ru / 16.0)))
+                    if (not is_cap_face and mat_idx in REPEATABLE_FACADE_MAT_INDICES)
+                    else 1.0
+                )
+                rep_v = (
+                    float(max(1, round(rv / 14.0)))
+                    if (not is_cap_face and mat_idx in REPEATABLE_FACADE_MAT_INDICES)
+                    else 1.0
+                )
                 for loop, u_raw, v_raw in coords:
-                    loop[uv_layer].uv = Vector(((u_raw - min_u) / ru, (v_raw - min_v) / rv))
+                    u_norm = (u_raw - min_u) / ru
+                    u_val = (1.0 - u_norm if flip_u else u_norm) * rep_u
+                    v_val = ((v_raw - min_v) / rv) * rep_v
+                    loop[uv_layer].uv = Vector((u_val, v_val))
 
 
 def add_oriented_box(
@@ -417,11 +469,13 @@ def add_cylindrical_panel_z(
     end_rad: float,
     segments: int = 20,
     mat_idx: int = 0,
+    inner_mat_idx: int | None = None,
 ):
     """
     円柱表面に沿った扇形円筒シェル（厚み r_outer - r_inner、角度範囲 start_rad .. end_rad）を bmesh に追加する。
     SHIBUYA109 シリンダー曲面ファサードに完全密着したバッキングプレート・看板ベース生成用。
     """
+    back_mat_idx = mat_idx if inner_mat_idx is None else inner_mat_idx
     hz = height * 0.5
     p_in_bot = []
     p_in_top = []
@@ -454,23 +508,23 @@ def add_cylindrical_panel_z(
         f_out.loops[1][uv_layer].uv = Vector((u1, 0.0))
         f_out.loops[2][uv_layer].uv = Vector((u1, 1.0))
         f_out.loops[3][uv_layer].uv = Vector((u0, 1.0))
-        # 内周面
+        # 内周面（内側視点でも左右反転しない UV 方向）
         f_in = bm.faces.new([p_in_bot[ni], p_in_bot[i], p_in_top[i], p_in_top[ni]])
-        f_in.material_index = mat_idx
-        f_in.loops[0][uv_layer].uv = Vector((u1, 0.0))
-        f_in.loops[1][uv_layer].uv = Vector((u0, 0.0))
-        f_in.loops[2][uv_layer].uv = Vector((u0, 1.0))
-        f_in.loops[3][uv_layer].uv = Vector((u1, 1.0))
+        f_in.material_index = back_mat_idx
+        f_in.loops[0][uv_layer].uv = Vector((u0, 0.0))
+        f_in.loops[1][uv_layer].uv = Vector((u1, 0.0))
+        f_in.loops[2][uv_layer].uv = Vector((u1, 1.0))
+        f_in.loops[3][uv_layer].uv = Vector((u0, 1.0))
         # 底面
         f_bot = bm.faces.new([p_in_bot[i], p_in_bot[ni], p_out_bot[ni], p_out_bot[i]])
-        f_bot.material_index = mat_idx
+        f_bot.material_index = back_mat_idx
         f_bot.loops[0][uv_layer].uv = Vector((0.0, 0.0))
         f_bot.loops[1][uv_layer].uv = Vector((1.0, 0.0))
         f_bot.loops[2][uv_layer].uv = Vector((1.0, 1.0))
         f_bot.loops[3][uv_layer].uv = Vector((0.0, 1.0))
         # 天面
         f_top = bm.faces.new([p_in_top[ni], p_in_top[i], p_out_top[i], p_out_top[ni]])
-        f_top.material_index = mat_idx
+        f_top.material_index = back_mat_idx
         f_top.loops[0][uv_layer].uv = Vector((0.0, 0.0))
         f_top.loops[1][uv_layer].uv = Vector((1.0, 0.0))
         f_top.loops[2][uv_layer].uv = Vector((1.0, 1.0))
@@ -478,14 +532,14 @@ def add_cylindrical_panel_z(
 
     # 左側小口 (i = 0)
     f_left = bm.faces.new([p_in_bot[0], p_out_bot[0], p_out_top[0], p_in_top[0]])
-    f_left.material_index = mat_idx
+    f_left.material_index = back_mat_idx
     f_left.loops[0][uv_layer].uv = Vector((0.0, 0.0))
     f_left.loops[1][uv_layer].uv = Vector((1.0, 0.0))
     f_left.loops[2][uv_layer].uv = Vector((1.0, 1.0))
     f_left.loops[3][uv_layer].uv = Vector((0.0, 1.0))
     # 右側小口 (i = segments)
     f_right = bm.faces.new([p_out_bot[-1], p_in_bot[-1], p_in_top[-1], p_out_top[-1]])
-    f_right.material_index = mat_idx
+    f_right.material_index = back_mat_idx
     f_right.loops[0][uv_layer].uv = Vector((0.0, 0.0))
     f_right.loops[1][uv_layer].uv = Vector((1.0, 0.0))
     f_right.loops[2][uv_layer].uv = Vector((1.0, 1.0))
@@ -738,6 +792,8 @@ def assign_materials_to_object(obj: bpy.types.Object, materials: dict[str, bpy.t
         "ShibuyaMarkCityFacade",  # 24
         "ShibuyaToeiBicFacade",  # 25
         "ShibuyaDogenzakaCommercialFacade",  # 26
+        "ShibuyaCenterGaiArchSign",  # 27
+        "ShibuyaCenterGaiBanner",  # 28
     ]
     for k in ordered_keys:
         obj.data.materials.append(materials[k])
@@ -1570,19 +1626,27 @@ def build_shutoko_route3_viaduct(
                 mat_idx=2,
             )
 
-    # 4. 門型ラーメン・T字コンクリート橋脚列（国道246号の車道 bx=98..122 および明治通り車道 by=-67..-43 を完全回避）
-    # bx = 95.5 (worldZ = 80.5: 南側歩道外縁) & bx = 124.5 (worldZ = 109.5: 北側歩道外縁)
-    pier_by_list = [-135.0, -87.0, -33.0, 23.0, 77.0]
-    for p_by in pier_by_list:
+    # 4. 門型ラーメン・T字コンクリート橋脚列（国道246号カーブ・明治通り・ヒカリエ連絡路を完全回避）
+    # (p_by, south_x, north_x): south/north pier worldZ = -15 + pier_x, worldX = -695 + p_by
+    pier_specs = [
+        (-135.0, 95.5, 124.5),  # worldX=-830 (玉川通り車道外側 z=80.5 / 109.5)
+        (-87.0, 95.5, 124.5),  # worldX=-782 (渋谷西口車道外側 z=80.5 / 109.5)
+        (-40.5, 95.5, 136.0),  # worldX=-735.5 (明治通り東側歩道 & R246北側歩道 z=80.5 / 121.0)
+        (23.0, 95.5, 134.5),  # worldX=-672 (R246東進カーブ外側・ヒカリエ南端手前 z=80.5 / 119.5)
+        (77.0, 95.5, 138.0),  # worldX=-618 (R246カーブ外側 z=80.5 / 123.0)
+    ]
+    for p_by, south_x, north_x in pier_specs:
+        beam_cx = (south_x + north_x) * 0.5
+        beam_sx = (north_x - south_x) + 2.8
         # 水平ハンチ付き大梁（クロスヘッド: Z = 9.8m..11.4m, 桁下クリアランス 9.8m 確保）
         add_box(
             bm,
-            center=Vector((bx_center, p_by, 10.65)),
-            size=Vector((31.2, 2.8, 1.7)),
+            center=Vector((beam_cx, p_by, 10.65)),
+            size=Vector((beam_sx, 2.8, 1.7)),
             mat_idx=8,
         )
         # 左右の丸みを帯びた角柱コンクリート橋脚（Z = 0m..10.6m）
-        for pier_x in [95.5, 124.5]:
+        for pier_x in [south_x, north_x]:
             add_box(
                 bm,
                 center=Vector((pier_x, p_by, 5.3)),
@@ -1649,25 +1713,12 @@ def build_shutoko_route3_viaduct(
                 size=Vector((0.28, 13.6, 2.35)),
                 mat_idx=0,
             )
-            # 首都高グリーン内面プレート
+            # 首都高グリーン案内プレート（クリーンな「首都高 3 / 出口 303 EXIT / 渋谷 / 六本木・霞が関」標識テクスチャを前面に全面表示）
             add_box(
                 bm,
                 center=Vector((side_x + n_sign * 0.08, sign_by, 15.65)),
                 size=Vector((0.24, 13.0, 1.95)),
                 mat_idx=9,
-            )
-            # 白ルートライン＆イエロー出口バッジアクセント
-            add_box(
-                bm,
-                center=Vector((side_x + n_sign * 0.16, sign_by - 4.2, 15.65)),
-                size=Vector((0.20, 2.2, 1.35)),
-                mat_idx=5,
-            )
-            add_box(
-                bm,
-                center=Vector((side_x + n_sign * 0.16, sign_by + 1.4, 15.65)),
-                size=Vector((0.20, 7.4, 0.48)),
-                mat_idx=0,
             )
 
     bm.normal_update()
@@ -1907,8 +1958,8 @@ def build_shibuya_hikarie_tower(
     mesh = bpy.data.meshes.new("ShibuyaHikarie_TowerMesh")
     bm = bmesh.new()
 
-    cx = 161.0  # worldZ = 146.0
-    cy = 3.0  # worldX = -692.0
+    cx = 163.0  # worldZ = 148.0 (国道246号北側首都高橋脚 z=119.5 を南端 z=123.0 でクリア)
+    cy = 5.0  # worldX = -690.0 (西端 x=-714.0 でヒカリエ連絡路 x=-727.5±5.0 を完全クリア)
     w_x = 50.0
     d_y = 48.0
 
@@ -1935,8 +1986,8 @@ def build_shibuya_hikarie_tower(
     # 明治通り側 (-Y) の円筒ガラスアーバンコア（エレベーター・エスカレーターシャフト）
     add_cylinder_z(
         bm,
-        center=Vector((cx - 14.0, cy - d_y * 0.5 - 1.2, 24.0)),
-        radius=5.2,
+        center=Vector((cx - 14.0, cy - d_y * 0.5 + 0.5, 24.0)),
+        radius=4.2,
         height=48.0,
         segments=20,
         mat_idx=10,
@@ -2154,11 +2205,12 @@ def build_shibuya_pedestrian_deck_and_rail_overpass(
                 mat_idx=0,
             )
 
-    # 歩道橋の円柱スチール橋脚（すべて歩道上のみ：車道 bx=98..122, by=-67..-43 を完全回避）
+    # 歩道橋の円柱スチール橋脚（すべて歩道上のみ：車道 bx=98..122, by=-67..-43 およびヒカリエ連絡路 by=-37.5..-27.5 を完全回避）
     deck_pillars = [
         (86.0, -29.5),
         (86.0, -78.5),
-        (134.0, -29.5),
+        (134.0, -40.5),
+        (134.0, -20.5),
         (134.0, -78.5),
         (24.0, -29.5),
         (24.0, -78.5),
@@ -2736,7 +2788,7 @@ def build_shibuya_miyashita_park_complex(
     mesh = bpy.data.meshes.new("ShibuyaMiyashitaParkMesh")
     bm = bmesh.new()
 
-    cx = 263.0  # worldZ = 248.0 (南端 bx=228 -> worldZ=213: 宮下美竹通り worldZ=195 を完全クリア)
+    cx = 335.0  # worldZ = 320.0 (南端 bx=300 -> worldZ=285: 宮益坂 worldZ=248..254 を完全クリアし明治通り東側正規街区に整合)
     cy = 0.0  # worldX = -695.0 (西端 by=-21 -> worldX=-716: 明治通り東歩道外縁をクリア)
     w_x = 70.0
     d_y = 42.0
@@ -2912,121 +2964,125 @@ def build_shibuya_qfront_109_complex(
     materials: dict[str, bpy.types.Material],
 ) -> bpy.types.Object:
     """
-    QFRONT・SHIBUYA109 街区（渋谷スクランブル交差点北西〜道玄坂分岐ランドマーク群, 実寸 78.5m / 地上16階）
-    Three.js ワールド座標 (x=-815.0, z=248.0) -> Blender 座標 (bx=263.0, by=-120.0):
-    1. QFRONT（キューフロント: 東側＝スクランブル交差点・明治通り側 `bx = 256.0, by = -104.0`, Z=0.0m〜47.5m）:
-       - 渋谷スクランブル交差点（南東側）に正対する象徴的な曲面ガラスカーテンウォール
-       - 壁面全体を覆う大型湾曲LEDビジョン「Q'S EYE」（シアンブルー＆マゼンタ発光）
-       - 2F「SHIBUYA TSUTAYA / Starbucks Coffee」のスクランブル交差点展望リボンウィンドウ（ウォーム発光帯）
-    2. SHIBUYA109（シブヤ109: 南西角・道玄坂二股分岐先端 `bx = 247.0, by = -131.5`, Z=0.0m〜78.5m）:
-       - 竹山実設計の象徴的な「鏡面シルバーメタリック円筒シリンダータワー」（半径 10.6m, 高さ 78.5m）が南東のハチ公前広場側からも遮られずに聳え立つ配置
-       - シリンダー頂部（Z=60.0m〜75.0m）の象徴的なマゼンタレッド発光クラウンバンド＆「109」立体ブロックロゴ
-       - 8階建て段状商業ビル本体と屋上テラス・航空障害灯
+    QFRONT・SHIBUYA109 街区（実寸街区へ分離配置）
+    1. QFRONT（スクランブル交差点北側正面街区 `worldX=-815.0, worldZ=288.0` -> Blender `bx=303.0, by=-120.0`, Z=0..46m）:
+       - スクランブル交差点北歩道（`z=270..278`）に正対し、センター街・公園通りに挟まれた一等地へ配置
+       - 1F〜2F 展望ガラス帯および南正面密着型の大型メディア壁「Q'S EYE / SHIBUYA TSUTAYA」
+    2. SHIBUYA109（道玄坂・文化村通り Y字分岐三角街区 `worldX=-879.0, worldZ=263.0` -> Blender `bx=278.0, by=-184.0`, Z=0..78m）:
+       - スクランブル交差点から道玄坂へ入る左手の二股分岐ランドマークとして配置
+       - 東〜南東（道玄坂下・スクランブル交差点方向）に正対するメタリックシルバー円筒タワー、
+         正面弧に配された「109」マゼンタクラウンパネルおよび立体 3D「1 0 9」エンブレム
     """
     mesh = bpy.data.meshes.new("ShibuyaQfront109Mesh")
     bm = bmesh.new()
 
-    cx = 263.0  # worldZ = 248.0 (南端 bx=238 -> worldZ=223: 宮下美竹通り worldZ=195 をクリア)
-    cy = (
-        -120.0
-    )  # worldX = -815.0 (西端 by=-143 -> worldX=-838, 東端 by=-97 -> worldX=-792: 明治通りをクリア)
-    w_x = 50.0
-    d_y = 46.0
+    # =========================================================================
+    # 1. SHIBUYA QFRONT（スクランブル交差点北正面: worldX=[-823,-807], worldZ=[278,298]）
+    # =========================================================================
+    qf_cx = 303.0  # worldZ = 288.0 (南端 bx=293.0 -> worldZ=278.0, Scramble pad z<=270 から 8m 北)
+    qf_cy = -120.0  # worldX = -815.0 (幅 16.0m -> worldX=[-823.0, -807.0])
+    qf_w = 20.0
+    qf_d = 16.0
+    qf_h = 46.0
 
-    # 1. 街区共通の低層商業ポディウム（1F〜5F, Z = 0.0m .. 24.0m）
+    # メイン建物躯体（ダークフレーム＋ガラスカーテンウォール）
     add_box(
         bm,
-        center=Vector((cx + 2.0, cy, 12.0)),
-        size=Vector((w_x - 8.0, d_y - 6.0, 24.0)),
-        mat_idx=2,
+        center=Vector((qf_cx, qf_cy, qf_h * 0.5)),
+        size=Vector((qf_w, qf_d, qf_h)),
+        mat_idx=0,  # StreamWhitePanel
     )
-    # 1F〜2F スクランブル交差点・文化村通り路面ショーウィンドウ
     add_box(
         bm,
-        center=Vector((cx, cy + 2.0, 5.2)),
-        size=Vector((w_x - 6.0, d_y - 4.0, 8.8)),
-        mat_idx=6,
+        center=Vector((qf_cx + 0.3, qf_cy, qf_h * 0.5 + 3.0)),
+        size=Vector((qf_w - 1.2, qf_d + 0.4, qf_h - 8.0)),
+        mat_idx=1,  # StreamCurtainGlass
     )
-
-    # 2. QFRONT（南東〜東側 `bx = 252.0, by = -104.5`: 明治通り・スクランブル交差点に面する曲面メディアビル）
-    qfront_cx = cx - 9.0
-    qfront_cy = cy + 12.5
-    # QFRONT ファサード本体（実写 QFRONT テクスチャ）
+    # 1F〜2F 展望ガラス帯（無地灰壁に見えないようカーテンガラス+マリオンフレームで表現）
     add_box(
         bm,
-        center=Vector((qfront_cx + 4.0, qfront_cy, 23.0)),
-        size=Vector((24.0, 18.0, 46.0)),
-        mat_idx=14,
+        center=Vector((qf_cx - 0.05, qf_cy, 5.2)),
+        size=Vector((qf_w + 0.1, qf_d + 0.1, 10.0)),
+        mat_idx=1,  # StreamCurtainGlass
     )
-    # スクランブル交差点側（南東角 `bx = 244.5, by = -101.5`）の曲面ガラス＆大型湾曲LEDビジョン「Q'S EYE」
-    q_corner_x = cx - 16.5
-    q_corner_y = cy + 15.5
-    add_cylinder_z(
+    # 南正面（スクランブル交差点直視面）に密着した大型メディア＆1Fスターバックス連続ファサード（Z = 0.5m .. 45.5m）
+    add_box(
         bm,
-        center=Vector((q_corner_x, q_corner_y, 23.75)),
-        radius=9.2,
-        height=47.5,
-        segments=24,
-        mat_idx=14,
+        center=Vector((qf_cx - qf_w * 0.5 - 0.15, qf_cy, 23.0)),
+        size=Vector((0.7, qf_d - 1.2, 45.0)),
+        mat_idx=14,  # ShibuyaQfrontMedia
     )
-    # 2F〜3F スターバックス展望ガラスバンド（Z = 5.5m .. 12.5m）
-    add_cylinder_z(
-        bm,
-        center=Vector((q_corner_x, q_corner_y, 9.0)),
-        radius=9.48,
-        height=6.8,
-        segments=24,
-        mat_idx=6,
-    )
-    # 大型湾曲LEDビジョン「Q'S EYE」（Z = 14.5m .. 39.5m: 実写 QFRONT Q'S EYE メディアテクスチャ）
-    add_cylinder_z(
-        bm,
-        center=Vector((q_corner_x, q_corner_y, 27.0)),
-        radius=9.65,
-        height=24.0,
-        segments=24,
-        mat_idx=14,
-    )
-    for border_z in [14.6, 27.0, 39.4]:
+    # スクリーン周囲のダークスチール額縁＆左右ガラス装飾ピラー（非ミラー・建物本体に密着）
+    for side_y in [-1.0, 1.0]:
         add_cylinder_z(
             bm,
-            center=Vector((q_corner_x, q_corner_y, border_z)),
-            radius=9.82,
-            height=1.2,
-            segments=24,
-            mat_idx=0,
+            center=Vector((qf_cx - qf_w * 0.5 + 0.6, qf_cy + side_y * (qf_d * 0.5 - 0.4), 23.0)),
+            radius=1.1,
+            height=46.0,
+            segments=16,
+            mat_idx=1,  # StreamCurtainGlass
         )
-    add_cylinder_z(
-        bm,
-        center=Vector((q_corner_x, q_corner_y, 27.0)),
-        radius=9.76,
-        height=3.8,
-        segments=24,
-        mat_idx=14,
-    )
-
-    # 3. SHIBUYA109（南西角〜道玄坂分岐先端 `bx = 247.5, by = -131.0`: 南側のスクランブル交差点からも全景が見える円筒シリンダータワー）
-    cyl_cx = cx - 14.5  # bx = 248.5 (南側前面に配置し QFRONT と並んでスクランブル交差点を見下ろす)
-    cyl_cy = cy - 11.5  # by = -131.5 (西側・道玄坂分岐角)
-    cyl_r = 10.8
-    cyl_h = 86.0
-
-    # 109 背後のステップ状商業ビル本体（北西側 `bx = 266.0, by = -126.0`, Z = 0.0m .. 64.0m）
-    add_box(
-        bm,
-        center=Vector((cx + 4.0, cy - 7.5, 32.0)),
-        size=Vector((28.0, 24.0, 64.0)),
-        mat_idx=0,
-    )
-    for band_z in range(16, 62, 6):
+    for frame_z in [7.0, 14.2, 39.0, 45.4]:
         add_box(
             bm,
-            center=Vector((cx + 4.0, cy - 7.5, float(band_z))),
-            size=Vector((28.5, 24.5, 1.5)),
-            mat_idx=1,
+            center=Vector((qf_cx - qf_w * 0.5 - 0.25, qf_cy, frame_z)),
+            size=Vector((0.8, qf_d - 0.8, 0.7)),
+            mat_idx=2,  # StreamDarkVoidSteel
+        )
+    # 屋上ペントハウス＆シアンアクセントライン
+    add_box(
+        bm,
+        center=Vector((qf_cx + 1.5, qf_cy, qf_h + 2.0)),
+        size=Vector((10.0, 10.0, 4.0)),
+        mat_idx=2,  # StreamDarkVoidSteel
+    )
+    add_box(
+        bm,
+        center=Vector((qf_cx - qf_w * 0.5 + 0.2, qf_cy, qf_h - 0.6)),
+        size=Vector((1.0, qf_d - 0.4, 0.7)),
+        mat_idx=10,  # ShibuyaSkyEdgeGlow
+    )
+
+    # =========================================================================
+    # 2. SHIBUYA109（道玄坂×文化村通り Y字分岐: worldX=[-899,-870], worldZ=[254,273]）
+    # =========================================================================
+    cyl_cx = 278.0  # worldZ = 263.0
+    cyl_cy = -184.0  # worldX = -879.0
+    cyl_r = 8.8
+    cyl_h = 78.0
+
+    # 109 背後段状商業ビル本体（worldX=[-899.25,-879.75], worldZ=[254.25,272.75], Z=0..58m）
+    body_cx = 278.5
+    body_cy = -194.5
+    add_box(
+        bm,
+        center=Vector((body_cx, body_cy, 29.0)),
+        size=Vector((18.5, 19.5, 58.0)),
+        mat_idx=0,  # StreamWhitePanel
+    )
+    add_box(
+        bm,
+        center=Vector((body_cx, body_cy + 1.0, 5.0)),
+        size=Vector((19.0, 19.8, 9.6)),
+        mat_idx=6,  # WarmPlazaGlow
+    )
+    for band_z in range(14, 56, 6):
+        add_box(
+            bm,
+            center=Vector((body_cx, body_cy + 0.2, float(band_z))),
+            size=Vector((19.0, 19.9, 1.4)),
+            mat_idx=1,  # StreamCurtainGlass
         )
 
-    # 竹山実設計 SHIBUYA109 象徴のメタリックシルバー円筒シリンダータワー（Z = 0.0m .. 86.0m）
+    # 背後商業ウイング西・南壁面に実写 109 ファサードパネルを貼付（正方比率に近い 15m×18m で 109 ロゴの縦長歪みを防止）
+    add_box(
+        bm,
+        center=Vector((body_cx - 9.4, body_cy + 1.0, 29.0)),
+        size=Vector((0.4, 15.0, 18.0)),
+        mat_idx=15,  # Shibuya109Crown
+    )
+
+    # 竹山実設計 SHIBUYA109 象徴のメタリックシルバー円筒シリンダータワー（Z = 0.0m .. 78.0m）
     add_cylinder_z(
         bm,
         center=Vector((cyl_cx, cyl_cy, cyl_h * 0.5)),
@@ -3035,13 +3091,12 @@ def build_shibuya_qfront_109_complex(
         segments=28,
         mat_idx=0,
     )
-    # シリンダー外周の水平ステンレス目地リング（Z = 10m .. 62m）
-    for ring_z in range(10, 64, 6):
+    for ring_z in range(10, 60, 6):
         add_cylinder_z(
             bm,
             center=Vector((cyl_cx, cyl_cy, float(ring_z))),
-            radius=cyl_r + 0.22,
-            height=0.55,
+            radius=cyl_r + 0.20,
+            height=0.50,
             segments=28,
             mat_idx=3,
         )
@@ -3049,7 +3104,7 @@ def build_shibuya_qfront_109_complex(
     add_cylinder_z(
         bm,
         center=Vector((cyl_cx, cyl_cy, 4.2)),
-        radius=cyl_r + 0.38,
+        radius=cyl_r + 0.32,
         height=7.2,
         segments=28,
         mat_idx=6,
@@ -3057,79 +3112,80 @@ def build_shibuya_qfront_109_complex(
     add_cylinder_z(
         bm,
         center=Vector((cyl_cx, cyl_cy, 8.2)),
-        radius=cyl_r + 1.25,
-        height=0.85,
+        radius=cyl_r + 1.05,
+        height=0.80,
         segments=28,
-        mat_idx=13,
+        mat_idx=3,  # StreamGalvanizedFrame（シャンパンゴールド・アルミ金属庇トリム）
     )
 
-    # シリンダー頂部（Z = 65.0m .. 82.0m）のメタリックシルバーパネル＆象徴的なマゼンタレッド発光クラウンバンド（実写109クラウンテクスチャ）
-    add_cylinder_z(
+    # 109 シリンダー正面方向（道玄坂下・スクランブル交差点へ向かう東寄り南東向き）
+    logo_dir = Vector((-0.39, 0.92, 0.0)).normalized()
+    theta_center = math.atan2(logo_dir.y, logo_dir.x)
+
+    # シリンダー頂部（Z = 60.0m .. 75.0m）はクリーンな白アルミドラム＋マゼンタ上下帯とし、立体「1 0 9」がくっきり読める構成にする
+    add_cylindrical_panel_z(
         bm,
-        center=Vector((cyl_cx, cyl_cy, 73.5)),
-        radius=cyl_r + 0.38,
-        height=16.5,
-        segments=28,
-        mat_idx=15,
+        center=Vector((cyl_cx, cyl_cy, 67.5)),
+        r_inner=cyl_r + 0.16,
+        r_outer=cyl_r + 0.36,
+        height=14.8,
+        start_rad=theta_center - 0.90,
+        end_rad=theta_center + 0.90,
+        segments=18,
+        mat_idx=0,  # StreamWhitePanel
+        inner_mat_idx=0,
     )
-    for pink_z in [67.8, 79.2]:
+    for pink_z in [61.2, 74.2]:
         add_cylinder_z(
             bm,
             center=Vector((cyl_cx, cyl_cy, pink_z)),
-            radius=cyl_r + 0.62,
-            height=1.65,
+            radius=cyl_r + 0.50,
+            height=1.35,
             segments=28,
             mat_idx=13,
         )
-    # シリンダー正面（スクランブル交差点・明治通り向き南東面）の立体マゼンタ「1 0 9」ジオメトリック・エンブレム（Z = 73.5m）
-    # 南東（スクランブル交差点・明治通り側 bx=185..210, by=-55）からシリンダー (248.5, -131.5) を見たとき、
-    # 法線方向は (-0.54, 0.84, 0.0)、観察者から見た右方向（接線）は (-0.84, -0.54, 0.0)
-    logo_dir = Vector((-0.54, 0.84, 0.0)).normalized()
-    theta_center = math.atan2(logo_dir.y, logo_dir.x)
 
-    # シリンダー曲面外側に美しく浮き彫りされた白アルミバッキングプレート（Z-fighting・埋没ゼロ、3Dエンブレムの台座）
+    # 白アルミバッキングプレート（Z = 68.0m）
     add_cylindrical_panel_z(
         bm,
-        center=Vector((cyl_cx, cyl_cy, 73.5)),
-        r_inner=cyl_r + 0.40,
-        r_outer=cyl_r + 0.52,
-        height=7.2,
+        center=Vector((cyl_cx, cyl_cy, 68.0)),
+        r_inner=cyl_r + 0.35,
+        r_outer=cyl_r + 0.45,
+        height=6.2,
         start_rad=theta_center - 0.48,
         end_rad=theta_center + 0.54,
-        segments=28,
+        segments=18,
         mat_idx=0,
     )
 
     # 各文字のシリンダー曲面上の配置角度（左から 1, 0, 9）
     cyl_center = Vector((cyl_cx, cyl_cy, 0.0))
-    letter_r = cyl_r + 0.58
-    letter_depth = 0.36
+    letter_r = cyl_r + 0.52
+    letter_depth = 0.34
 
-    # "1" (左側 theta = theta_center - 0.27: 0 との間に 0.556m のクリアランスを確保)
+    # "1" (左側 theta = theta_center - 0.27)
     theta_1 = theta_center - 0.27
     n_1 = Vector((math.cos(theta_1), math.sin(theta_1), 0.0))
     t_1 = Vector((-math.sin(theta_1), math.cos(theta_1), 0.0))
-    pos_1 = cyl_center + n_1 * letter_r + Vector((0.0, 0.0, 73.5))
-    # 縦ステム
+    pos_1 = cyl_center + n_1 * letter_r + Vector((0.0, 0.0, 68.0))
     add_oriented_box(
         bm,
         center=pos_1,
         tangent_dir=t_1,
         normal_dir=n_1,
-        size_tangent=1.05,
+        size_tangent=0.95,
         size_normal=letter_depth,
-        size_z=5.0,
+        size_z=4.4,
         mat_idx=13,
     )
-    # トップセリフ
     add_oriented_box(
         bm,
-        center=pos_1 - t_1 * 0.60 + Vector((0.0, 0.0, 1.85)),
+        center=pos_1 - t_1 * 0.52 + Vector((0.0, 0.0, 1.65)),
         tangent_dir=t_1,
         normal_dir=n_1,
-        size_tangent=0.85,
+        size_tangent=0.75,
         size_normal=letter_depth,
-        size_z=1.10,
+        size_z=1.00,
         mat_idx=13,
     )
 
@@ -3137,69 +3193,66 @@ def build_shibuya_qfront_109_complex(
     theta_0 = theta_center
     n_0 = Vector((math.cos(theta_0), math.sin(theta_0), 0.0))
     t_0 = Vector((-math.sin(theta_0), math.cos(theta_0), 0.0))
-    pos_0 = cyl_center + n_0 * letter_r + Vector((0.0, 0.0, 73.5))
+    pos_0 = cyl_center + n_0 * letter_r + Vector((0.0, 0.0, 68.0))
     add_extruded_arc_ring(
         bm,
         center=pos_0,
         tangent_dir=t_0,
         normal_dir=n_0,
-        outer_r=2.10,
-        inner_r=1.15,
-        depth=letter_depth,
-        start_deg=0.0,
-        end_deg=360.0,
-        segments=28,
-        mat_idx=13,
-    )
-
-    # "9" (右側 theta = theta_center + 0.33: 0 との間に 0.585m の完全なクリアランスを確保し衝突を完全解消)
-    theta_9 = theta_center + 0.33
-    n_9 = Vector((math.cos(theta_9), math.sin(theta_9), 0.0))
-    t_9 = Vector((-math.sin(theta_9), math.cos(theta_9), 0.0))
-    pos_9 = cyl_center + n_9 * letter_r + Vector((0.0, 0.0, 73.5))
-    # 上部ループ (全高・プロポーションを0と統一)
-    add_extruded_arc_ring(
-        bm,
-        center=pos_9 + Vector((0.0, 0.0, 1.0)) - t_9 * 0.20,
-        tangent_dir=t_9,
-        normal_dir=n_9,
-        outer_r=1.35,
-        inner_r=0.60,
+        outer_r=1.85,
+        inner_r=1.00,
         depth=letter_depth,
         start_deg=0.0,
         end_deg=360.0,
         segments=24,
         mat_idx=13,
     )
-    # 右縦ステム (ループ右端 -0.20 + 1.35 = +1.15 と完全同一面で接合)
-    add_oriented_box(
+
+    # "9" (右側 theta = theta_center + 0.33)
+    theta_9 = theta_center + 0.33
+    n_9 = Vector((math.cos(theta_9), math.sin(theta_9), 0.0))
+    t_9 = Vector((-math.sin(theta_9), math.cos(theta_9), 0.0))
+    pos_9 = cyl_center + n_9 * letter_r + Vector((0.0, 0.0, 68.0))
+    add_extruded_arc_ring(
         bm,
-        center=pos_9 + t_9 * 0.75 - Vector((0.0, 0.0, 0.10)),
+        center=pos_9 + Vector((0.0, 0.0, 0.9)) - t_9 * 0.18,
         tangent_dir=t_9,
         normal_dir=n_9,
-        size_tangent=0.80,
-        size_normal=letter_depth,
-        size_z=4.6,
+        outer_r=1.20,
+        inner_r=0.52,
+        depth=letter_depth,
+        start_deg=0.0,
+        end_deg=360.0,
+        segments=20,
         mat_idx=13,
     )
-    # 下部ボトムフック (右端 +1.15 から左へ滑らかに弧を描くように接続し、不要な段差や飛び出しフットを完全排除)
     add_oriented_box(
         bm,
-        center=pos_9 - t_9 * 0.05 - Vector((0.0, 0.0, 2.0)),
+        center=pos_9 + t_9 * 0.66 - Vector((0.0, 0.0, 0.10)),
         tangent_dir=t_9,
         normal_dir=n_9,
-        size_tangent=2.40,
+        size_tangent=0.72,
         size_normal=letter_depth,
-        size_z=0.80,
+        size_z=4.1,
+        mat_idx=13,
+    )
+    add_oriented_box(
+        bm,
+        center=pos_9 - t_9 * 0.05 - Vector((0.0, 0.0, 1.80)),
+        tangent_dir=t_9,
+        normal_dir=n_9,
+        size_tangent=2.15,
+        size_normal=letter_depth,
+        size_z=0.72,
         mat_idx=13,
     )
 
-    # シリンダー最上部のダークスチール冠部＆航空障害灯（Z = 82.2m .. 86.0m）
+    # シリンダー最上部のダークスチール冠部＆航空障害灯（Z = 75.5m .. 78.8m）
     add_cylinder_z(
         bm,
-        center=Vector((cyl_cx, cyl_cy, 84.1)),
+        center=Vector((cyl_cx, cyl_cy, 77.2)),
         radius=cyl_r * 0.88,
-        height=3.6,
+        height=3.2,
         segments=24,
         mat_idx=2,
     )
@@ -3211,28 +3264,14 @@ def build_shibuya_qfront_109_complex(
                 (
                     cyl_cx + math.cos(rad) * (cyl_r * 0.78),
                     cyl_cy + math.sin(rad) * (cyl_r * 0.78),
-                    86.5,
+                    79.3,
                 )
             ),
-            radius=0.45,
-            height=1.0,
+            radius=0.40,
+            height=0.9,
             segments=12,
             mat_idx=7,
         )
-
-    # 4. スクランブル交差点周辺の大型屋外LEDビジョン＆ビルボード（実写交差点ビルボードテクスチャ）
-    add_box(
-        bm,
-        center=Vector((cx - 24.0, cy + 24.0, 26.0)),
-        size=Vector((1.2, 18.0, 22.0)),
-        mat_idx=20,
-    )
-    add_box(
-        bm,
-        center=Vector((cx - 12.0, cy + 30.0, 30.0)),
-        size=Vector((20.0, 1.2, 18.0)),
-        mat_idx=20,
-    )
 
     bm.normal_update()
     bm.to_mesh(mesh)
@@ -3259,10 +3298,10 @@ def build_shibuya_magnet_and_station_front(
     mesh = bpy.data.meshes.new("ShibuyaMagnetMesh")
     bm = bmesh.new()
 
-    cx = 290.0  # worldZ = 275.0（南側壁面 z = 262.0 で駅前東西連絡路 z = 248.0 車道を回避）
-    cy = -87.0  # worldX = -782.0（ハチ公前・スクランブル交差点北東街区）
+    cx = 310.0  # worldZ = 295.0（[282..308]: スクランブル z<=270 と宮益坂下 z<=260 から完全退避）
+    cy = -79.4  # worldX = -774.4（[-779.0..-769.8]: 公園通りと明治通りの間の三角街区に収容）
     w_x = 26.0  # worldZ 方向奥行き
-    d_y = 28.0  # worldX 方向間口幅
+    d_y = 9.2  # worldX 方向間口幅
     h_z = 42.0
 
     # 1. メインビルボリューム
@@ -3279,61 +3318,46 @@ def build_shibuya_magnet_and_station_front(
         size=Vector((w_x - 1.5, d_y - 1.5, h_z - 8.0)),
         mat_idx=1,  # StreamCurtainGlass
     )
-    # 1F〜3F 路面店舗ショーウィンドウ（ウォームインテリア）
+    # 1F〜屋上直前まで実写ファサードを一体展開（旧 1F〜3F の無地 WarmPlazaGlow 板はのっぺり灰白板に見えたため全面実写化）
     # 南面（駅前連絡路向き）
     add_box(
         bm,
-        center=Vector((cx - w_x * 0.5 - 0.2, cy, 6.0)),
-        size=Vector((0.5, d_y - 4.0, 11.5)),
-        mat_idx=6,  # WarmPlazaGlow
-    )
-    # 西面（スクランブル交差点向き）
-    add_box(
-        bm,
-        center=Vector((cx, cy - d_y * 0.5 - 0.2, 6.0)),
-        size=Vector((w_x - 4.0, 0.5, 11.5)),
-        mat_idx=6,  # WarmPlazaGlow
-    )
-    # 2. 巨大屋外LEDビジョン「渋谷駅前ビジョン」
-    # 南面（ハチ公前・駅前連絡路正対: Z = 16.0m .. 36.0m）
-    add_box(
-        bm,
-        center=Vector((cx - w_x * 0.5 - 0.35, cy, 26.0)),
-        size=Vector((0.6, d_y - 4.0, 18.0)),
+        center=Vector((cx - w_x * 0.5 - 0.35, cy, 18.0)),
+        size=Vector((0.6, d_y - 3.6, 35.0)),
         mat_idx=23,  # ShibuyaMagnetFacade
     )
-    # 西面（スクランブル交差点・QFRONT正対: Z = 16.0m .. 36.0m）
+    # 西面（スクランブル交差点・公園通り向き）
     add_box(
         bm,
-        center=Vector((cx, cy - d_y * 0.5 - 0.35, 26.0)),
-        size=Vector((w_x - 4.0, 0.6, 18.0)),
+        center=Vector((cx, cy - d_y * 0.5 - 0.35, 18.0)),
+        size=Vector((w_x - 3.6, 0.6, 35.0)),
         mat_idx=23,  # ShibuyaMagnetFacade
     )
-    # スクリーン周囲のダークスチールトリムフレーム
+    # ファサード周囲のダークスチールトリムフレーム
     add_box(
         bm,
-        center=Vector((cx - w_x * 0.5 - 0.2, cy, 26.0)),
-        size=Vector((0.5, d_y - 2.4, 19.6)),
+        center=Vector((cx - w_x * 0.5 - 0.2, cy, 18.2)),
+        size=Vector((0.5, d_y - 1.2, 36.0)),
         mat_idx=2,  # StreamDarkVoidSteel
     )
     add_box(
         bm,
-        center=Vector((cx, cy - d_y * 0.5 - 0.2, 26.0)),
-        size=Vector((w_x - 2.4, 0.5, 19.6)),
+        center=Vector((cx, cy - d_y * 0.5 - 0.2, 18.2)),
+        size=Vector((w_x - 2.4, 0.5, 36.0)),
         mat_idx=2,  # StreamDarkVoidSteel
     )
     # 屋上 MAG's PARK 展望デッキ（Z = 42.0m）
     add_box(
         bm,
         center=Vector((cx, cy, 42.6)),
-        size=Vector((w_x - 1.5, d_y - 1.5, 1.2)),
+        size=Vector((w_x - 1.5, d_y - 0.8, 1.2)),
         mat_idx=3,  # StreamGalvanizedFrame
     )
     # 展望ガラスフェンス（南西見下ろし角）
     add_box(
         bm,
         center=Vector((cx - w_x * 0.5 + 1.0, cy, 43.5)),
-        size=Vector((0.3, d_y - 2.0, 1.6)),
+        size=Vector((0.3, d_y - 1.2, 1.6)),
         mat_idx=1,  # StreamCurtainGlass
     )
     add_box(
@@ -3345,16 +3369,24 @@ def build_shibuya_magnet_and_station_front(
     # 屋上パーゴラ＆ラウンジ構造物
     add_box(
         bm,
-        center=Vector((cx + 5.0, cy + 4.0, 45.0)),
-        size=Vector((10.0, 10.0, 4.0)),
+        center=Vector((cx + 4.0, cy + 0.5, 45.0)),
+        size=Vector((10.0, 5.6, 4.0)),
         mat_idx=2,  # StreamDarkVoidSteel
     )
-    # 航空障害灯
+    # 航空障害灯（屋上パーゴラ天端 z=47.0 にフランジ座付きで接地）
     add_cylinder_z(
         bm,
-        center=Vector((cx - w_x * 0.45, cy - d_y * 0.45, 47.5)),
+        center=Vector((cx + 7.2, cy - 1.5, 47.08)),
+        radius=0.55,
+        height=0.16,
+        segments=12,
+        mat_idx=2,  # StreamDarkVoidSteel
+    )
+    add_cylinder_z(
+        bm,
+        center=Vector((cx + 7.2, cy - 1.5, 47.56)),
         radius=0.35,
-        height=1.0,
+        height=0.80,
         segments=12,
         mat_idx=7,  # BeaconRed
     )
@@ -3385,34 +3417,37 @@ def build_shibuya_mark_city_complex(
     mesh = bpy.data.meshes.new("ShibuyaMarkCityMesh")
     bm = bmesh.new()
 
-    # 1. イースト棟（オフィス棟: bx = 175.0, by = -168.0, 高 95.6m）
-    e_cx = 175.0
+    # 1. イースト棟（オフィス棟: bx = 166.0 -> worldZ = 151.0, by = -168.0 -> worldX = -863.0, 高 95.6m）
+    # Why bx = 166 / 178 へ南寄せするか:
+    # 道玄坂（worldZ ≈ 210..238）と玉川通り（worldZ ≈ 98..113）の間の実在マークシティ敷地（worldZ ∈ [132..183]）へ収め、
+    # 道玄坂本線の路上・交差点へ躯体がはみ出して道路を分断・宙浮きに見せる干渉を完全に解消するため。
+    e_cx = 166.0
     e_cy = -168.0
     e_w = 34.0
     e_d = 30.0
     e_h = 95.6
 
+    # 上層オフィスタワー本体（Z = 0.0m .. 95.6m: ガラスカーテンウォール＋水平アルミスパンドレル）
     add_box(
         bm,
         center=Vector((e_cx, e_cy, e_h * 0.5)),
         size=Vector((e_w, e_d, e_h)),
-        mat_idx=24,  # ShibuyaMarkCityFacade
+        mat_idx=1,  # StreamCurtainGlass
     )
-    # 低層ポディウム（1F〜5F コンコース基壇）
-    add_box(
-        bm,
-        center=Vector((e_cx, e_cy + 4.0, 12.0)),
-        size=Vector((e_w + 4.0, e_d + 6.0, 24.0)),
-        mat_idx=0,  # StreamWhitePanel
-    )
-    # スリット窓ストライプ
-    for floor_z in range(28, int(e_h) - 8, 8):
+    for band_z in range(26, int(e_h), 6):
         add_box(
             bm,
-            center=Vector((e_cx, e_cy - e_d * 0.5 - 0.2, float(floor_z))),
-            size=Vector((e_w - 4.0, 0.4, 2.2)),
-            mat_idx=1,  # StreamCurtainGlass
+            center=Vector((e_cx, e_cy, float(band_z))),
+            size=Vector((e_w + 0.35, e_d + 0.35, 1.8)),
+            mat_idx=0,  # StreamWhitePanel
         )
+    # 1F〜5F 駅・商業ポディウム（Z = 0.0m .. 24.0m 接地：実写ファサードを路面から立ち上げ）
+    add_box(
+        bm,
+        center=Vector((e_cx, e_cy, 12.0)),
+        size=Vector((e_w + 1.6, e_d + 2.0, 24.0)),
+        mat_idx=24,  # ShibuyaMarkCityFacade
+    )
     # イースト棟屋上パラペット＆設備塔
     add_box(
         bm,
@@ -3429,34 +3464,34 @@ def build_shibuya_mark_city_complex(
         mat_idx=7,  # BeaconRed
     )
 
-    # 2. ウエスト棟（渋谷エクセルホテル東急: bx = 215.0, by = -198.0, 高 85.0m）
-    w_cx = 215.0
+    # 2. ウエスト棟（渋谷エクセルホテル東急: bx = 178.0 -> worldZ = 163.0, by = -198.0 -> worldX = -893.0, 高 85.0m）
+    w_cx = 178.0
     w_cy = -198.0
     w_w = 38.0
     w_d = 32.0
     w_h = 85.0
 
+    # 上層ホテルタワー本体（Z = 0.0m .. 85.0m: ガラスカーテンウォール＋水平白アルミバンド）
     add_box(
         bm,
         center=Vector((w_cx, w_cy, w_h * 0.5)),
         size=Vector((w_w, w_d, w_h)),
-        mat_idx=24,  # ShibuyaMarkCityFacade
+        mat_idx=1,  # StreamCurtainGlass
     )
-    # ホテル基壇部
-    add_box(
-        bm,
-        center=Vector((w_cx, w_cy + 3.0, 14.0)),
-        size=Vector((w_w + 3.0, w_d + 5.0, 28.0)),
-        mat_idx=0,  # StreamWhitePanel
-    )
-    # 客室リボン連窓
-    for floor_z in range(32, int(w_h) - 6, 7):
+    for band_z in range(28, int(w_h), 6):
         add_box(
             bm,
-            center=Vector((w_cx, w_cy - w_d * 0.5 - 0.2, float(floor_z))),
-            size=Vector((w_w - 4.0, 0.4, 2.0)),
-            mat_idx=1,  # StreamCurtainGlass
+            center=Vector((w_cx, w_cy, float(band_z))),
+            size=Vector((w_w + 0.35, w_d + 0.35, 1.9)),
+            mat_idx=0,  # StreamWhitePanel
         )
+    # 低層商業基壇（Z = 0.0m .. 26.0m 接地：SHIBUYA MARK CITY 実写テクスチャを地面から配置）
+    add_box(
+        bm,
+        center=Vector((w_cx, w_cy, 13.0)),
+        size=Vector((w_w + 1.6, w_d + 2.0, 26.0)),
+        mat_idx=24,  # ShibuyaMarkCityFacade
+    )
     # ウエスト棟屋上
     add_box(
         bm,
@@ -3473,38 +3508,43 @@ def build_shibuya_mark_city_complex(
         mat_idx=7,  # BeaconRed
     )
 
-    # 3. 連絡空中回廊＆駅コンコース構造（イースト棟〜ウエスト棟〜渋谷駅接続）
-    # 桁下クリアランス Z = 8.5m
-    bridge_len_x = 45.0
+    # 3. 連絡駅コンコース棟（イースト棟・ウエスト棟間を東西方向に貫通接続：Z = 0.0m .. 24.0m 接地）
+    bridge_span_x = 24.0
+    bridge_span_y = 32.0
     bridge_cx = (e_cx + w_cx) * 0.5
-    bridge_cy = (e_cy + w_cy) * 0.5 + 10.0
+    bridge_cy = (e_cy + w_cy) * 0.5
     add_box(
         bm,
-        center=Vector((bridge_cx, bridge_cy, 17.0)),
-        size=Vector((bridge_len_x, 16.0, 17.0)),
+        center=Vector((bridge_cx, bridge_cy, 12.0)),
+        size=Vector((bridge_span_x, bridge_span_y, 24.0)),
         mat_idx=24,  # ShibuyaMarkCityFacade
     )
-    # 回廊ガラス張り面
+    # 屋上トップトリム＆道玄坂側採光ガラス帯（Z = 18.0m .. 24.2m）
     add_box(
         bm,
-        center=Vector((bridge_cx, bridge_cy - 8.1, 17.0)),
-        size=Vector((bridge_len_x - 4.0, 0.4, 12.0)),
+        center=Vector((bridge_cx + bridge_span_x * 0.5 + 0.1, bridge_cy, 18.0)),
+        size=Vector((0.4, bridge_span_y - 4.0, 8.5)),
         mat_idx=1,  # StreamCurtainGlass
     )
-    # 回廊鉄骨下部トラス＆ラーメン橋脚
-    for pier_x in [e_cx + 8.0, w_cx - 8.0]:
-        add_box(
-            bm,
-            center=Vector((pier_x, bridge_cy, 4.25)),
-            size=Vector((3.0, 12.0, 8.5)),
-            mat_idx=8,  # ShutokoConcretePier
-        )
-
-    # 4. 道玄坂沿道ショーウィンドウ（実写商業ファサード＆暖色店舗）
     add_box(
         bm,
-        center=Vector((e_cx, e_cy - e_d * 0.5 - 1.2, 4.0)),
-        size=Vector((e_w, 2.0, 7.8)),
+        center=Vector((bridge_cx, bridge_cy, 24.2)),
+        size=Vector((bridge_span_x + 0.5, bridge_span_y + 0.5, 0.8)),
+        mat_idx=2,  # StreamDarkVoidSteel
+    )
+    for pier_y in [e_cy - 6.0, bridge_cy, w_cy + 6.0]:
+        add_box(
+            bm,
+            center=Vector((bridge_cx + bridge_span_x * 0.5 + 0.2, pier_y, 12.0)),
+            size=Vector((0.6, 1.2, 24.0)),
+            mat_idx=0,  # StreamWhitePanel
+        )
+
+    # 4. 道玄坂側プラザ商業ショーウィンドウ（イースト棟北面に密着接地：worldZ ≈ 169m）
+    add_box(
+        bm,
+        center=Vector((e_cx + e_w * 0.5 + 1.0, e_cy, 4.0)),
+        size=Vector((2.0, e_d, 8.0)),
         mat_idx=26,  # ShibuyaDogenzakaCommercialFacade
     )
 
@@ -3553,32 +3593,26 @@ def build_shibuya_toei_plaza_bic_camera(
         size=Vector((w_x + 0.2, d_y - 2.0, h_z - 10.0)),
         mat_idx=1,  # StreamCurtainGlass
     )
-    # 2. 南面（宮益坂面）の巨大赤白ビックカメラファサード看板（Z = 12.0m .. 46.0m）
+    # 2. 南面（宮益坂面）の巨大赤白ビックカメラ 1F店舗〜上層階連続ファサード（Z = 1.0m .. 46.0m）
     add_box(
         bm,
-        center=Vector((cx - w_x * 0.5 - 0.35, cy, 29.0)),
-        size=Vector((0.6, d_y - 2.0, 34.0)),
+        center=Vector((cx - w_x * 0.5 - 0.35, cy, 23.5)),
+        size=Vector((0.6, d_y - 2.0, 45.0)),
         mat_idx=25,  # ShibuyaToeiBicFacade
     )
-    # 西面（明治通り面）のビックカメラ縦型サイン看板
+    # 西面（明治通り面）のビックカメラ 1F〜上層階縦型連続ファサード（Z = 1.0m .. 46.0m）
     add_box(
         bm,
-        center=Vector((cx, cy - d_y * 0.5 - 0.35, 30.0)),
-        size=Vector((w_x - 4.0, 0.6, 32.0)),
+        center=Vector((cx, cy - d_y * 0.5 - 0.35, 23.5)),
+        size=Vector((w_x - 4.0, 0.6, 45.0)),
         mat_idx=25,  # ShibuyaToeiBicFacade
     )
-    # 3. 1F〜2F 路面店舗エントランス＆ショーウィンドウ（ウォーム照明）
+    # 3. 1F〜2F コーナー＆ガラスショーウィンドウ基壇フレーム
     add_box(
         bm,
-        center=Vector((cx - w_x * 0.5 - 0.2, cy - 2.0, 5.0)),
-        size=Vector((0.5, d_y - 4.0, 9.5)),
-        mat_idx=6,  # WarmPlazaGlow
-    )
-    add_box(
-        bm,
-        center=Vector((cx - 2.0, cy - d_y * 0.5 - 0.2, 5.0)),
-        size=Vector((w_x - 4.0, 0.5, 9.5)),
-        mat_idx=6,  # WarmPlazaGlow
+        center=Vector((cx - 0.05, cy - 0.05, 5.0)),
+        size=Vector((w_x + 0.2, d_y + 0.2, 9.6)),
+        mat_idx=1,  # StreamCurtainGlass
     )
     # 4. 屋上設備パラペット＆航空障害灯
     add_box(
@@ -3751,10 +3785,10 @@ def build_shibuya_parco_complex(
     mesh = bpy.data.meshes.new("ShibuyaParco_ComplexMesh")
     bm = bmesh.new()
 
-    cx = 397.0  # worldZ = 382.0
-    cy = -135.0  # worldX = -830.0
-    w_x = 40.0
-    d_y = 40.0
+    cx = 403.0  # worldZ = 388.0
+    cy = -140.0  # worldX = -835.0
+    w_x = 36.0
+    d_y = 36.0
 
     # 1. 低層商業ポディウム (Z = 0m..48m)
     add_box(
@@ -3764,12 +3798,19 @@ def build_shibuya_parco_complex(
         mat_idx=19,  # ShibuyaCommercialFacade
     )
 
-    # 1F〜3F 路面ガラスエントランス
+    # 1F〜3F 路面ガラスエントランス（日中無地灰壁に見えないようカーテンガラス+ダークマリオンで店舗表現）
+    # Why not mat_idx=6 WarmPlazaGlow slab: WarmPlazaGlow は単色無地ベイクで日中シャドウ角が巨大な灰壁に見えるためカーテンガラスを採用。
     add_box(
         bm,
-        center=Vector((cx - w_x * 0.5 - 0.2, cy, 7.0)),
-        size=Vector((0.8, d_y * 0.8, 12.0)),
-        mat_idx=6,  # WarmPlazaGlow
+        center=Vector((cx - w_x * 0.5 + 0.05, cy, 5.5)),
+        size=Vector((0.25, d_y * 0.78, 9.6)),
+        mat_idx=1,
+    )
+    add_box(
+        bm,
+        center=Vector((cx - w_x * 0.5 + 0.02, cy, 5.8)),
+        size=Vector((0.32, d_y * 0.80, 0.35)),
+        mat_idx=3,
     )
 
     # 立体街路スパイラル階段テラス（外周をらせん状に巻き上がる屋外デッキ）
@@ -3778,18 +3819,18 @@ def build_shibuya_parco_complex(
         s_ratio = s_i / step_count
         step_z = 4.0 + s_ratio * 42.0
         angle = s_ratio * math.pi * 1.5
-        s_dx = math.cos(angle) * (w_x * 0.52)
-        s_dy = math.sin(angle) * (d_y * 0.52)
+        s_dx = math.cos(angle) * (w_x * 0.48)
+        s_dy = math.sin(angle) * (d_y * 0.48)
         add_box(
             bm,
             center=Vector((cx + s_dx, cy + s_dy, step_z)),
-            size=Vector((7.0, 7.0, 1.8)),
+            size=Vector((5.8, 5.8, 1.8)),
             mat_idx=0,  # StreamWhitePanel
         )
         add_box(
             bm,
-            center=Vector((cx + s_dx * 1.05, cy + s_dy * 1.05, step_z + 1.4)),
-            size=Vector((7.2, 7.2, 1.1)),
+            center=Vector((cx + s_dx * 1.03, cy + s_dy * 1.03, step_z + 1.4)),
+            size=Vector((6.0, 6.0, 1.1)),
             mat_idx=10,  # ShibuyaSkyEdgeGlow
         )
 
@@ -3856,15 +3897,15 @@ def build_shibuya_center_gai_entrance(
     mesh = bpy.data.meshes.new("ShibuyaCenterGai_ArchMesh")
     bm = bmesh.new()
 
-    cx = 283.0  # worldZ = 268.0
-    cy = -140.0  # worldX = -835.0
+    cx = 293.2448  # worldZ = 278.2448 (u=0.08)
+    cy = -146.0863  # worldX = -841.0863 (u=0.08)
 
-    # センター街道路進行方向 (Three.js: dx=-40, dz=52 -> Blender: dbx=52, dby=-40)
+    # センター街道路進行方向 (u=0.08: Three.js tan=(-0.505744, 0.862684) -> Blender (0.862684, -0.505744))
     # 接線ベクトル (tangent_dir) と直交法線ベクトル (normal_dir: 道路を跨ぐ横断方向)
-    tangent_dir = Vector((0.7926238, -0.6097106, 0.0))
-    normal_dir = Vector((-0.6097106, -0.7926238, 0.0))
+    tangent_dir = Vector((0.862684, -0.505744, 0.0))
+    normal_dir = Vector((-0.505744, -0.862684, 0.0))
 
-    half_span = 4.2
+    half_span = 5.8
     for side in [-1.0, 1.0]:
         pillar_pos = Vector((cx, cy, 4.0)) + side * half_span * normal_dir
         add_cylinder_z(
@@ -3887,28 +3928,91 @@ def build_shibuya_center_gai_entrance(
             mat_idx=2,
         )
 
-    # 上部トラス梁（道路直交方向にスパン 9.2m）
+    # 上部トラス梁（道路直交方向にスパン 11.4m）
     add_oriented_box(
         bm,
         center=Vector((cx, cy, 7.6)),
         tangent_dir=tangent_dir,
         normal_dir=normal_dir,
         size_tangent=0.6,
-        size_normal=9.2,
+        size_normal=11.4,
         size_z=0.6,
         mat_idx=3,  # StreamGalvanizedFrame
     )
 
-    # メイン看板パネル「SHIBUYA CENTER-GAI バスケットボール通り」
-    add_oriented_box(
-        bm,
-        center=Vector((cx, cy, 6.8)),
-        tangent_dir=tangent_dir,
-        normal_dir=normal_dir,
-        size_tangent=0.42,
-        size_normal=6.4,
+    # メイン看板パネル「渋谷センター街 / SHIBUYA CENTER-GAI / バスケットボール通り」
+    # 両面の看板表示面（±t面）には未反転UV [0,1]x[0,1] と ShibuyaCenterGaiArchSign を割り当て、
+    # 薄い側面・上下枠はダークスチール（mat_idx=2）にして文字の滲みを防止する。
+    uv_layer = bm.loops.layers.uv.verify()
+    t = tangent_dir.normalized()
+    n = normal_dir.normalized()
+    up = Vector((0.0, 0.0, 1.0))
+
+    def add_sign_panel_box(
+        panel_center: Vector,
+        size_t: float,
+        size_n: float,
+        size_z: float,
+        face_axis: str,
+        face_mat: int,
+        edge_mat: int,
+    ) -> None:
+        ht = size_t * 0.5
+        hn = size_n * 0.5
+        hz = size_z * 0.5
+        pts = [
+            panel_center + t * (-ht) + n * (-hn) + up * (-hz),
+            panel_center + t * ht + n * (-hn) + up * (-hz),
+            panel_center + t * ht + n * hn + up * (-hz),
+            panel_center + t * (-ht) + n * hn + up * (-hz),
+            panel_center + t * (-ht) + n * (-hn) + up * hz,
+            panel_center + t * ht + n * (-hn) + up * hz,
+            panel_center + t * ht + n * hn + up * hz,
+            panel_center + t * (-ht) + n * hn + up * hz,
+        ]
+        verts = [bm.verts.new(p) for p in pts]
+        uv_corners = [
+            Vector((0.0, 0.0)),
+            Vector((1.0, 0.0)),
+            Vector((1.0, 1.0)),
+            Vector((0.0, 1.0)),
+        ]
+
+        if face_axis == "normal":
+            # スクランブル交差点側 (-t) とセンター街側 (+t) が大面積表示面
+            face_specs = [
+                ((0, 3, 7, 4), face_mat, uv_corners),  # -t面: 左=-hn -> 右=+hn
+                ((2, 1, 5, 6), face_mat, uv_corners),  # +t面: 左=+hn -> 右=-hn
+                ((0, 3, 2, 1), edge_mat, uv_corners),
+                ((4, 5, 6, 7), edge_mat, uv_corners),
+                ((0, 1, 5, 4), edge_mat, uv_corners),
+                ((2, 3, 7, 6), edge_mat, uv_corners),
+            ]
+        else:
+            # 通りに直交して両側面（±n面）から見える縦長フラッグバナー
+            face_specs = [
+                ((1, 0, 4, 5), face_mat, uv_corners),  # -n面: 左=+ht -> 右=-ht
+                ((3, 2, 6, 7), face_mat, uv_corners),  # +n面: 左=-ht -> 右=+ht
+                ((0, 3, 2, 1), edge_mat, uv_corners),
+                ((4, 5, 6, 7), edge_mat, uv_corners),
+                ((1, 2, 6, 5), edge_mat, uv_corners),
+                ((3, 0, 4, 7), edge_mat, uv_corners),
+            ]
+
+        for idxs, m_idx, uvs in face_specs:
+            f = bm.faces.new([verts[idxs[0]], verts[idxs[1]], verts[idxs[2]], verts[idxs[3]]])
+            f.material_index = m_idx
+            for li, uv in enumerate(uvs):
+                f.loops[li][uv_layer].uv = uv
+
+    add_sign_panel_box(
+        panel_center=Vector((cx, cy, 6.8)),
+        size_t=0.42,
+        size_n=6.4,
         size_z=1.4,
-        mat_idx=13,  # ShibuyaQfront109Accent
+        face_axis="normal",
+        face_mat=27,  # ShibuyaCenterGaiArchSign
+        edge_mat=2,  # StreamDarkVoidSteel
     )
     # 看板上部ブルーアクセント
     add_oriented_box(
@@ -3922,32 +4026,11 @@ def build_shibuya_center_gai_entrance(
         mat_idx=10,  # ShibuyaSkyEdgeGlow
     )
 
-    # センター街沿道フラッグポスト（道路両脇に直交オフセット配置）
-    for f_dist in [12.0, 24.0]:
-        fx = cx + f_dist * tangent_dir.x
-        fy = cy + f_dist * tangent_dir.y
-        for side in [-1.0, 1.0]:
-            p_pos = Vector((fx, fy, 2.5)) + side * 3.8 * normal_dir
-            add_cylinder_z(
-                bm,
-                center=p_pos,
-                radius=0.1,
-                height=5.0,
-                segments=10,
-                mat_idx=2,
-            )
-            b_pos = Vector((fx, fy, 3.8)) + side * 3.8 * normal_dir
-            add_oriented_box(
-                bm,
-                center=b_pos,
-                tangent_dir=tangent_dir,
-                normal_dir=normal_dir,
-                size_tangent=0.8,
-                size_normal=0.1,
-                size_z=1.8,
-                mat_idx=12,  # SakuraStagePinkGlow
-            )
+    # Why not straight-line f_dist flag posts:
+    # センター街は Catmull-Rom 曲線道路のため直線接線方向のオフセット柱は湾曲区間の車道へ突き出す。
+    # 沿道バナーは Three.js 側のスプライン追従フラッグに一本化する。
 
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     bm.normal_update()
     bm.to_mesh(mesh)
     bm.free()
@@ -4120,9 +4203,9 @@ def render_360_review(review_dir: str):
         ),
         (
             "10_driver_eye_under_shutoko_246",
-            Vector((110.0, -68.0, 2.0)),
-            Vector((110.0, 30.0, 13.5)),
-            24.0,
+            Vector((122.0, -35.0, 2.2)),
+            Vector((122.0, 85.0, 7.5)),
+            22.0,
         ),
         (
             "11_closeup_scramble_sky_and_hikarie",
@@ -4144,20 +4227,20 @@ def render_360_review(review_dir: str):
         ),
         (
             "14_closeup_qfront_and_shibuya109",
-            Vector((205.0, -55.0, 36.0)),
-            Vector((255.0, -125.0, 58.0)),
-            28.0,
+            Vector((215.0, -90.0, 28.0)),
+            Vector((278.0, -165.0, 48.0)),
+            26.0,
         ),
         (
             "15_closeup_miyashita_park_arches",
-            Vector((200.0, -65.0, 34.0)),
-            Vector((263.0, 0.0, 26.0)),
+            Vector((270.0, -65.0, 34.0)),
+            Vector((335.0, 0.0, 26.0)),
             26.0,
         ),
         (
             "16_driver_eye_scramble_crossing_and_magnet",
             Vector((263.0, -120.0, 3.0)),
-            Vector((290.0, -87.0, 24.0)),
+            Vector((310.0, -79.4, 24.0)),
             24.0,
         ),
         (
@@ -4175,7 +4258,7 @@ def render_360_review(review_dir: str):
         (
             "19_closeup_shibuya_parco_and_spiral",
             Vector((330.0, -110.0, 60.0)),
-            Vector((390.0, -129.0, 50.0)),
+            Vector((403.0, -140.0, 50.0)),
             28.0,
         ),
         (
@@ -4187,7 +4270,7 @@ def render_360_review(review_dir: str):
         (
             "21_driver_eye_center_gai_entrance_arch",
             Vector((255.0, -119.0, 2.5)),
-            Vector((283.0, -140.0, 7.0)),
+            Vector((293.24, -146.09, 7.0)),
             24.0,
         ),
     ]

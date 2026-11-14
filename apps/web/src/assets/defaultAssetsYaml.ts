@@ -296,12 +296,12 @@ signs:
 
   - id: "delineator_median_south"
     type: "delineator"
-    position: [0.0, 0.0, 38.0]
+    position: [9.3, 0.0, 38.0]
     rotationY: 3.14159
 
   - id: "delineator_median_north"
     type: "delineator"
-    position: [0.0, 0.0, 96.0]
+    position: [9.3, 0.0, 96.0]
     rotationY: 3.14159
 
   - id: "stop_marunouchi_entry"
@@ -311,7 +311,7 @@ signs:
 
   - id: "no_entry_plaza"
     type: "no_entry"
-    position: [-9.2, 0.0, 14.0]
+    position: [-9.5, 0.0, 21.0]
     rotationY: 0.0
 
   - id: "direction_mandatory_hibiya"
@@ -348,45 +348,78 @@ signs:
     type: "overhead_guide"
     position: [-750.0, 0.0, 35.0]
     rotationY: 3.14159
+    supportType: "portal"
+    spanWidth: 26.6
     label: "恵比寿 渋谷ストリーム"
     subLabel: "Ebisu / Shibuya Stream"
     arrowDirections: ["直進", "左折"]
 
   - id: "intersection_name_shibuya_stream"
     type: "intersection_name"
-    position: [-737.2, 0.0, 38.0]
+    position: [-736.2, 0.0, 38.0]
     rotationY: 3.14159
     label: "渋谷ストリーム前"
     subLabel: "Shibuya Stream"
 
   - id: "lane_direction_meiji_dori"
     type: "lane_direction"
-    position: [-737.2, 0.0, 18.0]
+    position: [-736.2, 0.0, 18.0]
     rotationY: 3.14159
     arrowDirections: ["直進・左折", "直進", "右折"]
 
   - id: "street_name_meiji_dori"
     type: "street_name"
-    position: [-737.2, 0.0, 58.0]
+    position: [-736.2, 0.0, 58.0]
     rotationY: 3.14159
     label: "明治通り"
     subLabel: "Meiji-dori Ave."
 
   - id: "speed_limit_meiji_dori"
     type: "speed_limit"
-    position: [-737.2, 0.0, 48.0]
+    position: [-736.2, 0.0, 48.0]
     rotationY: 3.14159
     speedLimit: 50
     auxiliaryText: "終日"
 
   - id: "overhead_guide_shibuya_246_shutoko"
     type: "overhead_guide"
-    position: [-744.5, 0.0, 62.0]
-    rotationY: 0.0
-    spanWidth: 22.0
+    position: [-750.0, 0.0, 62.0]
+    rotationY: 3.14159
+    supportType: "portal"
+    spanWidth: 26.6
     label: "原宿 首都高3号・国道246号"
     subLabel: "Harajuku / Shutoko Rte 3 / Rte 246"
     arrowDirections: ["左折", "直進", "右折"]
+
+  - id: "overhead_guide_shibuya_miyamasu"
+    type: "overhead_guide"
+    position: [-620.0, 0.0, 253.4]
+    rotationY: 1.5708
+    supportType: "cantilever"
+    spanWidth: 19.2
+    label: "青山 赤坂"
+    subLabel: "Aoyama / Akasaka [246]"
+    arrowDirections: ["直進", "右折"]
+
+  - id: "overhead_guide_shibuya_dogenzaka"
+    type: "overhead_guide"
+    position: [-926.0, 0.0, 216.0]
+    rotationY: 1.25
+    supportType: "cantilever"
+    spanWidth: 16.0
+    label: "三軒茶屋 世田谷"
+    subLabel: "Sangenjaya / Setagaya [246]"
+    arrowDirections: ["直進", "左折"]
+
+  - id: "overhead_guide_shibuya_meiji_north"
+    type: "overhead_guide"
+    position: [-773.5, 0.0, 295.0]
+    rotationY: 3.1416
+    supportType: "cantilever"
+    spanWidth: 16.0
+    label: "原宿 新宿"
+    subLabel: "Harajuku / Shinjuku [305]"
+    arrowDirections: ["直進"]
 
 weatherPresets:
   - id: "sunset"

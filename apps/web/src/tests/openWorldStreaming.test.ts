@@ -884,4 +884,49 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
       expect(tileMesh.userData.proxyMaterial).toBeDefined();
     }
   });
+
+  it("全建物グループ（拡張ビル群 exp-bldg-* を含む）が high/medium/low 各 LOD 距離で上部パーツだけ宙に浮かず接地状態を保つことを保証する", async () => {
+    const { mockWorld, mockRapier } = createMockPhysicsContext();
+    const scene = new THREE.Scene();
+    const cityMap = new TokyoStationMap(scene, mockWorld, mockRapier, { deferGlbLoads: true });
+
+    for (const def of WORLD_CHUNK_DEFINITIONS) {
+      await cityMap.activateWorldChunk(def.id);
+    }
+
+    expect(cityMap.plateauBuildingGroups.length).toBeGreaterThan(20);
+
+    const getLocalMinY = (mesh: THREE.Mesh): number => {
+      if (!mesh.geometry.boundingBox) {
+        mesh.geometry.computeBoundingBox();
+      }
+      const box = mesh.geometry.boundingBox;
+      return box ? box.min.y * mesh.scale.y + mesh.position.y : 0;
+    };
+
+    const probeOffsets = [0, 175, 290];
+    for (const group of cityMap.plateauBuildingGroups) {
+      const meshes: THREE.Mesh[] = [];
+      group.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          meshes.push(child as THREE.Mesh);
+        }
+      });
+      if (meshes.length === 0) continue;
+      const lowestMeshY = Math.min(...meshes.map(getLocalMinY));
+
+      for (const dx of probeOffsets) {
+        cityMap.updateDistanceCulling(
+          new THREE.Vector3(group.position.x + dx, 0, group.position.z),
+          600,
+          true,
+        );
+        if (!group.visible) continue;
+        const visibleMeshes = meshes.filter((m) => m.visible);
+        expect(visibleMeshes.length).toBeGreaterThan(0);
+        const visibleLowestY = Math.min(...visibleMeshes.map(getLocalMinY));
+        expect(visibleLowestY - lowestMeshY).toBeLessThanOrEqual(0.5);
+      }
+    }
+  });
 });

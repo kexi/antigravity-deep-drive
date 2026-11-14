@@ -1902,12 +1902,85 @@ if (signCamDist < 42.0) {
   }
 
   /**
-   * 13. 安全施設: 「視線誘導標（デリネーター）＆ 障害物表示ゼブラ標示板」
-   * How: 中央分離帯端や交差点コーナーに設置される黄黒ゼブラ反射板とオレンジ反射器。
+   * 12b. 安全施設: 「中央分離帯用 自発光・再帰反射フレックスガイドポスト（360°両面視認型）」
+   * How: 道路の中央分離帯天端に一定間隔で設置する細身のオレンジ支柱＋全周2段白反射帯＋両面円形アンバー反射頭。
+   *      1面の広い裏板（signBackMat）を持たないため、対向車線側から見ても不自然な「宙浮き看板」にならない。
+   */
+  public createMedianGuidePost(x: number, z: number): THREE.Group {
+    const group = new THREE.Group();
+    group.name = "MedianGuidePost";
+    group.position.set(x, 0, z);
+
+    // ベース台座（縁石天端との隙間を防ぐため下端を -0.012m までわずかに埋め込む）
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,
+      roughness: 0.72,
+      metalness: 0.15,
+    });
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.115, 0.055, 12), baseMat);
+    base.name = "MedianGuidePostBase";
+    base.position.y = 0.015;
+    group.add(base);
+
+    // 柔軟樹脂製オレンジ支柱（高さ 0.78m）
+    const postMat = new THREE.MeshStandardMaterial({
+      color: 0xf97316,
+      emissive: 0x9a3412,
+      emissiveIntensity: 0.25,
+      roughness: 0.34,
+      metalness: 0.08,
+    });
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.044, 0.78, 12), postMat);
+    post.name = "MedianGuidePostBody";
+    post.position.y = 0.42;
+    group.add(post);
+
+    // 全周360度 高輝度ホワイト再帰反射バンド（上下2段）
+    const bandMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xe2e8f0,
+      emissiveIntensity: 0.52,
+      roughness: 0.16,
+      metalness: 0.28,
+    });
+    applyRoadProp3DTexture(bandMat, "retroreflector");
+    for (const bandY of [0.56, 0.71]) {
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.0415, 0.0415, 0.1, 14), bandMat);
+      band.name = "MedianGuidePostRetroBand";
+      band.position.y = bandY;
+      group.add(band);
+    }
+
+    // 頂部 両面円形アンバー再帰反射レンズ＋ダークハウジング
+    const housingGeo = new THREE.CylinderGeometry(0.058, 0.058, 0.032, 16);
+    housingGeo.rotateX(Math.PI / 2);
+    const housing = new THREE.Mesh(housingGeo, baseMat);
+    housing.position.y = 0.835;
+    group.add(housing);
+
+    const lensGeo = new THREE.CylinderGeometry(0.048, 0.048, 0.04, 16);
+    lensGeo.rotateX(Math.PI / 2);
+    const lens = new THREE.Mesh(lensGeo, this.delineatorRetroMat);
+    lens.name = "MedianGuidePostTopLens";
+    lens.position.y = 0.835;
+    group.add(lens);
+
+    return group;
+  }
+
+  /**
+   * 13. 安全施設: 「視線誘導標（デリネーター）＆ 両面障害物表示ゼブラ標示板」
+   * How: 中央分離帯端や交差点コーナーに設置される両面ゼブラ反射板と両面オレンジ反射器。
    */
   public createDelineatorPost(x: number, z: number): THREE.Group {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
+
+    // アンカー台座
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.095, 0.045, 10), this.poleMat);
+    foot.name = "DelineatorFoot";
+    foot.position.y = 0.0225;
+    group.add(foot);
 
     // 支柱（高さ1.22m）
     const poleGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.22, 10);
@@ -1916,7 +1989,7 @@ if (signCamDist < 42.0) {
     pole.position.y = 0.61;
     group.add(pole);
 
-    // 黄黒ゼブラ警戒板（幅0.26m, 高さ0.75m）＋ 裏板
+    // 黄黒ゼブラ警戒板（幅0.26m, 高さ0.75m）＋ 裏表両面反射プレート
     const zebraWidth = 0.26;
     const zebraHeight = 0.75;
     const zebraBack = new THREE.Mesh(
@@ -1927,6 +2000,7 @@ if (signCamDist < 42.0) {
     group.add(zebraBack);
 
     const hasDocument = typeof document !== "undefined";
+    let zebraMat: THREE.MeshStandardMaterial;
     if (hasDocument) {
       const canvas = document.createElement("canvas");
       canvas.width = 128;
@@ -1951,7 +2025,7 @@ if (signCamDist < 42.0) {
 
       const tex = new THREE.CanvasTexture(canvas);
       tex.colorSpace = THREE.SRGBColorSpace;
-      const mat = new THREE.MeshStandardMaterial({
+      zebraMat = new THREE.MeshStandardMaterial({
         map: tex,
         emissive: 0xd97706,
         emissiveMap: tex,
@@ -1959,38 +2033,41 @@ if (signCamDist < 42.0) {
         roughness: 0.16,
         metalness: 0.32,
       });
-      applyRoadProp3DTexture(mat, "retroreflector");
-      const front = new THREE.Mesh(new THREE.PlaneGeometry(zebraWidth, zebraHeight), mat);
-      front.name = "DelineatorZebraRetroPlate";
-      front.position.set(0, 0.68, 0.05);
-      group.add(front);
+      applyRoadProp3DTexture(zebraMat, "retroreflector");
     } else {
-      const fallbackMat = new THREE.MeshStandardMaterial({
+      zebraMat = new THREE.MeshStandardMaterial({
         color: 0xfacc15,
         emissive: 0xd97706,
         emissiveIntensity: 0.45,
         roughness: 0.16,
         metalness: 0.32,
       });
-      applyRoadProp3DTexture(fallbackMat, "retroreflector");
-      const front = new THREE.Mesh(new THREE.PlaneGeometry(zebraWidth, zebraHeight), fallbackMat);
-      front.name = "DelineatorZebraRetroPlate";
-      front.position.set(0, 0.68, 0.05);
-      group.add(front);
+      applyRoadProp3DTexture(zebraMat, "retroreflector");
     }
 
-    // 上部オレンジ再帰反射デリネーターレンズ（支柱上端にブラケット一体で固定）
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(zebraWidth, zebraHeight), zebraMat);
+    front.name = "DelineatorZebraRetroPlate";
+    front.position.set(0, 0.68, 0.049);
+    group.add(front);
+
+    const backPlate = new THREE.Mesh(new THREE.PlaneGeometry(zebraWidth, zebraHeight), zebraMat);
+    backPlate.name = "DelineatorZebraRetroPlateBack";
+    backPlate.position.set(0, 0.68, 0.031);
+    backPlate.rotation.y = Math.PI;
+    group.add(backPlate);
+
+    // 上部両面オレンジ再帰反射デリネーターレンズ（支柱上端にブラケット一体で固定）
     const reflectorHousingGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.036, 16);
     reflectorHousingGeo.rotateX(Math.PI / 2);
     const reflectorHousing = new THREE.Mesh(reflectorHousingGeo, this.signBackMat);
     reflectorHousing.position.set(0, 1.18, 0.02);
     group.add(reflectorHousing);
 
-    const reflectorGeo = new THREE.CylinderGeometry(0.088, 0.088, 0.042, 16);
+    const reflectorGeo = new THREE.CylinderGeometry(0.088, 0.088, 0.044, 16);
     reflectorGeo.rotateX(Math.PI / 2);
     const reflector = new THREE.Mesh(reflectorGeo, this.delineatorRetroMat);
     reflector.name = "DelineatorTopRetroLens";
-    reflector.position.set(0, 1.18, 0.024);
+    reflector.position.set(0, 1.18, 0.02);
     group.add(reflector);
 
     return group;

@@ -2381,6 +2381,58 @@ export class CarModel {
 
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+
+    if (isShibuyaZone) {
+      const shibuyaConnectedBranches: ReadonlyArray<ReadonlyArray<{ x: number; z: number }>> = [
+        [
+          { x: -750.0, z: 248.0 },
+          { x: -815.0, z: 249.0 },
+          { x: -835.0, z: 268.0 },
+          { x: -850.0, z: 292.0 },
+          { x: -875.0, z: 320.0 },
+          { x: -902.0, z: 350.0 },
+          { x: -922.0, z: 356.0 },
+          { x: -940.0, z: 345.0 },
+          { x: -905.0, z: 325.0 },
+          { x: -869.0, z: 282.0 },
+          { x: -838.0, z: 252.0 },
+          { x: -872.0, z: 235.0 },
+          { x: -925.0, z: 215.0 },
+          { x: -975.0, z: 188.0 },
+          { x: -1030.0, z: 162.0 },
+          { x: -1080.0, z: 140.0 },
+          { x: -940.0, z: 115.0 },
+          { x: -855.0, z: 95.0 },
+          { x: -750.0, z: 95.0 },
+        ],
+        [
+          { x: -875.0, z: 320.0 },
+          { x: -856.0, z: 342.0 },
+          { x: -822.0, z: 345.0 },
+          { x: -802.0, z: 348.0 },
+          { x: -798.0, z: 358.0 },
+          { x: -756.0, z: 354.0 },
+        ],
+        [
+          { x: -798.0, z: 358.0 },
+          { x: -791.0, z: 270.0 },
+          { x: -815.0, z: 249.0 },
+        ],
+      ];
+
+      for (const branch of shibuyaConnectedBranches) {
+        traceRoundedRoute(branch, 10.0);
+        ctx.strokeStyle = "rgba(8, 145, 178, 0.72)";
+        ctx.lineWidth = 5.6;
+        ctx.stroke();
+
+        traceRoundedRoute(branch, 10.0);
+        ctx.strokeStyle = "#22d3ee";
+        ctx.lineWidth = 2.6;
+        ctx.stroke();
+      }
+    }
+
     traceRoundedRoute(routeWaypoints, 16.0);
     ctx.strokeStyle = "rgba(3, 105, 161, 0.92)";
     ctx.lineWidth = 8.5;

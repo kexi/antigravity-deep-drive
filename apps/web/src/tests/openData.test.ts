@@ -491,7 +491,7 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
       );
     }
     expect(hikarieLen).toBeGreaterThanOrEqual(100);
-    expect(hikarieNav!.points.some((p) => p.x === -730 && p.z === 155)).toBe(true);
+    expect(hikarieNav!.points.some((p) => p.x === -727.5 && p.z === 155)).toBe(true);
 
     // 10. センター街・ヒカリエ前・金王坂下の新設交差点が存在すること
     expect(intersections.some((i) => i.id === "nav-int-shibuya-center-gai")).toBe(true);

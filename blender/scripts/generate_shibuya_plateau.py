@@ -147,11 +147,395 @@ def point_to_polyline_distance(px: float, pz: float, points: list[tuple[float, f
 
 
 # 渋谷周辺 4倍拡大エリアの全実在道路中心線ポリラインとクリアランス半径（車道＋歩道）
+def _eval_catmull_rom_axis(
+    x0: float,
+    x1: float,
+    x2: float,
+    x3: float,
+    dt0: float,
+    dt1: float,
+    dt2: float,
+    w: float,
+) -> float:
+    t1 = ((x1 - x0) / dt0 - (x2 - x0) / (dt0 + dt1) + (x2 - x1) / dt1) * dt1
+    t2 = ((x2 - x1) / dt1 - (x3 - x1) / (dt1 + dt2) + (x3 - x2) / dt2) * dt1
+    c0 = x1
+    c1 = t1
+    c2 = -3.0 * x1 + 3.0 * x2 - 2.0 * t1 - t2
+    c3 = 2.0 * x1 - 2.0 * x2 + t1 + t2
+    return c0 + w * (c1 + w * (c2 + w * c3))
+
+
+def eval_centripetal_catmull_rom_2d(
+    pts: list[tuple[float, float]], steps_per_meter: float = 0.75
+) -> list[tuple[float, float]]:
+    """Three.js CatmullRomCurve3(..., false, 'centripetal', 0.5) 相当の2D曲線サンプリング"""
+    n = len(pts)
+    if n <= 1:
+        return list(pts)
+
+    total_len = sum(
+        math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]) for i in range(n - 1)
+    )
+    sample_count = max(16, math.ceil(total_len * steps_per_meter) + 1)
+    out: list[tuple[float, float]] = []
+
+    def _dt(a: tuple[float, float], b: tuple[float, float]) -> float:
+        d2 = (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+        return max(1e-4, d2**0.25)
+
+    for s in range(sample_count + 1):
+        t = s / sample_count
+        p = (n - 1) * t
+        ip = math.floor(p)
+        w = p - ip
+        if w == 0.0 and ip == n - 1:
+            ip = n - 2
+            w = 1.0
+        ip = min(max(ip, 0), n - 2)
+
+        p0 = pts[ip - 1] if ip > 0 else (2.0 * pts[0][0] - pts[1][0], 2.0 * pts[0][1] - pts[1][1])
+        p1 = pts[ip]
+        p2 = pts[ip + 1]
+        p3 = (
+            pts[ip + 2]
+            if ip + 2 < n
+            else (2.0 * pts[-1][0] - pts[-2][0], 2.0 * pts[-1][1] - pts[-2][1])
+        )
+
+        dt0, dt1, dt2 = _dt(p0, p1), _dt(p1, p2), _dt(p2, p3)
+        out.append(
+            (
+                _eval_catmull_rom_axis(p0[0], p1[0], p2[0], p3[0], dt0, dt1, dt2, w),
+                _eval_catmull_rom_axis(p0[1], p1[1], p2[1], p3[1], dt0, dt1, dt2, w),
+            )
+        )
+    return out
+
+
+def dist_point_to_triangle_2d_sq(
+    px: float,
+    pz: float,
+    ax: float,
+    az: float,
+    bx: float,
+    bz: float,
+    cx: float,
+    cz: float,
+) -> float:
+    """2D XZ平面における点 (px, pz) から三角形 (a, b, c) への最短距離の二乗を返す"""
+    abx, abz = bx - ax, bz - az
+    acx, acz = cx - ax, cz - az
+    apx, apz = px - ax, pz - az
+
+    d1 = abx * apx + abz * apz
+    d2 = acx * apx + acz * apz
+    if d1 <= 0.0 and d2 <= 0.0:
+        return apx * apx + apz * apz
+
+    bpx, bpz = px - bx, pz - bz
+    d3 = abx * bpx + abz * bpz
+    d4 = acx * bpx + acz * bpz
+    if d3 >= 0.0 and d4 <= d3:
+        return bpx * bpx + bpz * bpz
+
+    vc = d1 * d4 - d3 * d2
+    if vc <= 0.0 and d1 >= 0.0 and d3 <= 0.0:
+        v = d1 / max(1e-12, d1 - d3)
+        rx = ax + v * abx - px
+        rz = az + v * abz - pz
+        return rx * rx + rz * rz
+
+    cpx, cpz = px - cx, pz - cz
+    d5 = abx * cpx + abz * cpz
+    d6 = acx * cpx + acz * cpz
+    if d6 >= 0.0 and d5 <= d6:
+        return cpx * cpx + cpz * cpz
+
+    vb = d5 * d2 - d1 * d6
+    if vb <= 0.0 and d2 >= 0.0 and d6 <= 0.0:
+        w = d2 / max(1e-12, d2 - d6)
+        rx = ax + w * acx - px
+        rz = az + w * acz - pz
+        return rx * rx + rz * rz
+
+    va = d3 * d6 - d5 * d4
+    if va <= 0.0 and (d4 - d3) >= 0.0 and (d5 - d6) >= 0.0:
+        w = (d4 - d3) / max(1e-12, (d4 - d3) + (d5 - d6))
+        rx = bx + w * (cx - bx) - px
+        rz = bz + w * (cz - bz) - pz
+        return rx * rx + rz * rz
+
+    denom = 1.0 / max(1e-12, va + vb + vc)
+    v = vb * denom
+    w = vc * denom
+    rx = ax + abx * v + acx * w - px
+    rz = az + abz * v + acz * w - pz
+    return rx * rx + rz * rz
+
+
+# gsiPlateauLoader.ts の getOpenDataCurvedRoadCorridors() と1対1対応する実車道中心線＆クリアランス半径 (halfW + 1.8m)
+EXACT_CURVED_ROAD_CLEARANCES = [
+    {
+        "name": "nav-road-uchibori-dori",
+        "radius": 10.8,
+        "points": [(-253.0, 365.0), (-165.0, 378.0), (0.0, 390.0), (165.0, 378.0), (255.0, 365.0)],
+    },
+    {
+        "name": "nav-road-meiji-dori",
+        "radius": 12.3,
+        "points": [
+            (-750.0, -210.0),
+            (-750.0, -140.0),
+            (-750.0, -68.0),
+            (-750.0, 0.0),
+            (-750.0, 60.0),
+            (-750.0, 95.0),
+            (-750.0, 150.0),
+            (-750.0, 206.0),
+            (-750.0, 248.0),
+        ],
+    },
+    {
+        "name": "nav-road-meiji-dori-ebisu-curve",
+        "radius": 12.3,
+        "points": [
+            (-750.0, -210.0),
+            (-756.0, -280.0),
+            (-768.0, -380.0),
+            (-780.0, -520.0),
+            (-775.0, -680.0),
+            (-762.0, -860.0),
+            (-750.0, -1050.0),
+        ],
+    },
+    {
+        "name": "nav-road-meiji-dori-harajuku-curve",
+        "radius": 12.3,
+        "points": [
+            (-750.0, 248.0),
+            (-753.0, 310.0),
+            (-762.0, 420.0),
+            (-774.0, 580.0),
+            (-780.0, 750.0),
+            (-772.0, 920.0),
+            (-760.0, 1050.0),
+        ],
+    },
+    {
+        "name": "nav-road-yamate-dori",
+        "radius": 13.8,
+        "points": [
+            (-1365.0, -850.0),
+            (-1355.0, -550.0),
+            (-1346.0, -200.0),
+            (-1348.0, 0.0),
+            (-1350.0, 150.0),
+            (-1358.0, 380.0),
+            (-1368.0, 620.0),
+            (-1362.0, 850.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-scramble",
+        "radius": 12.8,
+        "points": [(-835.0, 252.0), (-815.0, 249.0), (-775.0, 246.0), (-732.0, 248.0)],
+    },
+    {
+        "name": "nav-road-route246",
+        "radius": 10.8,
+        "points": [
+            (-738.0, 102.0),
+            (-690.0, 106.0),
+            (-632.0, 108.0),
+            (-545.0, 108.0),
+            (-450.0, 104.0),
+            (-355.0, 98.0),
+            (-283.0, 95.0),
+        ],
+    },
+    {
+        "name": "nav-road-route246-underpass-link",
+        "radius": 11.8,
+        "points": [(-855.0, 95.0), (-795.0, 98.5), (-738.0, 102.0)],
+    },
+    {
+        "name": "nav-road-shibuya-dogenzaka",
+        "radius": 9.8,
+        "points": [
+            (-837.0, 248.0),
+            (-872.0, 235.0),
+            (-925.0, 215.0),
+            (-975.0, 188.0),
+            (-1030.0, 162.0),
+            (-1080.0, 140.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-miyamasuzaka",
+        "radius": 10.3,
+        "points": [
+            (-732.0, 248.0),
+            (-685.0, 252.0),
+            (-635.0, 254.0),
+            (-560.0, 250.0),
+            (-480.0, 242.0),
+            (-400.0, 232.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-bunkamura-dori",
+        "radius": 8.8,
+        "points": [
+            (-838.0, 252.0),
+            (-869.0, 282.0),
+            (-905.0, 325.0),
+            (-940.0, 345.0),
+            (-1000.0, 360.0),
+            (-1060.0, 370.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-koen-dori",
+        "radius": 9.3,
+        "points": [(-791.0, 270.0), (-798.0, 360.0), (-805.0, 440.0), (-810.0, 520.0)],
+    },
+    {
+        "name": "nav-road-shibuya-inokashira-organ",
+        "radius": 7.3,
+        "points": [
+            (-875.0, 320.0),
+            (-856.0, 342.0),
+            (-822.0, 345.0),
+            (-802.0, 348.0),
+            (-798.0, 358.0),
+            (-756.0, 354.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-tamagawa-west",
+        "radius": 11.8,
+        "points": [
+            (-855.0, 95.0),
+            (-940.0, 115.0),
+            (-1010.0, 128.0),
+            (-1080.0, 140.0),
+            (-1170.0, 146.0),
+            (-1250.0, 150.0),
+            (-1350.0, 150.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-shinsen-nakadori",
+        "radius": 6.6,
+        "points": [
+            (-1080.0, 140.0),
+            (-1100.0, 185.0),
+            (-1110.0, 230.0),
+            (-1100.0, 300.0),
+            (-1060.0, 370.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-sakurazaka-loop",
+        "radius": 6.8,
+        "points": [
+            (-855.0, 95.0),
+            (-855.0, 40.0),
+            (-890.0, 10.0),
+            (-940.0, -30.0),
+            (-950.0, -60.0),
+            (-980.0, 0.0),
+            (-940.0, 115.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-jinnan-cross",
+        "radius": 7.1,
+        "points": [
+            (-750.0, 430.0),
+            (-772.0, 434.0),
+            (-798.0, 440.0),
+            (-825.0, 446.0),
+            (-860.0, 450.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-center-gai",
+        "radius": 6.8,
+        "points": [
+            (-835.0, 268.0),
+            (-850.0, 292.0),
+            (-875.0, 320.0),
+            (-902.0, 350.0),
+            (-922.0, 356.0),
+            (-940.0, 345.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-hikarie-access",
+        "radius": 6.8,
+        "points": [
+            (-729.0, 248.0),
+            (-729.0, 205.0),
+            (-727.5, 155.0),
+            (-727.5, 120.0),
+            (-727.5, 102.0),
+        ],
+    },
+    # 首都高速3号渋谷線高架橋コリドー（R246上空 X[-1252..-572], Z[83..107] と建物躯体の貫通を根絶）
+    {
+        "name": "shutoko-route3-viaduct",
+        "radius": 12.2,
+        "points": [(-1252.0, 95.0), (-1050.0, 95.0), (-865.0, 95.0), (-572.0, 95.0)],
+    },
+]
+
+EXACT_INTERSECTION_CLEARANCES = [
+    ((-815.0, 248.0), 23.0),
+    ((-750.0, 248.0), 18.0),
+    ((-1080.0, 140.0), 19.0),
+    ((-1250.0, 150.0), 18.0),
+    ((-940.0, 345.0), 16.0),
+    ((-1060.0, 370.0), 15.0),
+    ((-798.0, 360.0), 16.0),
+    ((-805.0, 440.0), 15.0),
+    ((-810.0, 520.0), 16.0),
+    ((-875.0, 320.0), 14.0),
+    ((-950.0, -60.0), 14.0),
+    ((-1350.0, 150.0), 17.0),
+    ((-855.0, 95.0), 22.0),
+    ((-940.0, 115.0), 18.0),
+    ((-750.0, 102.0), 18.0),
+    ((-750.0, -210.0), 14.0),
+]
+
+# shibuya_stream.glb の高精度カスタムランドマーク建物フットプリント（重複する生PLATEAU躯体を除外）
+CUSTOM_LANDMARK_EXCLUSIONS = [
+    ("ShibuyaCerulean", -934.0, -868.0, -76.0, -14.0),
+    ("ShibuyaFukuras", -840.0, -773.0, 21.0, 71.0),
+    ("ShibuyaHikarie", -725.0, -667.0, 117.0, 174.0),
+    ("ShibuyaMagnet", -781.0, -769.0, 280.0, 309.0),
+    ("ShibuyaMarkCity", -918.0, -844.0, 132.0, 190.0),
+    ("ShibuyaMiyashitaPark", -718.0, -672.0, 283.0, 357.0),
+    ("ShibuyaParco", -858.0, -812.0, 362.0, 410.0),
+    ("ShibuyaQfront109", -900.0, -805.0, 252.0, 299.0),
+    ("ShibuyaSakuraStage", -838.0, -772.0, -54.0, 6.0),
+    ("ShibuyaScrambleSquare", -835.0, -781.0, 117.0, 173.0),
+    ("ShibuyaStream", -731.0, -673.0, -44.0, 14.0),
+    ("ShibuyaToeiBic", -738.0, -709.0, 260.0, 289.0),
+    ("CenterGaiCommercial_North_1", -839.0, -824.0, 287.0, 302.0),
+    ("CenterGaiCommercial_North_2", -859.0, -842.0, 313.0, 330.0),
+    ("CenterGaiCommercial_North_3", -873.0, -859.0, 355.0, 369.0),
+    ("ExpBldgShinsenCrossing", -1300.0, -1256.0, 169.0, 207.0),
+]
+
+
 ROAD_CORRIDOR_POLYLINES = [
     # 1. 道玄坂本線（109前〜道玄坂上〜神泉接続）
     {
         "name": "Dogenzaka",
-        "radius": 12.0,
+        "radius": 12.5,
         "points": [
             (-830.0, 248.0),
             (-872.0, 235.0),
@@ -164,10 +548,10 @@ ROAD_CORRIDOR_POLYLINES = [
     # 2. 文化村通り（109前〜東急本店〜松濤二丁目）
     {
         "name": "Bunkamura",
-        "radius": 11.0,
+        "radius": 11.5,
         "points": [
-            (-828.0, 258.0),
-            (-862.0, 290.0),
+            (-838.0, 252.0),
+            (-869.0, 282.0),
             (-905.0, 325.0),
             (-940.0, 345.0),
             (-1000.0, 360.0),
@@ -199,15 +583,17 @@ ROAD_CORRIDOR_POLYLINES = [
             (-810.0, 520.0),
         ],
     },
-    # 5. 井の頭通り・オルガン坂（スクランブル北西〜宇田川町〜PARCO前）
+    # 5. 井の頭通り・オルガン坂（スクランブル北西〜宇田川町〜PARCO前〜明治通り）
     {
         "name": "Inokashira_Organ",
         "radius": 9.0,
         "points": [
-            (-840.0, 265.0),
             (-875.0, 320.0),
-            (-850.0, 348.0),
-            (-798.0, 360.0),
+            (-856.0, 342.0),
+            (-822.0, 345.0),
+            (-802.0, 348.0),
+            (-798.0, 358.0),
+            (-756.0, 354.0),
         ],
     },
     # 6. 桜丘町・さくら坂（サクラステージ〜インフォスタワー〜玉川通り周回路）
@@ -271,7 +657,7 @@ ROAD_CORRIDOR_POLYLINES = [
             (-732.0, 248.0),
         ],
     },
-    # 11. 渋谷センター街・バスケットボール通り（スクランブル北西〜宇田川町交番・井の頭通り合流）
+    # 11. 渋谷センター街・バスケットボール通り（スクランブル北西〜宇田川町交番・井の頭通り合流〜東急本店前）
     {
         "name": "Center_Gai",
         "radius": 7.0,
@@ -279,8 +665,9 @@ ROAD_CORRIDOR_POLYLINES = [
             (-835.0, 268.0),
             (-850.0, 292.0),
             (-875.0, 320.0),
-            (-905.0, 350.0),
-            (-935.0, 375.0),
+            (-902.0, 350.0),
+            (-922.0, 356.0),
+            (-940.0, 345.0),
         ],
     },
     # 12. 渋谷ヒカリエ連絡路・金王坂（宮益坂下〜ヒカリエ前〜金王坂・国道246号合流）
@@ -288,11 +675,11 @@ ROAD_CORRIDOR_POLYLINES = [
         "name": "Hikarie_Access",
         "radius": 8.5,
         "points": [
-            (-732.0, 248.0),
-            (-730.0, 205.0),
-            (-730.0, 155.0),
-            (-730.0, 120.0),
-            (-730.0, 95.0),
+            (-729.0, 248.0),
+            (-729.0, 205.0),
+            (-727.5, 155.0),
+            (-727.5, 120.0),
+            (-727.5, 102.0),
         ],
     },
 ]
@@ -367,6 +754,45 @@ def create_pbr_material(
             if emissive_strength > 0.0 and "Emission Color" in bsdf.inputs:
                 mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Emission Color"])
     return mat
+
+
+def _uf_find(parent: list[int], x: int) -> int:
+    while parent[x] != x:
+        parent[x] = parent[parent[x]]
+        x = parent[x]
+    return x
+
+
+def _partition_connected_shells(polys: list, mesh_verts) -> list[list]:
+    """glTF の法線分割頂点も同一シェルとして連結できるよう量子化座標で Union-Find 分割する"""
+    poly_vgroups: dict[int, int] = {}
+    qkey_to_rep: dict[tuple[int, int, int], int] = {}
+    parent: list[int] = []
+
+    for p in polys:
+        first_rep = -1
+        for vi in p.vertices:
+            co = mesh_verts[vi].co
+            qkey = (round(co.x * 20.0), round(co.y * 20.0), round(co.z * 20.0))
+            rep = qkey_to_rep.get(qkey)
+            if rep is None:
+                rep = len(parent)
+                parent.append(rep)
+                qkey_to_rep[qkey] = rep
+            if first_rep < 0:
+                first_rep = rep
+            else:
+                ra = _uf_find(parent, first_rep)
+                rb = _uf_find(parent, rep)
+                if ra != rb:
+                    parent[rb] = ra
+        poly_vgroups[p.index] = first_rep
+
+    shell_polys = collections.defaultdict(list)
+    for p in polys:
+        root = _uf_find(parent, poly_vgroups[p.index])
+        shell_polys[root].append(p)
+    return list(shell_polys.values())
 
 
 def setup_materials() -> list[bpy.types.Material]:
@@ -549,9 +975,12 @@ def generate_shibuya_plateau_city() -> str:
             main_bid = batch_vals[poly.vertices[0]] if poly.vertices else 0
             bldg_polys[main_bid].append(poly)
 
-        # 3. 建物ごとのクリアランス・ランドマーク判定および最低標高の算出
-        valid_bldg_bids = set()
-        bldg_info = {}  # bid: (z_base, bldg_h, b_cx, b_cy)
+        # 3. 建物バッチ内を連結シェル単位に分解し、道路クリアランス・接地・宙浮き除外を実施
+        valid_poly_comp: dict[int, int] = {}
+        comp_info: dict[int, tuple[float, float, float, float]] = {}  # cid: (z_base, h, cx, cy)
+        vert_z_offset: dict[int, float] = {}
+        next_comp_id = 1
+        total_floating_dropped = 0
 
         for bid, polys in bldg_polys.items():
             gml_id = gml_ids[bid] if bid < len(gml_ids) else ""
@@ -562,85 +991,302 @@ def generate_shibuya_plateau_city() -> str:
                 total_landmarks_skipped += len(polys)
                 continue
 
-            all_coords = [obj.data.vertices[vi].co for p in polys for vi in p.vertices]
-            if not all_coords:
+            shell_list = _partition_connected_shells(polys, obj.data.vertices)
+            shell_records = []
+            for sp in shell_list:
+                vert_indices = {vi for p in sp for vi in p.vertices}
+                coords = [obj.data.vertices[vi].co for vi in vert_indices]
+                if not coords:
+                    continue
+                c_min_x = min(c.x for c in coords)
+                c_max_x = max(c.x for c in coords)
+                c_min_y = min(c.y for c in coords)
+                c_max_y = max(c.y for c in coords)
+                c_min_z = min(c.z for c in coords)
+                c_max_z = max(c.z for c in coords)
+                c_cx = sum(c.x for c in coords) / len(coords)
+                c_cy = sum(c.y for c in coords) / len(coords)
+                c_cz = -c_cy
+                c_h = c_max_z - c_min_z
+
+                # 三角形2D一覧を構築し、カスタムランドマーク重複・道路コリドー・首都高3号線との干渉を厳密判定
+                # Why: 従来の重心判定や端点チェックでは明治通り(x=-750)やR246を跨ぐ幅70〜90mの大型基壇ブロックがすり抜けるため、
+                #      全構成三角形に対して実道路曲線(Catmull-Rom)および交差点・高架橋との2D最短距離を判定する。
+                c_world_min_z = -c_max_y
+                c_world_max_z = -c_min_y
+                shell_w = c_max_x - c_min_x
+                shell_d = c_world_max_z - c_world_min_z
+                shell_area_xz = max(1.0, shell_w * shell_d)
+                # Why skip narrow slivers & tiny low sheds:
+                # PLATEAU の細長い境界壁・低層物置シェル (幅 <3.5m、面積 <180m2 かつ 高さ <4.5m、
+                # または面積 <45m2 かつ 高さ <7.0m) が交差点脇やアーチ背後に孤立した小屋として残るのを防ぐ。
+                if (
+                    min(shell_w, shell_d) < 3.5
+                    or (shell_area_xz < 180.0 and c_h < 4.5)
+                    or (shell_area_xz < 45.0 and c_h < 7.0)
+                ):
+                    total_landmarks_skipped += len(sp)
+                    continue
+                in_custom_landmark = False
+                for _lm_name, lx0, lx1, lz0, lz1 in CUSTOM_LANDMARK_EXCLUSIONS:
+                    if lx0 <= c_cx <= lx1 and lz0 <= c_cz <= lz1:
+                        in_custom_landmark = True
+                        break
+                    ox = min(c_max_x, lx1) - max(c_min_x, lx0)
+                    oz = min(c_world_max_z, lz1) - max(c_world_min_z, lz0)
+                    if ox > 2.0 and oz > 2.0:
+                        lm_area = max(1.0, (lx1 - lx0) * (lz1 - lz0))
+                        if (ox * oz) >= 0.20 * min(shell_area_xz, lm_area):
+                            in_custom_landmark = True
+                            break
+
+                if in_custom_landmark:
+                    total_landmarks_skipped += len(sp)
+                    continue
+
+                if "_EXACT_ROAD_DISCS" not in globals():
+                    discs: list[tuple[float, float, float]] = []
+                    for corridor in EXACT_CURVED_ROAD_CLEARANCES:
+                        r = corridor["radius"]
+                        for sx, sz in eval_centripetal_catmull_rom_2d(corridor["points"]):
+                            discs.append((sx, sz, r))
+                    for (ix, iz), iradius in EXACT_INTERSECTION_CLEARANCES:
+                        discs.append((ix, iz, iradius))
+                    globals()["_EXACT_ROAD_DISCS"] = discs
+                road_discs: list[tuple[float, float, float]] = globals()["_EXACT_ROAD_DISCS"]
+
+                shell_tris_2d: list[tuple[float, float, float, float, float, float]] = []
+                for p in sp:
+                    pverts = [obj.data.vertices[vi].co for vi in p.vertices]
+                    for ki in range(1, len(pverts) - 1):
+                        v0, v1, v2 = pverts[0], pverts[ki], pverts[ki + 1]
+                        shell_tris_2d.append((v0.x, -v0.y, v1.x, -v1.y, v2.x, -v2.y))
+
+                max_disc_r = 24.0
+                cand_discs = [
+                    (rx, rz, rr)
+                    for (rx, rz, rr) in road_discs
+                    if (c_min_x - max_disc_r) <= rx <= (c_max_x + max_disc_r)
+                    and (c_world_min_z - max_disc_r) <= rz <= (c_world_max_z + max_disc_r)
+                ]
+
+                in_exact_road = False
+                if cand_discs and shell_tris_2d:
+                    for ax, az, bx, bz, cx, cz in shell_tris_2d:
+                        tmin_x = min(ax, bx, cx)
+                        tmax_x = max(ax, bx, cx)
+                        tmin_z = min(az, bz, cz)
+                        tmax_z = max(az, bz, cz)
+                        for rx, rz, rr in cand_discs:
+                            if (
+                                rx < tmin_x - rr
+                                or rx > tmax_x + rr
+                                or rz < tmin_z - rr
+                                or rz > tmax_z + rr
+                            ):
+                                continue
+                            if dist_point_to_triangle_2d_sq(rx, rz, ax, az, bx, bz, cx, cz) <= (
+                                rr * rr
+                            ):
+                                in_exact_road = True
+                                break
+                        if in_exact_road:
+                            break
+
+                in_intersection = any(
+                    math.hypot(c_cx - ix, c_cz - iz) <= iradius
+                    for (ix, iz), iradius in ROAD_INTERSECTION_CLEARANCES
+                )
+                in_corridor_center = any(
+                    point_to_polyline_distance(c_cx, c_cz, corridor["points"]) <= corridor["radius"]
+                    for corridor in ROAD_CORRIDOR_POLYLINES
+                )
+
+                if in_exact_road or in_intersection or in_corridor_center:
+                    total_road_clipped += len(sp)
+                    continue
+
+                shell_records.append(
+                    {
+                        "polys": sp,
+                        "vert_indices": vert_indices,
+                        "min_x": c_min_x,
+                        "max_x": c_max_x,
+                        "min_y": c_min_y,
+                        "max_y": c_max_y,
+                        "min_z": c_min_z,
+                        "max_z": c_max_z,
+                        "h": c_h,
+                        "cx": c_cx,
+                        "cy": c_cy,
+                    }
+                )
+
+            if not shell_records:
                 continue
-            b_cx = sum(c.x for c in all_coords) / len(all_coords)
-            b_cy = sum(c.y for c in all_coords) / len(all_coords)
-            b_cz = -b_cy
-            z_base = min(c.z for c in all_coords)
-            z_top = max(c.z for c in all_coords)
-            bldg_h = max(h, z_top - z_base)
 
-            # 車道コリドー＆交差点干渉除外（4倍拡大エリア全実在道路・交差点）
-            # A. 主要交差点円形クリアランス
-            if any(
-                math.hypot(b_cx - ix, b_cz - iz) <= iradius
-                for (ix, iz), iradius in ROAD_INTERSECTION_CLEARANCES
-            ):
-                total_road_clipped += len(polys)
-                continue
+            # 最低標高順にソートし、連結シェル単位で接地または下部躯体支持を判定
+            shell_records.sort(key=lambda s: s["min_z"])
+            bid_z_min = shell_records[0]["min_z"]
+            supported_shells = []
 
-            # B. 放射状曲線道路ポリラインクリアランス
-            if any(
-                point_to_polyline_distance(b_cx, b_cz, corridor["points"]) <= corridor["radius"]
-                for corridor in ROAD_CORRIDOR_POLYLINES
-            ):
-                total_road_clipped += len(polys)
-                continue
+            for rec in shell_records:
+                is_at_bid_base = rec["min_z"] <= bid_z_min + 0.5
+                supporting = None
+                if not is_at_bid_base:
+                    for g in reversed(supported_shells):
+                        overlap_w = min(g["max_x"], rec["max_x"]) - max(g["min_x"], rec["min_x"])
+                        overlap_d = min(g["max_y"], rec["max_y"]) - max(g["min_y"], rec["min_y"])
+                        xy_overlaps = overlap_w >= 1.5 and overlap_d >= 1.5
+                        z_rests_on_roof = abs(rec["min_z"] - g["max_z"]) <= 0.8
+                        if xy_overlaps and z_rests_on_roof:
+                            supporting = g
+                            break
 
-            # C. 明治通り南北幹線 (x = -750)
-            if -764.0 <= b_cx <= -736.0 and -350.0 <= b_cz <= 550.0:
-                total_road_clipped += len(polys)
-                continue
+                is_floating_slab = (
+                    not is_at_bid_base
+                    and supporting is None
+                    and rec["h"] < 5.0
+                    and (rec["min_z"] - bid_z_min) > 2.5
+                )
+                if is_floating_slab:
+                    total_floating_dropped += len(rec["polys"])
+                    continue
 
-            # D. 国道246号・青山通り東側区間 (z = 95)
-            if 82.0 <= b_cz <= 108.0 and -735.0 <= b_cx <= -260.0:
-                total_road_clipped += len(polys)
-                continue
+                # 傾斜地の独立棟・単体棟は自らの底面を z=0.0 へ完全接地
+                shift_z = supporting["shift_z"] if supporting is not None else rec["min_z"]
 
-            # E. 渋谷駅前東西連絡路 (z = 248)
-            if -795.0 <= b_cx <= -750.0 and 236.0 <= b_cz <= 260.0:
-                total_road_clipped += len(polys)
-                continue
+                rec["shift_z"] = shift_z
+                supported_shells.append(rec)
 
-            valid_bldg_bids.add(bid)
-            bldg_info[bid] = (z_base, bldg_h, b_cx, b_cy)
+                cid = next_comp_id
+                next_comp_id += 1
+                comp_h = max(h if len(shell_records) == 1 else rec["h"], rec["h"])
+                comp_info[cid] = (shift_z, comp_h, rec["cx"], rec["cy"])
+                for p in rec["polys"]:
+                    valid_poly_comp[p.index] = cid
+                for vi in rec["vert_indices"]:
+                    vert_z_offset[vi] = shift_z
 
-        # 4. 全建物を地盤面 z=0.0 にピタッと完全接地オフセット（高台・傾斜地の空中浮遊を根絶）
-        vert_z_offset = {}
-        for bid in valid_bldg_bids:
-            z_base = bldg_info[bid][0]
-            for p in bldg_polys[bid]:
-                for vi in p.vertices:
-                    vert_z_offset[vi] = z_base
-
+        # 4. 決定されたシェル別オフセットで全頂点を接地（高台・傾斜地の空中浮遊を根絶）
         for vi, v in enumerate(obj.data.vertices):
             if vi in vert_z_offset:
                 v.co.z = max(0.0, v.co.z - vert_z_offset[vi])
             else:
                 v.co.z = 0.0
         obj.data.update()
+        if total_floating_dropped > 0:
+            print(
+                f"[PLATEAU] {tile_name}: Dropped {total_floating_dropped} floating detached slab faces"
+            )
 
-        # 5. BMesh によるトポロジー維持・LOD2マテリアル・UV割り当て
+        # 5. BMesh による除外面先行削除・コンポーネント別トポロジー/外向き法線修復・LOD2マテリアル・UV割り当て
         bm = bmesh.new()
         bm.from_mesh(obj.data)
         bm.faces.ensure_lookup_table()
+        cid_layer = bm.faces.layers.int.new("cid")
+        for poly_idx, f in enumerate(bm.faces):
+            f[cid_layer] = valid_poly_comp.get(poly_idx, 0)
+
+        # 除外面・極小縮退面を先に削除してから法線修復する（未削除面との共有辺による法線反転を防止）
+        initial_bad_faces = [f for f in bm.faces if f[cid_layer] == 0 or f.calc_area() < 1e-4]
+        if initial_bad_faces:
+            bmesh.ops.delete(bm, geom=initial_bad_faces, context="FACES")
+        isolated_verts = [v for v in bm.verts if not v.link_faces]
+        if isolated_verts:
+            bmesh.ops.delete(bm, geom=isolated_verts, context="VERTS")
+        bm.faces.ensure_lookup_table()
+
+        # コンポーネントごとに重複頂点を結合（異なるビル同士の誤結合を防ぐ）
+        cid_verts_map: dict[int, set[bmesh.types.BMVert]] = collections.defaultdict(set)
+        for f in bm.faces:
+            cid_val = f[cid_layer]
+            if cid_val > 0:
+                for v in f.verts:
+                    cid_verts_map[cid_val].add(v)
+        for cid_val in sorted(cid_verts_map.keys()):
+            c_verts = [v for v in cid_verts_map[cid_val] if v.is_valid]
+            if len(c_verts) >= 3:
+                bmesh.ops.remove_doubles(bm, verts=c_verts, dist=0.005)
+
+        collapsed_faces = [f for f in bm.faces if f.calc_area() < 1e-4]
+        if collapsed_faces:
+            bmesh.ops.delete(bm, geom=collapsed_faces, context="FACES")
+        isolated_verts = [v for v in bm.verts if not v.link_faces]
+        if isolated_verts:
+            bmesh.ops.delete(bm, geom=isolated_verts, context="VERTS")
+        bm.faces.ensure_lookup_table()
+
+        # コンポーネント単位で外向き法線と符号付き体積・屋上法線の上向き整合性を保証する
+        comp_faces_map: dict[int, list[bmesh.types.BMFace]] = collections.defaultdict(list)
+        for f in bm.faces:
+            cid_val = f[cid_layer]
+            if cid_val > 0:
+                comp_faces_map[cid_val].append(f)
+
+        for _cid_val, c_faces in comp_faces_map.items():
+            bmesh.ops.recalc_face_normals(bm, faces=c_faces)
+            for f in c_faces:
+                f.normal_update()
+
+            c_coords = [v.co for f in c_faces for v in f.verts]
+            if not c_coords:
+                continue
+            comp_min_z = min(co.z for co in c_coords)
+            comp_max_z = max(co.z for co in c_coords)
+            avg_x = sum(co.x for co in c_coords) / len(c_coords)
+            avg_y = sum(co.y for co in c_coords) / len(c_coords)
+            ref = Vector((avg_x, avg_y, (comp_min_z + comp_max_z) * 0.5))
+
+            signed_vol = 0.0
+            top_roof_dot = 0.0
+            outward_dot = 0.0
+            for f in c_faces:
+                area = f.calc_area()
+                fc = f.calc_center_median()
+                outward_dot += (fc - ref).dot(f.normal) * area
+                if abs(f.normal.z) > 0.7 and fc.z >= max(comp_min_z + 0.8, comp_max_z - 0.5):
+                    top_roof_dot += area * f.normal.z
+                if len(f.verts) >= 3:
+                    v0 = f.verts[0].co - ref
+                    for ki in range(1, len(f.verts) - 1):
+                        v1 = f.verts[ki].co - ref
+                        v2 = f.verts[ki + 1].co - ref
+                        signed_vol += v0.dot(v1.cross(v2))
+
+            need_flip = (top_roof_dot < -0.5) or (
+                abs(top_roof_dot) <= 0.5
+                and (signed_vol < -1.0 or (abs(signed_vol) <= 1.0 and outward_dot < 0.0))
+            )
+            if need_flip:
+                bmesh.ops.reverse_faces(bm, faces=c_faces)
+                for f in c_faces:
+                    f.normal_update()
+
+            comp_h_span = comp_max_z - comp_min_z
+            for f in c_faces:
+                if abs(f.normal.z) > 0.80:
+                    fc = f.calc_center_median()
+                    should_flip = (fc.z <= comp_min_z + 0.25 and f.normal.z > 0.0) or (
+                        comp_h_span >= 1.5 and fc.z >= comp_max_z - 0.35 and f.normal.z < 0.0
+                    )
+                    if should_flip:
+                        f.normal_flip()
+                        f.normal_update()
+
+        bm.normal_update()
         uv_layer = bm.loops.layers.uv.verify()
 
-        faces_to_delete = []
-        bldg_roof_coords = collections.defaultdict(list)
+        comp_roof_faces: dict[int, list[tuple[float, float, float, float, float]]] = (
+            collections.defaultdict(list)
+        )
 
         for f in bm.faces:
-            poly = obj.data.polygons[f.index]
-            main_bid = batch_vals[poly.vertices[0]] if poly.vertices else 0
-
-            # 除外対象の建物は削除
-            if main_bid not in valid_bldg_bids:
-                faces_to_delete.append(f)
+            cid = f[cid_layer]
+            if cid not in comp_info:
                 continue
 
-            _z_base, bldg_h, b_cx, b_cy = bldg_info[main_bid]
+            _z_base, bldg_h, _b_cx, _b_cy = comp_info[cid]
             normal_z = f.normal.z
             is_roof = normal_z > 0.45
             is_floor = normal_z < -0.45
@@ -656,26 +1302,32 @@ def generate_shibuya_plateau_city() -> str:
                 f.material_index = 4  # PlateauRooftop
                 for loop in f.loops:
                     loop[uv_layer].uv = (loop.vert.co.x / 8.0, -loop.vert.co.y / 8.0)
-                bldg_roof_coords[main_bid].extend([v.co.copy() for v in f.verts])
+                # 塔屋配置用: 単一屋根面の中心と面積・高さを記録（最上階水平屋根のみ対象・中庭越しの浮遊を防止）
+                fc = f.calc_center_median()
+                if normal_z > 0.92 and fc.z >= max(10.0, bldg_h * 0.55):
+                    xs = [v.co.x for v in f.verts]
+                    ys = [v.co.y for v in f.verts]
+                    min_span = min(max(xs) - min(xs), max(ys) - min(ys)) if xs else 0.0
+                    comp_roof_faces[cid].append((f.calc_area(), fc.x, fc.y, fc.z, min_span))
                 continue
 
             # 垂直壁面（Wall）: ビル単位でのマテリアル一貫性（三角形対角線割れアーティファクトを100%根絶）
-            # 渋谷の都市景観に応じたマテリアル割り当て:
-            # - 低中層商業ビル (<35m): 繁華街テナントファサード (PlateauAlleyCommercial / PlateauStorefrontMat)
+            # 渋谷の都市景観に応じたマテリアル割り当て（全4階×4スパン 16m×14m 実寸スケールで圧縮モアレを防止）:
+            # - 低中層商業ビル (<35m): 繁華街テナントファサード / ライムストーン店舗 (PlateauAlleyCommercial / PlateauStorefrontMat)
             # - 中高層オフィス (35m〜60m): アルミパネル・窓グリッド (PlateauCommercialFacade)
             # - 高層タワー (>=60m): ガラスカーテンウォール (PlateauGlassTower)
             if bldg_h < 35.0:
-                mat_wall = 3 if (main_bid % 3 != 0) else 2
-                span_u = 12.0
-                span_v = 3.2
+                mat_wall = 3 if (cid % 3 != 0) else 2
+                span_u = 16.0
+                span_v = 14.0
             elif bldg_h < 60.0:
                 mat_wall = 1
-                span_u = 6.0
-                span_v = 3.4
+                span_u = 16.0
+                span_v = 14.0
             else:
                 mat_wall = 0
-                span_u = 6.0
-                span_v = 3.6
+                span_u = 16.0
+                span_v = 14.4
 
             f.material_index = mat_wall
 
@@ -695,27 +1347,127 @@ def generate_shibuya_plateau_city() -> str:
                 v = co.z / span_v
                 loop[uv_layer].uv = (u, v)
 
-        # 6. 除外面および孤立頂点を削除
-        bmesh.ops.delete(bm, geom=faces_to_delete, context="FACES")
-        isolated_verts = [v for v in bm.verts if not v.link_faces]
-        if isolated_verts:
-            bmesh.ops.delete(bm, geom=isolated_verts, context="VERTS")
+        # 6. 除外面はステップ5で削除済み。まず塔屋追加前の地盤接地済み躯体からLOD2プロキシを生成・浮遊断片除去する
+        bpy.data.objects.remove(obj, do_unlink=True)
 
-        # 7. 立体塔屋（ペントハウス・エレベーター機械室）の追加（屋根平均高さに完全接地）
-        for bid in valid_bldg_bids:
-            roof_coords = bldg_roof_coords.get(bid, [])
-            _z_base, bldg_h, b_cx, b_cy = bldg_info[bid]
-            if roof_coords and bldg_h >= 20.0:
-                rcx = sum(c.x for c in roof_coords) / len(roof_coords)
-                rcy = sum(c.y for c in roof_coords) / len(roof_coords)
-                rcz = sum(c.z for c in roof_coords) / len(roof_coords)
-                r_radius = sum(math.hypot(c.x - rcx, c.y - rcy) for c in roof_coords) / len(
-                    roof_coords
+        eval_mesh = None
+        if len(bm.faces) > 0:
+            proxy_src_mesh = bpy.data.meshes.new(f"ShibuyaPlateauProxySrc_{tile_name}")
+            bm.to_mesh(proxy_src_mesh)
+            proxy_src_obj = bpy.data.objects.new(f"PlateauProxySrc_{tile_name}", proxy_src_mesh)
+            bpy.context.scene.collection.objects.link(proxy_src_obj)
+
+            mod = proxy_src_obj.modifiers.new("Decimate", "DECIMATE")
+            mod.ratio = 0.20
+            bpy.context.view_layer.objects.active = proxy_src_obj
+            dg = bpy.context.evaluated_depsgraph_get()
+            eval_mesh = bpy.data.meshes.new_from_object(proxy_src_obj.evaluated_get(dg))
+
+            bpy.data.objects.remove(proxy_src_obj, do_unlink=True)
+            bpy.data.meshes.remove(proxy_src_mesh)
+
+            # Decimate後に独立浮遊化した上部断片シェルを 5cm 量子化連結成分判定で完全に除去する
+            bm_proxy = bmesh.new()
+            bm_proxy.from_mesh(eval_mesh)
+            bm_proxy.faces.ensure_lookup_table()
+            tiny_proxy = [pf for pf in bm_proxy.faces if pf.calc_area() < 1e-4]
+            if tiny_proxy:
+                bmesh.ops.delete(bm_proxy, geom=tiny_proxy, context="FACES")
+            bm_proxy.faces.ensure_lookup_table()
+
+            v_bucket: dict[tuple[int, int, int], list[bmesh.types.BMVert]] = (
+                collections.defaultdict(list)
+            )
+            for pv in bm_proxy.verts:
+                bkey = (
+                    round(pv.co.x * 20.0),
+                    round(pv.co.y * 20.0),
+                    round(pv.co.z * 20.0),
+                )
+                v_bucket[bkey].append(pv)
+
+            visited_pf: set[int] = set()
+            proxy_comps: list[dict] = []
+            for pf in bm_proxy.faces:
+                if pf.index in visited_pf:
+                    continue
+                queue = collections.deque([pf])
+                visited_pf.add(pf.index)
+                comp_pf: list[bmesh.types.BMFace] = []
+                min_x = min_y = min_z = float("inf")
+                max_x = max_y = max_z = float("-inf")
+                while queue:
+                    cur = queue.popleft()
+                    comp_pf.append(cur)
+                    for pv in cur.verts:
+                        co = pv.co
+                        if co.x < min_x:
+                            min_x = co.x
+                        if co.x > max_x:
+                            max_x = co.x
+                        if co.y < min_y:
+                            min_y = co.y
+                        if co.y > max_y:
+                            max_y = co.y
+                        if co.z < min_z:
+                            min_z = co.z
+                        if co.z > max_z:
+                            max_z = co.z
+                        bkey = (
+                            round(co.x * 20.0),
+                            round(co.y * 20.0),
+                            round(co.z * 20.0),
+                        )
+                        for bvert in v_bucket[bkey]:
+                            for nf in bvert.link_faces:
+                                if nf.index not in visited_pf:
+                                    visited_pf.add(nf.index)
+                                    queue.append(nf)
+                proxy_comps.append(
+                    {
+                        "faces": comp_pf,
+                        "min_x": min_x,
+                        "max_x": max_x,
+                        "min_y": min_y,
+                        "max_y": max_y,
+                        "min_z": min_z,
+                        "max_z": max_z,
+                    }
                 )
 
-                if r_radius >= 4.5:
-                    pw = min(max(r_radius * 0.45, 3.8), 6.5)
-                    pd = min(max(r_radius * 0.45, 3.8), 6.5)
+            grounded_proxies = [pc for pc in proxy_comps if pc["min_z"] <= 0.45]
+            drop_proxy_faces: list[bmesh.types.BMFace] = []
+            for pc in proxy_comps:
+                if pc["min_z"] <= 0.45:
+                    continue
+                is_supported = any(
+                    gp["min_x"] <= pc["max_x"] - 0.05
+                    and gp["max_x"] >= pc["min_x"] + 0.05
+                    and gp["min_y"] <= pc["max_y"] - 0.05
+                    and gp["max_y"] >= pc["min_y"] + 0.05
+                    and pc["min_z"] <= gp["max_z"] + 0.7
+                    for gp in grounded_proxies
+                )
+                if not is_supported:
+                    drop_proxy_faces.extend(pc["faces"])
+
+            if drop_proxy_faces:
+                bmesh.ops.delete(bm_proxy, geom=drop_proxy_faces, context="FACES")
+                iso_pv = [pv for pv in bm_proxy.verts if not pv.link_faces]
+                if iso_pv:
+                    bmesh.ops.delete(bm_proxy, geom=iso_pv, context="VERTS")
+            bm_proxy.normal_update()
+            bm_proxy.to_mesh(eval_mesh)
+            bm_proxy.free()
+
+        # 7. 詳細タイルへ立体塔屋（ペントハウス・エレベーター機械室）を追加（最大の水平屋根面に確実に接地）
+        for cid, (_z_base, bldg_h, _b_cx, _b_cy) in comp_info.items():
+            r_faces = comp_roof_faces.get(cid, [])
+            if r_faces and bldg_h >= 20.0:
+                best_area, rcx, rcy, rcz, min_span = max(r_faces, key=lambda t: t[0])
+                if best_area >= 48.0 and min_span >= 8.0:
+                    pw = min(max(min_span * 0.25, 2.8), 4.8)
+                    pd = min(max(min_span * 0.25, 2.8), 4.8)
                     ph = 2.8
                     corners_bottom = [
                         Vector((rcx - pw * 0.5, rcy - pd * 0.5, rcz)),
@@ -731,6 +1483,7 @@ def generate_shibuya_plateau_city() -> str:
                     ]
                     vb = [bm.verts.new(co) for co in corners_bottom]
                     vt = [bm.verts.new(co) for co in corners_top]
+                    hut_faces: list[bmesh.types.BMFace] = []
                     for i in range(4):
                         next_i = (i + 1) % 4
                         try:
@@ -740,6 +1493,7 @@ def generate_shibuya_plateau_city() -> str:
                                 u = (loop.vert.co.x + loop.vert.co.y) / 4.0
                                 v = (loop.vert.co.z - rcz) / ph
                                 loop[uv_layer].uv = (u, v)
+                            hut_faces.append(f_side)
                         except Exception:
                             pass
                     try:
@@ -747,18 +1501,18 @@ def generate_shibuya_plateau_city() -> str:
                         f_top.material_index = 4  # PlateauRooftop
                         for loop in f_top.loops:
                             loop[uv_layer].uv = (loop.vert.co.x / 4.0, -loop.vert.co.y / 4.0)
+                        hut_faces.append(f_top)
                     except Exception:
                         pass
+                    if hut_faces:
+                        bmesh.ops.recalc_face_normals(bm, faces=hut_faces)
 
-        # 8. 全法線を外向きに統一再計算
-        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        # 8. 詳細メッシュ・プロキシメッシュをシーンへ出力（成分単位溶接済みのため全体remove_doublesは行わない）
+        bm.normal_update()
         tile_faces_count = len(bm.faces)
         total_faces_kept += tile_faces_count
 
-        bpy.data.objects.remove(obj, do_unlink=True)
-
         if tile_faces_count > 0:
-            bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.01)
             tile_mesh = bpy.data.meshes.new(f"ShibuyaPlateauTileMesh_{tile_name}")
             for m in materials[:5]:
                 tile_mesh.materials.append(m)
@@ -769,33 +1523,31 @@ def generate_shibuya_plateau_city() -> str:
             tile_obj["tile_id"] = tile_name
             tile_obj["is_plateau_tile"] = True
 
-            # LOD2 軽量プロキシメッシュ生成 (Decimate による低ポリゴン化 80%削減 + 単一プロキシマテリアル)
-            mod = tile_obj.modifiers.new("Decimate", "DECIMATE")
-            mod.ratio = 0.20
-            bpy.context.view_layer.objects.active = tile_obj
-            dg = bpy.context.evaluated_depsgraph_get()
-            eval_mesh = bpy.data.meshes.new_from_object(tile_obj.evaluated_get(dg))
-            tile_obj.modifiers.remove(mod)
+            proxy_poly_count = len(eval_mesh.polygons) if eval_mesh is not None else 0
+            if eval_mesh is not None and proxy_poly_count > 0:
+                eval_mesh.name = f"ShibuyaPlateauProxyMesh_{tile_name}"
+                eval_mesh.materials.clear()
+                eval_mesh.materials.append(materials[5])
+                for p in eval_mesh.polygons:
+                    p.material_index = 0
+                eval_mesh.validate()
 
-            eval_mesh.name = f"ShibuyaPlateauProxyMesh_{tile_name}"
-            eval_mesh.materials.clear()
-            eval_mesh.materials.append(materials[5])
-            for p in eval_mesh.polygons:
-                p.material_index = 0
-            eval_mesh.validate()
-
-            proxy_obj = bpy.data.objects.new(f"PlateauProxyTile_{tile_name}", eval_mesh)
-            bpy.context.scene.collection.objects.link(proxy_obj)
-            proxy_obj["tile_id"] = tile_name
-            proxy_obj["is_plateau_proxy"] = True
-            proxy_obj["target_tile"] = f"PlateauTile_{tile_name}"
+                proxy_obj = bpy.data.objects.new(f"PlateauProxyTile_{tile_name}", eval_mesh)
+                bpy.context.scene.collection.objects.link(proxy_obj)
+                proxy_obj["tile_id"] = tile_name
+                proxy_obj["is_plateau_proxy"] = True
+                proxy_obj["target_tile"] = f"PlateauTile_{tile_name}"
+            elif eval_mesh is not None:
+                bpy.data.meshes.remove(eval_mesh)
 
             bm.free()
             print(
                 f"[PLATEAU] Built tile object PlateauTile_{tile_name} ({tile_faces_count} faces) "
-                f"and proxy PlateauProxyTile_{tile_name} ({len(eval_mesh.polygons)} faces)"
+                f"and proxy PlateauProxyTile_{tile_name} ({proxy_poly_count} faces)"
             )
         else:
+            if eval_mesh is not None:
+                bpy.data.meshes.remove(eval_mesh)
             bm.free()
 
     print(

@@ -1040,29 +1040,110 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
     const count = Math.floor(halfSpan / stepDist) * 2;
 
     for (const dir of [1, -1]) {
+      const isNeSw = dir > 0;
       const diagAngle = (dir * Math.PI) / 4;
+      const stripeY = isNeSw ? 0.0255 : 0.027;
       for (let i = -count / 2; i <= count / 2; i++) {
         const offset = i * stepDist;
         // Why stripeLength in X and stripeWidth in Z:
         // PlaneGeometry を rotateX(-PI/2) すると X が横幅、Z が縦長になる。
         // diagAngle で回転させると Z軸方向が対角線歩行方向と一致するため、
         // 歩行方向（Z）の厚みを stripeWidth (0.45m)、横断歩道の幅員（X）を stripeLength (4.2m) に設定することで、
-        // 対角線歩行路上で各ストライプが重なり合わず、進行方向と直交する美しい 4.2m 幅のゼブラ帯を形成する。
+        // 対角線歩行路上で各ストライプが重なり合わず、進行方向と直交する美しいゼブラ帯を形成する。
         const stripeGeo = new THREE.PlaneGeometry(stripeLength, stripeWidth);
         stripeGeo.rotateX(-Math.PI / 2);
         stripeGeo.rotateY(diagAngle);
         const stripeMesh = new THREE.Mesh(stripeGeo, this.whitePaintMat);
-        stripeMesh.name = `ScrambleDiagonalStripe_${dir > 0 ? "NE_SW" : "NW_SE"}_${i}`;
+        stripeMesh.name = `ScrambleDiagonalStripe_${isNeSw ? "NE_SW" : "NW_SE"}_${i}`;
         stripeMesh.userData.markingType = "CrosswalkStripe";
         stripeMesh.userData.stripeLength = stripeLength;
         stripeMesh.userData.stripeWidth = stripeWidth;
         stripeMesh.userData.diagonalDir = dir;
         stripeMesh.userData.stripeIndex = i;
-        stripeMesh.position.set(offset * Math.cos(diagAngle), 0, offset * Math.sin(diagAngle));
+        stripeMesh.position.set(
+          offset * Math.cos(diagAngle),
+          stripeY,
+          offset * Math.sin(diagAngle),
+        );
         stripeMesh.receiveShadow = true;
         scrambleInterGroup.add(stripeMesh);
       }
+
+      // 渋谷スクランブル交差点特有の対角線横断歩道両サイドの破線ガイドライン（白いドット破線 0.4m × 0.15m）
+      const guideDotGeo = new THREE.PlaneGeometry(0.15, 0.4);
+      guideDotGeo.rotateX(-Math.PI / 2);
+      guideDotGeo.rotateY(diagAngle);
+      const dotStepDist = 1.0;
+      const dotHalfCount = Math.floor(halfSpan / dotStepDist);
+      const guideDotY = isNeSw ? 0.0258 : 0.0273;
+      const latOffsetMeters = stripeLength * 0.5 + 0.18;
+
+      for (const sideSign of [-1, 1]) {
+        for (let j = -dotHalfCount; j <= dotHalfCount; j++) {
+          const longDist = j * dotStepDist;
+          const posX =
+            longDist * Math.cos(diagAngle) - sideSign * latOffsetMeters * Math.sin(diagAngle);
+          const posZ =
+            longDist * Math.sin(diagAngle) + sideSign * latOffsetMeters * Math.cos(diagAngle);
+          const dotMesh = new THREE.Mesh(guideDotGeo, this.whitePaintMat);
+          dotMesh.name = `ScrambleGuideDot_${isNeSw ? "NE_SW" : "NW_SE"}_${sideSign > 0 ? "R" : "L"}_${j}`;
+          dotMesh.userData.markingType = "GuideLineDot";
+          dotMesh.position.set(posX, guideDotY, posZ);
+          dotMesh.receiveShadow = true;
+          scrambleInterGroup.add(dotMesh);
+        }
+      }
     }
+
+    // 4辺外周横断歩道（スクランブル交差点の東西南北アプローチ外周に配置・X字対角線と重ならない外周位置）
+    // 渋谷スクランブル仕様: 白縞（幅 0.45m、間隔 0.45m、長さ 4.5m）、Y座標 0.024 で Z-fighting を防止
+    const perimDist = padSize * 0.41;
+    const perimSpan = padSize * 0.52;
+    const perimStripeLen = 4.5;
+    const perimStripeWidth = 0.45;
+    const perimStep = 0.9;
+    const perimHalfCount = Math.floor((perimSpan * 0.5) / perimStep);
+    const perimeterEdges: Array<{ name: string; axis: "x" | "z"; fixedCoord: number }> = [
+      { name: "North", axis: "z", fixedCoord: perimDist },
+      { name: "South", axis: "z", fixedCoord: -perimDist },
+      { name: "East", axis: "x", fixedCoord: perimDist },
+      { name: "West", axis: "x", fixedCoord: -perimDist },
+    ];
+    for (const edge of perimeterEdges) {
+      const isXAxis = edge.axis === "x";
+      const rotY = isXAxis ? Math.PI / 2 : 0;
+      for (let i = -perimHalfCount; i <= perimHalfCount; i++) {
+        const alongOffset = i * perimStep;
+        const stripeGeo = new THREE.PlaneGeometry(perimStripeWidth, perimStripeLen);
+        stripeGeo.rotateX(-Math.PI / 2);
+        stripeGeo.rotateY(rotY);
+        const stripeMesh = new THREE.Mesh(stripeGeo, this.whitePaintMat);
+        stripeMesh.name = `ScramblePerimStripe_${edge.name}_${i}`;
+        stripeMesh.userData.markingType = "CrosswalkStripe";
+        stripeMesh.position.set(
+          isXAxis ? edge.fixedCoord : alongOffset,
+          0.024,
+          isXAxis ? alongOffset : edge.fixedCoord,
+        );
+        stripeMesh.receiveShadow = true;
+        scrambleInterGroup.add(stripeMesh);
+      }
+
+      // 各進入方向（東・西・北・南）の外周横断歩道の外側 2.5m に太く鮮明な停止線（幅 0.45m）を配置
+      const stopLineSign = edge.fixedCoord >= 0 ? 1 : -1;
+      const stopLineCoord = edge.fixedCoord + stopLineSign * 2.5;
+      const stopLineGeo = isXAxis
+        ? new THREE.PlaneGeometry(0.45, perimSpan)
+        : new THREE.PlaneGeometry(perimSpan, 0.45);
+      stopLineGeo.rotateX(-Math.PI / 2);
+      const stopLineMesh = new THREE.Mesh(stopLineGeo, this.whitePaintMat);
+      stopLineMesh.name = `ScrambleStopLine_${edge.name}`;
+      stopLineMesh.userData.markingType = "StopLine";
+      stopLineMesh.position.set(isXAxis ? stopLineCoord : 0, 0.024, isXAxis ? 0 : stopLineCoord);
+      stopLineMesh.receiveShadow = true;
+      scrambleInterGroup.add(stopLineMesh);
+    }
+
     return scrambleInterGroup;
   }
 

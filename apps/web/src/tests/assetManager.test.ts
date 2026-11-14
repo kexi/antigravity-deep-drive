@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { AssetManager } from "../assets/assetManager";
 import { DEFAULT_ASSETS_YAML } from "../assets/defaultAssetsYaml";
+import publicAssetsYaml from "../../public/config/assets.yml?raw";
 
 describe("AssetManager - YAML Asset Manifest & Zod Validation", () => {
   it("YAMLマニフェストを正しくパースし、Zodスキーマに適合することを保証する", () => {
@@ -108,8 +109,8 @@ models:
     expect(shibuyaSinglePoleSigns.length).toBe(3);
     for (const s of shibuyaSinglePoleSigns) {
       expect(s.rotationY).toBeCloseTo(3.14159, 4);
-      // 明治通り北行き (+Z) の左側歩道 (x = -750 + 12.8 = -737.2, 車道東端 -738.0 の外側) に建つこと
-      expect(s.position[0]).toBeCloseTo(-737.2, 2);
+      // 明治通り北行き (+Z) の左側歩道 (x = -736.2, 中央分離帯付き車道東端 -737.9 の外側) に建つこと
+      expect(s.position[0]).toBeCloseTo(-736.2, 2);
     }
     expect(hasStopSign).toBe(true);
     expect(hasSpeedSign).toBe(true);
@@ -308,5 +309,40 @@ models:
     expect(throwsTooHighRes).toThrow();
     expect(throwsTooLowRes).toThrow();
     expect(throwsInvalidRoughness).toThrow();
+  });
+
+  it("public/config/assets.yml と DEFAULT_ASSETS_YAML の標識配置が一致し、車道・交差点上に標識やガントリー支柱が置かれないことを保証する", () => {
+    const publicManager = new AssetManager();
+    const defaultManager = new AssetManager();
+    publicManager.loadFromYamlString(publicAssetsYaml);
+    defaultManager.loadFromYamlString(DEFAULT_ASSETS_YAML);
+
+    const publicSigns = publicManager.getSigns();
+    const defaultSigns = defaultManager.getSigns();
+    expect(publicSigns).toEqual(defaultSigns);
+
+    // 渋谷明治通りの門型案内標識は左右歩道上（x = -750 ± 13.3）に支柱が収まること
+    for (const gantryId of [
+      "overhead_guide_shibuya_stream",
+      "overhead_guide_shibuya_246_shutoko",
+    ]) {
+      const gantry = publicSigns.find((s) => s.id === gantryId);
+      expect(gantry).toBeDefined();
+      expect(gantry?.supportType).toBe("portal");
+      expect(gantry?.spanWidth).toBe(26.6);
+    }
+
+    // 中央分離帯のない行幸通り車道中央 (x = 0) にデリネーターを置かないこと
+    for (const delId of ["delineator_median_south", "delineator_median_north"]) {
+      const del = publicSigns.find((s) => s.id === delId);
+      expect(del).toBeDefined();
+      expect(Math.abs(del!.position[0])).toBeGreaterThanOrEqual(9.0);
+    }
+
+    // no_entry_plaza が東京駅正面交差点（z ∈ [-6, 16]）外側の西側歩道上に立つこと
+    const noEntryPlaza = publicSigns.find((s) => s.id === "no_entry_plaza");
+    expect(noEntryPlaza).toBeDefined();
+    expect(noEntryPlaza!.position[2]).toBeGreaterThanOrEqual(18.0);
+    expect(noEntryPlaza!.position[0]).toBeLessThanOrEqual(-9.0);
   });
 });

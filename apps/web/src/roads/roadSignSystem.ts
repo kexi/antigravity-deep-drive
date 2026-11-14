@@ -679,7 +679,8 @@ export class RoadSignSystem {
       const sinR = Math.sin(spec.rotationY);
 
       if (supportType === "cantilever") {
-        const localSupportX = spanWidth * 0.5;
+        // cantileverColX (-spanWidth * 0.5) と一致する支柱位置へコライダーを配置
+        const localSupportX = -spanWidth * 0.5;
         const poleWorldX = sx + localSupportX * cosR;
         const poleWorldZ = sz - localSupportX * sinR;
         const colDesc = this.createCylinderDesc(rapier, 3.2, 0.24)

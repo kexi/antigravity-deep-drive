@@ -1895,6 +1895,10 @@ export function getNavigationMapLabels(
         { text: "Roppongi Hills", x: -380, z: -420, color: "#38bdf8" },
         { text: "Center-Gai / Basketball St.", x: -850, z: 292, color: "#f59e0b" },
         { text: "Shibuya PARCO", x: -824, z: 375, color: "#cbd5e1" },
+        { text: "Scramble Crossing", x: -815, z: 248, color: "#38bdf8" },
+        { text: "SHIBUYA109", x: -884, z: 263, color: "#f472b6" },
+        { text: "Dogenzaka St.", x: -955, z: 200, color: "#fb923c" },
+        { text: "Bunkamura-dori", x: -965, z: 350, color: "#c084fc" },
       ];
     }
     const isChinese = locale === "zh";
@@ -1916,6 +1920,10 @@ export function getNavigationMapLabels(
         { text: "六本木之丘", x: -380, z: -420, color: "#38bdf8" },
         { text: "涩谷中心街 (篮球街)", x: -850, z: 292, color: "#f59e0b" },
         { text: "涩谷PARCO", x: -824, z: 375, color: "#cbd5e1" },
+        { text: "涩谷全向十字路口", x: -815, z: 248, color: "#38bdf8" },
+        { text: "SHIBUYA109", x: -884, z: 263, color: "#f472b6" },
+        { text: "道玄坂", x: -955, z: 200, color: "#fb923c" },
+        { text: "文化村通", x: -965, z: 350, color: "#c084fc" },
       ];
     }
     return [
@@ -1935,6 +1943,10 @@ export function getNavigationMapLabels(
       { text: "六本木ヒルズ", x: -380, z: -420, color: "#38bdf8" },
       { text: "渋谷センター街 (バスケ通り)", x: -850, z: 292, color: "#f59e0b" },
       { text: "渋谷PARCO", x: -824, z: 375, color: "#cbd5e1" },
+      { text: "スクランブル交差点", x: -815, z: 248, color: "#38bdf8" },
+      { text: "SHIBUYA109", x: -884, z: 263, color: "#f472b6" },
+      { text: "道玄坂", x: -955, z: 200, color: "#fb923c" },
+      { text: "文化村通り", x: -965, z: 350, color: "#c084fc" },
     ];
   }
 

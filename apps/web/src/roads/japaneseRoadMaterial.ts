@@ -21,6 +21,8 @@ export interface JapaneseRoadMaterialOptions {
   baseMetalness?: number;
   noise3DTexture?: THREE.Data3DTexture;
   isIntersection?: boolean;
+  isIntersectionPad?: boolean;
+  roadWidth?: number;
 }
 
 export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
@@ -36,12 +38,16 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
   public uSkyZenithColor: { value: THREE.Color };
   public uNightFactor: { value: number };
   public uIsIntersection: { value: number };
+  public uIsIntersectionPad: { value: number };
+  public uRoadWidth: { value: number };
   public readonly isIntersection: boolean;
+  public readonly isIntersectionPad: boolean;
 
   constructor(options: JapaneseRoadMaterialOptions = {}) {
-    const isIntersection = Boolean(options.isIntersection);
+    const isIntersectionPad = Boolean(options.isIntersectionPad ?? options.isIntersection);
+    const isIntersection = Boolean(options.isIntersection || isIntersectionPad);
     super({
-      color: 0x4c525c,
+      color: 0x1e2229,
       roughness: options.baseRoughness ?? 0.85,
       metalness: options.baseMetalness ?? 0.12,
       // Why 交差点パッドのみ polygonOffset をわずかに手前バイアスするか:
@@ -52,6 +58,7 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
       polygonOffsetUnits: isIntersection ? -0.5 : 0,
     });
     this.isIntersection = isIntersection;
+    this.isIntersectionPad = isIntersectionPad;
 
     const hasSharedTex = Boolean(JapaneseRoadMaterial.shared3DTexture);
     if (!hasSharedTex) {
@@ -66,13 +73,17 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
     this.uRippleIntensity = { value: 1.0 };
     this.uRoadNoise3D = { value: tex3D };
     this.uSunDirection = { value: new THREE.Vector3(0.68, 0.25, 0.68).normalize() };
-    this.uSunColor = { value: new THREE.Color(0xfb923c) };
-    this.uSkyHorizonColor = { value: new THREE.Color(0xfdba74) };
-    this.uSkyZenithColor = { value: new THREE.Color(0x4c1d95) };
+    this.uSunColor = { value: new THREE.Color(0xfffbeb) };
+    this.uSkyHorizonColor = { value: new THREE.Color(0xbae6fd) };
+    this.uSkyZenithColor = { value: new THREE.Color(0x1e3a8a) };
     this.uNightFactor = { value: 0.0 };
     this.uIsIntersection = { value: isIntersection ? 1.0 : 0.0 };
+    this.uIsIntersectionPad = { value: isIntersectionPad ? 1.0 : 0.0 };
+    this.uRoadWidth = { value: options.roadWidth ?? 15.0 };
     this.customProgramCacheKey = () =>
-      isIntersection ? "japanese-road-mat-3d-intersection-v4" : "japanese-road-mat-3d-segment-v4";
+      isIntersectionPad
+        ? "japanese-road-mat-3d-intersection-v5"
+        : "japanese-road-mat-3d-segment-v5";
 
     this.onBeforeCompile = (shader) => {
       shader.uniforms.uRainWetness = this.uRainWetness;
@@ -85,6 +96,8 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
       shader.uniforms.uSkyZenithColor = this.uSkyZenithColor;
       shader.uniforms.uNightFactor = this.uNightFactor;
       shader.uniforms.uIsIntersection = this.uIsIntersection;
+      shader.uniforms.uIsIntersectionPad = this.uIsIntersectionPad;
+      shader.uniforms.uRoadWidth = this.uRoadWidth;
 
       shader.vertexShader = shader.vertexShader.replace(
         "#include <common>",
@@ -121,6 +134,8 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
         uniform vec3 uSkyZenithColor;
         uniform float uNightFactor;
         uniform float uIsIntersection;
+        uniform float uIsIntersectionPad;
+        uniform float uRoadWidth;
         varying vec3 vWorldPos;
         varying vec3 vLocalRoadPos;
         varying vec2 vRoadUv;
@@ -155,10 +170,9 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
         }
 
         // 車道水たまりの盆地深度（低周波FBM + 車線の轍 Wheel Ruts + 路肩側溝 + 3D微細凹部）
-        // Why not: ワールドX座標（worldPos.x）で横断轍を判定すると東西道路（日比谷通り・丸の内仲通り）で道路を横切る縞になるため、
-        // 道路ローカル横断座標（localRoadPos.x）で車線の轍・路肩・クラウン排水勾配を評価する。
-        // 交差点（uIsIntersection > 0.5）では直交する2方向（X・Z）の轍を滑らかにブレンドし、外隅の水はけを確保する。
-        float sampleRoadPuddleBasin(vec3 worldPos, vec3 localRoadPos, float voxelAlpha, float crackVal) {
+        // Why: スプライン曲線道路（vRoadUv.x > 2.0）および直線道路・交差点パッドにおいて、
+        // 正確な道路横断オフセット roadLatX (m) と縦断距離 roadLongZ (m) を用いて轍・路肩水たまり・クラウン排水勾配を評価する。
+        float sampleRoadPuddleBasin(vec3 worldPos, vec3 localRoadPos, float roadLatX, float roadLongZ, float voxelAlpha, float crackVal) {
           float rawMacro = roadPuddleFbm(vec2(worldPos.x * 0.12 + 2.3, worldPos.z * 0.048));
           float rawSub = roadPuddleFbm(vec2(worldPos.x * 0.28 - 5.1, worldPos.z * 0.11 + 1.7));
           vec2 crossRot = vec2(
@@ -167,14 +181,12 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
           );
           float rawCross = roadPuddleFbm(crossRot + vec2(9.4, -4.2));
 
-          // Why not: 4オクターブ Perlin FBM の生の値（標準偏差が狭く 0.40..0.60 に集中）をそのまま使うと、
-          // 閾値 0.50 前後で路面全体の 5% 未満しか水たまりにならないため、smoothstep S字コントラスト伸長で 0..1 へ広げる
           float macroBasin = smoothstep(0.32, 0.68, rawMacro);
           float subBasin = smoothstep(0.34, 0.66, rawSub);
           float crossBasin = smoothstep(0.35, 0.65, rawCross);
 
-          float absX = abs(localRoadPos.x);
-          float absZ = abs(localRoadPos.z);
+          float absX = abs(roadLatX);
+          float absZ = abs(roadLongZ);
 
           // 片側2〜3車線の各車線ホイールトラック（左右タイヤ通過ライン & 車線内窪み）および路肩側溝の集水プロファイル
           float lane1RutX =
@@ -195,21 +207,22 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
             exp(-pow((absZ - 5.65) * 1.05, 2.0)) * 0.95;
           float rutProfileZ = clamp(max(lane1RutZ, lane2RutZ), 0.0, 1.0);
 
+          // 交差点パッドでは特定車線の直線的な轍を抑え、中心部の自然なラジアル減衰摩耗にする
           float intersectionBasin = exp(-pow((length(localRoadPos.xz) - 4.2) * 0.22, 2.0)) * 0.55;
           float rutProfile = mix(
             rutProfileX,
-            clamp(max(rutProfileX * 0.85, rutProfileZ * 0.85) + intersectionBasin * 0.45, 0.0, 1.0),
-            uIsIntersection
+            clamp(max(rutProfileX * 0.65, rutProfileZ * 0.65) + intersectionBasin * 0.35, 0.0, 1.0),
+            max(uIsIntersection, uIsIntersectionPad)
           );
 
           // 轍の縦断方向に長楕円のリアルな水たまり群を形成しつつ、車線中央や交差点にも有機的な水たまりパッチを残す
-          float rutPocket = rutProfile * (0.42 + 0.58 * mix(macroBasin, crossBasin, 0.35));
+          float rutPocket = rutProfile * macroBasin * (0.35 + 0.65 * subBasin);
           float openPatch = macroBasin * crossBasin * 0.65;
 
           // 道路中央線（x ≈ 0）直上のみごく緩やかに排水勾配をつけつつ、車線全体の盆地深さを高く保つ
           float crownDrainSeg = 0.82 + 0.18 * smoothstep(0.0, 0.85, absX);
           float crownDrainInter = 0.86 + 0.14 * smoothstep(0.0, 1.8, length(localRoadPos.xz));
-          float crownDrain = mix(crownDrainSeg, crownDrainInter, uIsIntersection);
+          float crownDrain = mix(crownDrainSeg, crownDrainInter, max(uIsIntersection, uIsIntersectionPad));
 
           float combinedBasin =
             macroBasin * 0.44 +
@@ -260,7 +273,7 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
         }
 
         // 車道水たまりの解析的平面鏡面反射（空・雲・太陽/月・丸の内/渋谷ビル群シルエット＆窓明かり・信号機・街灯ネオン）
-        vec3 calculateRoadPuddleReflection(vec3 worldPos, vec3 localRoadPos, vec3 worldNormal, float puddleStrength) {
+        vec3 calculateRoadPuddleReflection(vec3 worldPos, vec3 localRoadPos, float roadLatX, float roadLongZ, vec3 worldNormal, float puddleStrength) {
           vec3 V = normalize(cameraPosition - worldPos);
           vec3 N = normalize(worldNormal);
           vec3 R = reflect(-V, N);
@@ -299,22 +312,37 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
           float bayPillars = smoothstep(0.28, 0.75, sin(atan(R.x, R.z) * 20.0) * 0.5 + 0.5);
           float winMask = floorBands * bayPillars * smoothstep(0.02, 0.30, R.y);
           vec3 winGlow = mix(vec3(1.0, 0.80, 0.46), vec3(0.42, 0.82, 1.0), clamp(R.z * 0.5 + 0.5, 0.0, 1.0));
-          float winIntensity = mix(0.26, 0.82, max(uNightFactor, uRainWetness * 0.60));
+          float winIntensity = mix(0.12, 0.38, clamp(uNightFactor * 1.15, 0.0, 1.0));
           vec3 buildingRefl = buildingBase + winGlow * winMask * winIntensity;
 
-          vec3 envColor = mix(skyGrad, buildingRefl, buildingMask * 0.64);
+          vec3 nightSkyFloor = vec3(0.02, 0.04, 0.09);
+          vec3 effectiveSkyGrad = mix(skyGrad, skyGrad * 0.18 + nightSkyFloor, uNightFactor);
+          vec3 envColor = mix(effectiveSkyGrad, buildingRefl, buildingMask * 0.64);
 
           // 3. 街灯（アンバー）＆信号機（エメラルド/アンバー/ルビー）の路面水たまり反射ストリーク
-          float lampLateral = exp(-abs(abs(localRoadPos.x) - 5.2) * 0.14);
+          // 交差点パッドでは四角いオレンジの発光を防ぐため、反射強度を 0.35 倍程度に抑えワールドノイズで分散
+          float padNoise = roadPuddleFbm(worldPos.xz * 0.06);
+          float padLampLateral = 0.35 * (0.75 + 0.5 * padNoise);
+          float lampLongMask = pow(0.5 + 0.5 * cos(roadLongZ * 0.22), 3.0);
+          float segLampLateral = exp(-abs(abs(roadLatX) - 5.2) * 0.35) * (0.15 + 0.85 * lampLongMask);
+          float lampLateral = mix(segLampLateral, padLampLateral, uIsIntersectionPad);
+
           float lampReflectDir = smoothstep(0.10, 0.72, max(abs(R.x), abs(R.z) * 0.65));
           float rippleShift = (N.x + N.z) * 4.2;
           float lampStreak = lampLateral * lampReflectDir * clamp(1.0 + rippleShift, 0.45, 1.85);
-          vec3 streetLightRefl = vec3(1.0, 0.74, 0.34) * lampStreak * mix(0.34, 0.98, max(uNightFactor, uRainWetness * 0.65));
+          float lampIntensity = mix(
+            mix(0.12, 0.34, clamp(uNightFactor * 1.15, 0.0, 1.0)),
+            mix(0.08, 0.22, clamp(uNightFactor * 1.15, 0.0, 1.0)),
+            uIsIntersectionPad
+          );
+          vec3 streetLightRefl = vec3(1.0, 0.74, 0.34) * lampStreak * lampIntensity;
 
           // 交差点・横断歩道付近の信号機・テールランプ・ネオン反射彩度
           float signalPhase = sin(worldPos.z * 0.045 + worldPos.x * 0.035);
           vec3 neonTint = mix(vec3(0.12, 0.92, 0.68), vec3(1.0, 0.26, 0.32), smoothstep(-0.4, 0.4, signalPhase));
-          float neonMask = exp(-abs(abs(localRoadPos.x) - 3.6) * 0.16) * smoothstep(0.02, 0.25, R.y);
+          float segNeonMask = exp(-abs(abs(roadLatX) - 3.6) * 0.16) * smoothstep(0.02, 0.25, R.y);
+          float padNeonMask = 0.35 * smoothstep(0.02, 0.25, R.y) * (0.7 + 0.5 * padNoise);
+          float neonMask = mix(segNeonMask, padNeonMask, uIsIntersectionPad);
           vec3 neonRefl = neonTint * neonMask * clamp(0.8 + rippleShift * 0.6, 0.3, 1.6) * mix(0.14, 0.46, max(uNightFactor, uRainWetness * 0.5));
 
           // 4. 太陽・月光のデュアルローブ水面スペキュラ道（Glitter Path）
@@ -443,10 +471,15 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
         // Bチャンネル: 転圧ローラー方向のアスファルトバインダー（歴青）色調ムラ
         float binderTone = mix(voxelCoarse.b, voxelMacro.b, 0.55);
 
+        // 道路横断(m)・縦断距離(m)の正確な復元
+        // 曲線道路では vRoadUv.x > 2.0 に offset+50.0 がエンコードされている
+        bool hasMetricUv = vRoadUv.x > 2.0;
+        float roadLatX = hasMetricUv ? (vRoadUv.x - 50.0) : vLocalRoadPos.x;
+        float roadLongZ = hasMetricUv ? (vRoadUv.y * 5.0) : vLocalRoadPos.z;
+        float absRoadX = abs(roadLatX);
+        float absRoadZ = abs(roadLongZ);
+
         // 車線のタイヤ通過ライン（Wheel Track: 道路ローカル横断 |x| ≈ 1.35m, 2.85m, 4.65m, 6.15m）の摩耗・骨材露出
-        // 交差点（uIsIntersection > 0.5）では直交する2方向（X・Z）の通過ラインと旋回摩耗ゾーンを滑らかに合成する
-        float absRoadX = abs(vLocalRoadPos.x);
-        float absRoadZ = abs(vLocalRoadPos.z);
         float tireTrackWearX =
           exp(-pow((absRoadX - 1.35) * 1.15, 2.0)) +
           exp(-pow((absRoadX - 2.85) * 1.15, 2.0)) +
@@ -457,43 +490,49 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
           exp(-pow((absRoadZ - 2.85) * 1.15, 2.0)) +
           exp(-pow((absRoadZ - 4.65) * 1.15, 2.0)) +
           exp(-pow((absRoadZ - 6.15) * 1.15, 2.0));
-        float intersectionTurnWear = exp(-pow((length(vLocalRoadPos.xz) - 3.8) * 0.28, 2.0)) * 0.45;
+        float intersectionTurnWear = exp(-pow(length(vLocalRoadPos.xz) * 0.08, 2.0)) * 0.35;
         float combinedTireWear = mix(
           tireTrackWearX,
-          clamp(max(tireTrackWearX * 0.72, tireTrackWearZ * 0.72) + intersectionTurnWear, 0.0, 1.0),
-          uIsIntersection
+          clamp(max(tireTrackWearX * 0.35, tireTrackWearZ * 0.35) + intersectionTurnWear, 0.0, 1.0),
+          max(uIsIntersection, uIsIntersectionPad)
         );
         float tireTrackWear = clamp(combinedTireWear, 0.0, 1.0) * (0.68 + 0.32 * voxelMacro.b);
 
-        // 砕石骨材（安山岩・硬質砂岩グレー）と歴青バインダー暗部・石英ハイライト・タイヤ摩耗帯を合成
-        vec3 bitumenDark = vec3(0.032, 0.036, 0.044);
-        vec3 crushedStoneGrey = vec3(0.205, 0.218, 0.242);
-        vec3 weatheredAndesite = vec3(0.248, 0.262, 0.286);
-        vec3 stoneColor = mix(crushedStoneGrey, weatheredAndesite, mineralGrain * 0.62);
-        vec3 baseAsphaltAlbedo = mix(bitumenDark, stoneColor, aggregateContrast * 0.76 + coarseStonePatch * 0.24);
-        baseAsphaltAlbedo += vec3(0.175, 0.186, 0.205) * silicaChip;
-        baseAsphaltAlbedo *= mix(1.0, 0.42, poreCrevice * 0.76);
-        baseAsphaltAlbedo = mix(baseAsphaltAlbedo, vec3(0.255, 0.268, 0.295), tireTrackWear * 0.44);
-        baseAsphaltAlbedo *= mix(0.84, 1.16, binderTone);
+        // 日本の都市部密粒度アスファルト舗装のフォトリアルな質感チューニング
+        // 中距離での過剰な白黒砂利ノイズを抑え、緻密で滑らかな密粒度テクスチャにする
+        float aggregateSmooth = mix(0.82, 1.16, smoothstep(0.28, 0.72, aggregateGrain));
+        vec3 bitumenDark = vec3(0.045, 0.048, 0.056);
+        vec3 crushedStoneGrey = vec3(0.138, 0.148, 0.162);
+        vec3 weatheredAndesite = vec3(0.168, 0.178, 0.194);
+        vec3 stoneColor = mix(crushedStoneGrey, weatheredAndesite, mineralGrain * 0.52);
+        vec3 baseAsphaltAlbedo = mix(bitumenDark, stoneColor, aggregateContrast * 0.58 + coarseStonePatch * 0.22) * aggregateSmooth;
+        baseAsphaltAlbedo += vec3(0.09, 0.095, 0.105) * silicaChip;
+        baseAsphaltAlbedo *= mix(1.0, 0.65, poreCrevice * 0.55);
+        // タイヤ走行帯の微細なポリッシュ感（わずかな色調変化と滑らかさ）
+        baseAsphaltAlbedo = mix(baseAsphaltAlbedo, baseAsphaltAlbedo * 1.15 + vec3(0.015, 0.018, 0.022), tireTrackWear * 0.38);
+        baseAsphaltAlbedo *= mix(0.88, 1.12, binderTone);
 
         // Gチャンネル: 微細クラック（経年変化）とアスファルトフィニッシャー車線境界の縦断施工目地（|x| = 0m, 3.5m, 7.0m）
-        // Why 交差点内で laneJoint を抑制するか:
-        // 交差点内で一方向だけの施工目地スジを描画すると直交道路に対して3.5m間隔の不自然な横断黒線になるため、
-        // 交差点パッド外縁部のみ接続道路と馴染ませ、交差点中央では施工目地スジをフェードアウトさせる。
         float crackDarkness = voxelFine.g * smoothstep(0.32, 0.74, voxelMacro.a);
         float jointDistX = abs(fract(absRoadX / 3.5 + 0.5) - 0.5) * 3.5;
         float laneJointSeg = exp(-pow(jointDistX * 14.0, 2.0)) * 0.28;
-        float edgeJointFade = smoothstep(5.5, 11.0, max(absRoadX, absRoadZ));
-        float laneJoint = mix(laneJointSeg, laneJointSeg * edgeJointFade * 0.35, uIsIntersection);
+        float laneJoint = mix(laneJointSeg, 0.0, max(uIsIntersection, uIsIntersectionPad));
         diffuseColor.rgb = mix(baseAsphaltAlbedo, vec3(0.022, 0.025, 0.032), clamp(crackDarkness * 0.46 + laneJoint, 0.0, 0.65));
+
+        // 交差点パッド外縁部で周囲道路と完全にシームレスにブレンド
+        if (uIsIntersectionPad > 0.5) {
+          float padEdgeDist = min(min(vRoadUv.x, 1.0 - vRoadUv.x), min(vRoadUv.y, 1.0 - vRoadUv.y));
+          float padEdgeBlend = smoothstep(0.0, 0.12, padEdgeDist);
+          diffuseColor.rgb = mix(baseAsphaltAlbedo, diffuseColor.rgb, padEdgeBlend);
+        }
 
         // 砕石頂部はローラー転圧＆タイヤ研磨でやや滑らか、骨材間の空隙ボイドは粗いマイクロラフネス分布
         roughnessFactor = clamp(
-          roughnessFactor + (0.52 - aggregateGrain) * 0.28 + poreCrevice * 0.16 - silicaChip * 0.20 - tireTrackWear * 0.12,
-          0.10,
+          roughnessFactor + (0.50 - aggregateGrain) * 0.18 + poreCrevice * 0.12 - silicaChip * 0.12 - tireTrackWear * 0.15,
+          0.12,
           0.95
         );
-        metalnessFactor = clamp(metalnessFactor + silicaChip * 0.16 + mineralGrain * 0.06, 0.05, 0.85);
+        metalnessFactor = clamp(metalnessFactor + silicaChip * 0.12 + mineralGrain * 0.05, 0.05, 0.85);
 
         // 3D骨材マイクロファセットによる大気空・太陽光の微細スペキュラ反射
         vec3 viewDeltaW = cameraPosition - vWorldPos;
@@ -508,16 +547,17 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
         vec3 skySheenColor = mix(uSkyHorizonColor, uSkyZenithColor, clamp(microReflDir.y * 0.7 + 0.25, 0.0, 1.0));
         vec3 safeSunDir = normalize(uSunDirection + vec3(0.0, 0.0001, 0.0));
         float microSunGlint = pow(max(dot(microReflDir, safeSunDir), 0.0), 14.0) * (1.0 - uNightFactor * 0.7);
-        float grainSparkleMask = (0.36 + 0.64 * aggregateContrast + silicaChip * 1.05) * (1.0 - poreCrevice * 0.62);
-        vec3 dryAggregateSheen = clamp((skySheenColor * 0.18 + uSunColor * microSunGlint * 0.22) * microFresnel * grainSparkleMask, vec3(0.0), vec3(0.45));
+        // aggregateSparkle（骨材の煌めき）の強度を 0.45 倍に抑え過剰な白い点々を防止
+        float grainSparkleMask = (0.22 + 0.38 * aggregateContrast + silicaChip * 0.45) * (1.0 - poreCrevice * 0.62) * 0.45;
+        vec3 dryAggregateSheen = clamp((skySheenColor * 0.18 + uSunColor * microSunGlint * 0.22) * microFresnel * grainSparkleMask, vec3(0.0), vec3(0.22));
 
         // Aチャンネル + 轍（Wheel Ruts）: 3D水たまり深度（凹部に水が溜まり、周囲に濡れ縁、内部は鏡面反射に変化）
         float puddleCoreMask = 0.0;
         vec3 puddleRippleVec = vec3(0.0, 0.0, 1.0);
         if (uRainWetness > 0.01 && roadCamDist < 185.0) {
           float distanceFade = 1.0 - smoothstep(130.0, 185.0, roadCamDist);
-          float basinDepth = sampleRoadPuddleBasin(vWorldPos, vLocalRoadPos, voxelMacro.a, crackDarkness);
-          float threshold = 0.43 - uRainWetness * 0.15;
+          float basinDepth = sampleRoadPuddleBasin(vWorldPos, vLocalRoadPos, roadLatX, roadLongZ, voxelMacro.a, crackDarkness);
+          float threshold = 0.58 - uRainWetness * 0.10;
 
           // 水たまり外周の浸透湿潤帯（濡れ縁 Wet Meniscus Rim）と表面張力メニスカスリング
           float wetRim = smoothstep(threshold - 0.18, threshold, basinDepth) * distanceFade;
@@ -527,7 +567,7 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
           puddleCoreMask = puddle;
 
           // 濡れたアスファルトのしっとりとした色調変化（水たまり内部は下地アスファルトを強く減衰させ鏡面反射を際立たせる）
-          diffuseColor.rgb *= mix(1.0, 0.46, wetRim * clamp(uRainWetness * 1.15, 0.0, 1.0));
+          diffuseColor.rgb *= mix(1.0, 0.38, uRainWetness * distanceFade);
           diffuseColor.rgb *= (1.0 - meniscusRing * 0.28);
           diffuseColor.rgb *= mix(1.0, 0.18, puddle);
 
@@ -544,7 +584,7 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
             float rippleLod = 1.0 - smoothstep(55.0, 115.0, roadCamDist);
             puddleRippleVec = calculatePuddleRipples(vWorldPos.xz, uTime, (uRainWetness * uRippleIntensity) * rippleLod);
             vec3 puddleWorldN = normalize(vec3(puddleRippleVec.x * 0.72, puddleRippleVec.z, puddleRippleVec.y * 0.72));
-            vec3 roadPuddleRefl = clamp(calculateRoadPuddleReflection(vWorldPos, vLocalRoadPos, puddleWorldN, puddle), vec3(0.0), vec3(1.55));
+            vec3 roadPuddleRefl = clamp(calculateRoadPuddleReflection(vWorldPos, vLocalRoadPos, roadLatX, roadLongZ, puddleWorldN, puddle), vec3(0.0), vec3(1.55));
             totalEmissiveRadiance += roadPuddleRefl * puddle;
           }
         } else {
@@ -607,5 +647,13 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
     if (hasNightFactor) {
       this.uNightFactor.value = params.nightFactor!;
     }
+  }
+
+  public setRoadWidth(width: number): void {
+    this.uRoadWidth.value = width;
+  }
+
+  public setIsIntersectionPad(isPad: boolean): void {
+    this.uIsIntersectionPad.value = isPad ? 1.0 : 0.0;
   }
 }

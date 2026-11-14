@@ -235,6 +235,7 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
       expect(tex.name).toBe(`ShibuyaTex_${id}`);
       expect(tex.generateMipmaps).toBe(true);
       expect(tex.minFilter).toBe(THREE.LinearMipmapLinearFilter);
+      expect(tex.anisotropy).toBe(8);
     }
 
     // 商業路面店舗マテリアル
@@ -368,6 +369,7 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
       expect(mat.userData.hasArch3DVolumeShader).toBe(true);
       expect(mat.userData.arch3DVolumeChannel).toBe(item.expectedChannel);
       expect(mat.map).toBeDefined();
+      expect(mat.map?.flipY).toBe(false);
       expect(mat.emissiveMap).toBe(mat.map);
     }
 
@@ -399,17 +401,26 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     cityMap.applyShibuyaStreamGlbMaterial3DTexture(parcoRoofMat);
     expect(parcoRoofMat.userData.arch3DVolumeChannel).toBe("white_granite");
 
-    // 渋谷センター街（入口アーチ＆サイン看板）
-    const centerGaiSignMat = new THREE.MeshStandardMaterial({ name: "CenterGaiSignBanner" });
+    // 渋谷センター街（入口アーチ看板・フラッグバナー）
+    const centerGaiSignMat = new THREE.MeshStandardMaterial({ name: "ShibuyaCenterGaiArchSign" });
     cityMap.applyShibuyaStreamGlbMaterial3DTexture(centerGaiSignMat);
-    expect(centerGaiSignMat.userData.arch3DVolumeChannel).toBe("anodized_metal");
-    expect(centerGaiSignMat.emissive.getHex()).toBe(0xf59e0b);
+    expect(centerGaiSignMat.emissiveIntensity).toBeCloseTo(0.25, 2);
+
+    const centerGaiBannerMat = new THREE.MeshStandardMaterial({ name: "ShibuyaCenterGaiBanner" });
+    cityMap.applyShibuyaStreamGlbMaterial3DTexture(centerGaiBannerMat);
+    expect(centerGaiBannerMat.emissiveIntensity).toBeCloseTo(0.18, 2);
+
+    cityMap.setNightMode(true);
+    expect(centerGaiSignMat.emissiveIntensity).toBeCloseTo(0.85, 2);
+    expect(centerGaiBannerMat.emissiveIntensity).toBeCloseTo(0.65, 2);
+    cityMap.setNightMode(false);
 
     // PLATEAU 実在建物群向けマテリアル（LOD2実写テクスチャ＆Mipmap検証）
     const plateauTowerMat = new THREE.MeshStandardMaterial({ name: "PlateauGlassTower" });
     cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauTowerMat);
     expect(plateauTowerMat.userData.arch3DVolumeChannel).toBe("curtain_glass");
     expect(plateauTowerMat.map).toBeDefined();
+    expect(plateauTowerMat.map?.flipY).toBe(false);
     expect(plateauTowerMat.map?.generateMipmaps).toBe(true);
     expect(plateauTowerMat.emissiveMap).toBe(plateauTowerMat.map);
 
@@ -427,6 +438,14 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     expect(plateauAlleyMat.userData.arch3DVolumeChannel).toBe("stone_punched");
     expect(plateauAlleyMat.map).toBeDefined();
     expect(plateauAlleyMat.map?.generateMipmaps).toBe(true);
+
+    const plateauStorefrontMat = new THREE.MeshStandardMaterial({ name: "PlateauStorefrontMat" });
+    cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauStorefrontMat);
+    expect(plateauStorefrontMat.userData.arch3DVolumeChannel).toBe("retail_storefront");
+    expect(plateauStorefrontMat.map).toBeDefined();
+    expect(plateauStorefrontMat.map?.generateMipmaps).toBe(true);
+    expect(plateauStorefrontMat.map?.anisotropy).toBe(8);
+    expect(plateauStorefrontMat.emissiveMap).toBe(plateauStorefrontMat.map);
 
     const plateauRoofMat = new THREE.MeshStandardMaterial({ name: "PlateauRooftop" });
     cityMap.applyShibuyaPlateauGlbMaterial3DTexture(plateauRoofMat);
@@ -453,22 +472,19 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     expect(signsGroup).toBeDefined();
     expect(signsGroup).not.toBeNull();
 
-    if (signsGroup) {
-      // 突き出し袖看板およびビルボードメッシュが多数格納されていること
-      const childCount = signsGroup.children.length;
-      expect(childCount).toBeGreaterThan(15);
+    // 浮遊袖看板・浮遊ビルボード（単独空中メッシュ）が排除されていること
+    expect(signsGroup?.children.length).toBe(0);
 
-      // 明治通りの突き出し袖看板（scale.y が 3m 以上で薄いメッシュ）が道路上空へX軸方向に1.2m以上突出し、Z軸厚みが0.3m以下であること
-      const bladeSignMeshes = signsGroup.children.filter(
-        (c) =>
-          (c as THREE.Mesh).isMesh && c.scale.y >= 3.0 && c.scale.y <= 5.5 && c.scale.z <= 0.35,
-      );
-      expect(bladeSignMeshes.length).toBe(12);
-      for (const bMesh of bladeSignMeshes) {
-        expect(bMesh.scale.x).toBeGreaterThanOrEqual(1.2);
-        expect(bMesh.scale.z).toBeLessThanOrEqual(0.3);
+    // 渋谷幹線道路に立体中央分離帯アイランドおよび都市街区舗装基壇が構築されていること
+    const urbanBase = cityMap.group.getObjectByName("ShibuyaUrbanDistrictPavement");
+    expect(urbanBase).toBeDefined();
+    let medianCurbCount = 0;
+    cityMap.group.traverse((obj) => {
+      if (obj.name.startsWith("CurvedCentralMedian_Curb_")) {
+        medianCurbCount += 1;
       }
-    }
+    });
+    expect(medianCurbCount).toBeGreaterThanOrEqual(8);
 
     // ハチ公前広場インフラおよびスクランブル交差点対角線横断歩道が構築されていること
     const hachikoPlaza = cityMap.group.getObjectByName("ShibuyaHachikoPlazaInfrastructure");
@@ -596,6 +612,11 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     expect(mockShader.fragmentShader).toContain("#ifdef USE_MAP");
     // USE_EMISSIVEMAP ガードが含まれていること
     expect(mockShader.fragmentShader).toContain("#ifdef USE_EMISSIVEMAP");
+    // USE_MAP 内では緑かぶり反射(treeFoliageReflection)および高周波粒状ノイズ(archVolMicro)を重畳しないこと
+    const useMapSection =
+      mockShader.fragmentShader.split("#ifdef USE_MAP")[1]?.split("#else")[0] ?? "";
+    expect(useMapSection).not.toContain("treeFoliageReflection");
+    expect(useMapSection).not.toContain("archVolMicro");
   });
 
   it("渋谷センター街（バスケットボール通り）インフラ（舗装、アーチ看板、沿道商業ビル、バナーフラッグ）が構築され、夜間発光が連動することを保証する", async () => {
@@ -608,11 +629,11 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     expect(centerGaiGroup).toBeDefined();
     expect(centerGaiGroup).not.toBeNull();
 
-    // 入口アーチ看板の存在と位置
+    // 入口アーチ看板の存在と位置（文化村通り Y字合流回避のためスプライン u = 0.08 に配置）
     const archSign = centerGaiGroup!.getObjectByName("CenterGaiEntranceArchSign");
     expect(archSign).toBeDefined();
-    expect(archSign!.position.x).toBeCloseTo(-835, 1);
-    expect(archSign!.position.z).toBeCloseTo(268, 1);
+    expect(archSign!.position.x).toBeCloseTo(-841.1, 1);
+    expect(archSign!.position.z).toBeCloseTo(278.2, 1);
 
     const signPanel = archSign!.getObjectByName("CenterGaiMainSignPanel");
     expect(signPanel).toBeDefined();
@@ -626,6 +647,14 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
       c.name.startsWith("CenterGaiCommercialBuilding_"),
     );
     expect(commercialBuildings.length).toBe(6);
+    for (const cb of commercialBuildings) {
+      const cbMesh = cb as THREE.Mesh;
+      expect(Array.isArray(cbMesh.material)).toBe(true);
+      const mats = cbMesh.material as THREE.MeshStandardMaterial[];
+      expect(mats[2].name).toBe("PlateauLod2RoofMat");
+      const uvAttr = cbMesh.geometry.getAttribute("uv");
+      expect(uvAttr.getY(1)).toBeGreaterThanOrEqual(2);
+    }
 
     // バナーフラッグの存在（4地点×左右2 = 8本）
     const banners = centerGaiGroup!.children.filter((c) =>

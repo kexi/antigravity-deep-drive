@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
+import { assetManager } from "../assets/assetManager";
+import { DEFAULT_ASSETS_YAML } from "../assets/defaultAssetsYaml";
+import publicAssetsYaml from "../../public/config/assets.yml?raw";
 import { JapaneseRoadBuilder } from "../roads/roadBuilder";
 import { JapaneseRoadMaterial } from "../roads/japaneseRoadMaterial";
 import { RoadProps } from "../roads/roadProps";
@@ -99,10 +102,21 @@ describe("日本の道路作成システムの仕様検証", () => {
     expect(isFlatCollider).toBe(true);
     expect(roadCollider.width).toBeCloseTo(expectedRoadwayWidth, 0.01);
 
-    // 4. 歩道縁石・ガードレール（横断歩道前後の開口部で2分割×左右＝4区間）・信号機支柱・道路標識支柱・デリネーターの物理コライダーがすべて生成されることを保証する
-    // 車道(1) + 左右歩道(2) + 左右分割ガードレール(4) + 信号機支柱(4) + 標識支柱(6) + デリネーター(2) = 19個
-    expect(result.colliders.length).toBe(19);
-    expect(result.obstacleColliderHandles.length).toBe(16);
+    // 4. 歩道縁石・ガードレール（横断歩道前後の開口部で2分割×左右＝4区間）・信号機支柱・道路標識支柱の物理コライダーがすべて生成され、
+    // 中央分離帯が無い道路（medianWidth 未指定）では車道中央 x=0 に不自然なデリネーター柱を配置しないことを保証する
+    // 車道(1) + 左右歩道(2) + 左右分割ガードレール(4) + 信号機支柱(4) + 標識支柱(7) = 18個（障害物コライダー15個）
+    expect(result.colliders.length).toBe(18);
+    expect(result.obstacleColliderHandles.length).toBe(15);
+
+    const medianResult = builder.buildSegment(
+      { ...config, medianWidth: 1.6 },
+      mockWorld,
+      mockRapier,
+      new THREE.Vector3(0, 0, 0),
+      0,
+    );
+    expect(medianResult.colliders.length).toBe(19);
+    expect(medianResult.obstacleColliderHandles.length).toBe(16);
 
     // 5. 横断歩道（crossZ = length * 0.25 = 25m）の前後にガードレール開口部が設けられ、歩行者の通路を塞がないことを保証する
     const guardrailGroups = result.group.children.filter(
@@ -1408,6 +1422,263 @@ describe("日本の道路作成システムの仕様検証", () => {
         );
       }
       expect(len).toBeGreaterThanOrEqual(100);
+    }
+  });
+
+  it("45mおよび58mの短区間セグメントでも道路標識・信号支柱がセグメント端（±length/2）をはみ出して交差点内へ突出しないことを保証する", async () => {
+    await RAPIER.init();
+    const builder = new JapaneseRoadBuilder();
+
+    for (const length of [45, 58]) {
+      const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+      const res = builder.buildSegment(
+        {
+          name: `ShortSeg_${length}`,
+          lanesPerDirection: 2,
+          laneWidth: 3.5,
+          shoulderWidth: 1.5,
+          sidewalkWidth: 4.0,
+          curbHeight: 0.15,
+          length,
+          hasYellowCenterLine: false,
+          hasWhiteDashedLines: true,
+          hasCrosswalk: true,
+          hasGuardrails: true,
+          hasTrafficLights: true,
+          speedLimitSign: 50,
+        },
+        world,
+        RAPIER,
+        new THREE.Vector3(0, 0, 0),
+        0,
+      );
+      res.group.updateMatrixWorld(true);
+
+      const poleZPositions: number[] = [];
+      const wp = new THREE.Vector3();
+      res.group.traverse((obj) => {
+        const isPole = obj.name === "RoadSignPole" || obj.name === "TrafficSignalPole";
+        if (!isPole) return;
+        obj.getWorldPosition(wp);
+        poleZPositions.push(wp.z);
+      });
+
+      expect(poleZPositions.length).toBeGreaterThan(0);
+      for (const z of poleZPositions) {
+        expect(Math.abs(z)).toBeLessThanOrEqual(length * 0.5 - 0.5);
+      }
+    }
+  });
+
+  it("public/config/assets.yml と DEFAULT_ASSETS_YAML の双方で、全街路樹・標識・信号・ガントリー・ガードレールが車道・交差点アスファルト上に立たないことを保証する", async () => {
+    await RAPIER.init();
+
+    const minDistToPolyline = (px: number, pz: number, pts: THREE.Vector3[]): number => {
+      let minDist = Infinity;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i];
+        const b = pts[i + 1];
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const lenSq = dx * dx + dz * dz;
+        const t =
+          lenSq > 1e-8 ? Math.max(0, Math.min(1, ((px - a.x) * dx + (pz - a.z) * dz) / lenSq)) : 0;
+        const dist = Math.hypot(px - (a.x + dx * t), pz - (a.z + dz * t));
+        if (dist < minDist) {
+          minDist = dist;
+        }
+      }
+      return minDist;
+    };
+
+    const curvedCorridors = getOpenDataCurvedRoadCorridors().map((c) => {
+      const isHikarie = c.id === "nav-road-shibuya-hikarie-access";
+      const lanes =
+        c.widthMeters >= 20 ? 3 : Math.max(1, Math.min(3, Math.round(c.widthMeters / 8.5)));
+      const laneW = isHikarie ? 2.9 : 3.4;
+      const shW = isHikarie ? 0.5 : 1.2;
+      let medW = 0;
+      if (c.id.includes("meiji-dori") || c.id === "nav-road-yamate-dori") medW = 1.4;
+      else if (c.id === "nav-road-shibuya-tamagawa-west" || c.id === "nav-road-uchibori-dori")
+        medW = 1.2;
+      else if (c.id === "nav-road-route246" || c.id === "nav-road-shibuya-miyamasuzaka") medW = 1.0;
+      else if (c.id === "nav-road-shibuya-dogenzaka") medW = 0.8;
+      const halfDriveable = (lanes * 2 * laneW + shW * 2 + medW) * 0.5;
+      const curve = new THREE.CatmullRomCurve3(
+        c.points.map((p) => new THREE.Vector3(p.x, 0, p.z)),
+        false,
+        "centripetal",
+        0.5,
+      );
+      return {
+        id: c.id,
+        halfDriveable,
+        medHalfW: medW * 0.5,
+        pts: curve.getPoints(Math.max(40, Math.ceil(curve.getLength() / 2))),
+      };
+    });
+
+    const auditManifest = (label: string, yamlSource: string) => {
+      assetManager.loadFromYamlString(yamlSource);
+      const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+      const scene = new THREE.Scene();
+      new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+      scene.updateMatrixWorld(true);
+
+      const straightPlanes: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }> = [];
+      const intersectionPads: Array<{
+        name: string;
+        minX: number;
+        maxX: number;
+        minZ: number;
+        maxZ: number;
+      }> = [];
+      const curvedRoadMeshes: THREE.Mesh[] = [];
+      const sidewalkMeshes: THREE.Mesh[] = [];
+      const medianMeshes: THREE.Mesh[] = [];
+      const box = new THREE.Box3();
+      const wp = new THREE.Vector3();
+
+      scene.traverse((obj) => {
+        if (!(obj instanceof THREE.Mesh)) return;
+        const n = obj.name;
+        const pn = obj.parent?.name ?? "";
+        if (pn.startsWith("Intersection_") && obj.geometry instanceof THREE.PlaneGeometry) {
+          box.setFromObject(obj);
+          intersectionPads.push({
+            name: pn,
+            minX: box.min.x,
+            maxX: box.max.x,
+            minZ: box.min.z,
+            maxZ: box.max.z,
+          });
+        } else if (
+          obj.material instanceof JapaneseRoadMaterial &&
+          !n.includes("Marking") &&
+          !n.includes("Yellow") &&
+          !n.includes("White") &&
+          !n.includes("Shoulder") &&
+          !n.includes("Lane")
+        ) {
+          if (pn.startsWith("CurvedRoadSegment_")) {
+            curvedRoadMeshes.push(obj);
+          } else if (obj.geometry instanceof THREE.PlaneGeometry) {
+            box.setFromObject(obj);
+            straightPlanes.push({
+              minX: box.min.x,
+              maxX: box.max.x,
+              minZ: box.min.z,
+              maxZ: box.max.z,
+            });
+          }
+        } else if (n.startsWith("CurvedSidewalk_") || n.startsWith("CurvedCurb_")) {
+          sidewalkMeshes.push(obj);
+        } else if (obj.geometry instanceof THREE.BoxGeometry) {
+          const p = obj.geometry.parameters;
+          if (
+            Math.abs(p.height - 0.15) < 0.02 &&
+            p.width >= 2.0 &&
+            p.width <= 8.0 &&
+            p.depth >= 12
+          ) {
+            sidewalkMeshes.push(obj);
+          }
+        } else if (n.startsWith("CurvedCentralMedian")) {
+          medianMeshes.push(obj);
+        }
+      });
+
+      const overlaps: string[] = [];
+      for (let i = 0; i < straightPlanes.length; i++) {
+        const a = straightPlanes[i];
+        for (let j = i + 1; j < straightPlanes.length; j++) {
+          const b = straightPlanes[j];
+          const ox = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+          const oz = Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ);
+          if (ox > 0.5 && oz > 0.5) {
+            overlaps.push(`[${label}] straight overlap ${ox.toFixed(1)}x${oz.toFixed(1)}`);
+          }
+        }
+        for (const inter of intersectionPads) {
+          const ox = Math.min(a.maxX, inter.maxX) - Math.max(a.minX, inter.minX);
+          const oz = Math.min(a.maxZ, inter.maxZ) - Math.max(a.minZ, inter.minZ);
+          if (ox > 0.5 && oz > 0.5) {
+            overlaps.push(`[${label}] ${inter.name} overlap ${ox.toFixed(1)}x${oz.toFixed(1)}`);
+          }
+        }
+      }
+      expect(overlaps).toEqual([]);
+
+      const raycaster = new THREE.Raycaster();
+      const down = new THREE.Vector3(0, -1, 0);
+      const violations: string[] = [];
+
+      scene.traverse((obj) => {
+        const n = obj.name;
+        const pn = obj.parent?.name ?? "";
+        const isSignOrSignal =
+          n.startsWith("GantryColumn_") ||
+          n === "RoadSignPole" ||
+          n === "TrafficSignalPole" ||
+          n === "DelineatorPole";
+        const isMedianPost = n === "MedianGuidePost";
+        const isTree = Boolean(obj.userData?.isStreetTreeSlot);
+        const isGuardrailPost =
+          obj instanceof THREE.Mesh &&
+          obj.geometry instanceof THREE.CylinderGeometry &&
+          pn === "Guardrail_Posts" &&
+          obj.geometry.parameters.height > 0.5;
+        if (!isSignOrSignal && !isMedianPost && !isTree && !isGuardrailPost) {
+          return;
+        }
+
+        obj.getWorldPosition(wp);
+        const px = wp.x;
+        const pz = wp.z;
+
+        const inInter = intersectionPads.some(
+          (p) => px >= p.minX && px <= p.maxX && pz >= p.minZ && pz <= p.maxZ,
+        );
+        const inStraight = straightPlanes.some(
+          (p) => px >= p.minX && px <= p.maxX && pz >= p.minZ && pz <= p.maxZ,
+        );
+        const inCurvedCorridor = curvedCorridors.some((cd) => {
+          const d = minDistToPolyline(px, pz, cd.pts);
+          if (d > cd.halfDriveable) return false;
+          if (isMedianPost && cd.medHalfW > 0 && d <= cd.medHalfW) return false;
+          return !isMedianPost;
+        });
+
+        raycaster.set(new THREE.Vector3(px, 1.0, pz), down);
+        const swHits = raycaster.intersectObjects(sidewalkMeshes, false);
+        const medHits = raycaster.intersectObjects(medianMeshes, false);
+        const curvedHits = isMedianPost ? [] : raycaster.intersectObjects(curvedRoadMeshes, false);
+
+        if (isMedianPost) {
+          const isValidMedian = !inInter && !inStraight && !inCurvedCorridor && medHits.length > 0;
+          if (!isValidMedian) {
+            violations.push(`[${label}] ${n}@(${px.toFixed(1)},${pz.toFixed(1)})`);
+          }
+          return;
+        }
+
+        const isOnRoad = inInter || inStraight || inCurvedCorridor || curvedHits.length > 0;
+        const isMissingSidewalkSupport = isSignOrSignal && swHits.length === 0;
+        if (isOnRoad || isMissingSidewalkSupport) {
+          violations.push(
+            `[${label}] ${n}@(${px.toFixed(1)},${pz.toFixed(1)}) onRoad=${isOnRoad} sw=${swHits.length}`,
+          );
+        }
+      });
+
+      expect(violations).toEqual([]);
+    };
+
+    try {
+      auditManifest("public/config/assets.yml", publicAssetsYaml);
+      auditManifest("DEFAULT_ASSETS_YAML", DEFAULT_ASSETS_YAML);
+    } finally {
+      assetManager.loadFromYamlString(DEFAULT_ASSETS_YAML);
     }
   });
 });

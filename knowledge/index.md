@@ -58,3 +58,7 @@ trust_signals:
 - [043-complete-elimination-of-shibuya-grid-geometry.md](./043-complete-elimination-of-shibuya-grid-geometry.md): 渋谷エリア残存格子グリッド道路幾何学・架空交差点の完全根絶とスプライン曲線幹線統合
 - [044-curved-road-markings-and-lane-divider-ribbon-system.md](./044-curved-road-markings-and-lane-divider-ribbon-system.md): 曲線道路標示（破線車線境界線・中央線・外側線）のスプライン追従リボンメッシュ化と交差点白線競合の完全排除
 - [045-elimination-of-invisible-colliders-and-road-clearance.md](./045-elimination-of-invisible-colliders-and-road-clearance.md): 道路網における「見えない壁」（透明コライダー・交差点貫通ガードレール・重複ビル・残留物理形状）の完全根絶と道路空間クリアランス設計
+- [046-shibuya-plateau-lod-medians-and-floating-geometry-fixes.md](./046-shibuya-plateau-lod-medians-and-floating-geometry-fixes.md): 道玄坂・国道246号周辺の実画面レビューに基づく PLATEAU LOD・中央分離帯ガイドポスト・宙浮きビル屋根スラブの根本解消
+- [047-shibuya-road-network-connectivity-and-geometry-polish.md](./047-shibuya-road-network-connectivity-and-geometry-polish.md): 渋谷広域道路網の全線接続保証（GLB三角形スライス監査・高架橋脚/ヒカリエ/宮下パーク退避）および主要ビル1Fファサード刷新
+- [048-shibuya-clean-building-textures-and-uv-noise-elimination.md](./048-shibuya-clean-building-textures-and-uv-noise-elimination.md): 渋谷ビル群テクスチャの人物・雑多ノイズ除去、PLATEAU UV モアレ解消、およびシェーダー・GLB 全面クリーン化
+- [049-shibuya-spline-road-pbr-jr-guard-underpass-and-radial-infrastructure.md](./049-shibuya-spline-road-pbr-jr-guard-underpass-and-radial-infrastructure.md): 渋谷スプライン曲線道路網のPBRアスファルトシェーダー刷新、JR渋谷駅高架橋の常時表示リアル造形、および放射状道路インフラの安全配置

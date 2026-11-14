@@ -360,7 +360,7 @@ describe("車両およびゲームシステムの仕様検証", () => {
     // 夜間・夕暮れモード切替時にライムイエローアクセントおよびロビー窓の発光強度がブーストされることを保証する
     cityMap.setNightMode(true);
     expect(yellowAccentMat.emissiveIntensity).toBeCloseTo(0.95, 2);
-    expect(warmGlowMat.emissiveIntensity).toBeCloseTo(1.32, 2);
+    expect(warmGlowMat.emissiveIntensity).toBeCloseTo(0.58, 2);
     cityMap.setNightMode(false);
     expect(yellowAccentMat.emissiveIntensity).toBeCloseTo(0.08, 2);
     expect(warmGlowMat.emissiveIntensity).toBeCloseTo(0.04, 2);
