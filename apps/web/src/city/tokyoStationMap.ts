@@ -4362,6 +4362,27 @@ export class TokyoStationMap {
       return;
     }
 
+    // 4b. 渋谷スクランブルスクエア 屋上「SHIBUYA SKY」CROSSING LIGHT 天頂サーチライト
+    const isSearchlight = matName.includes("ShibuyaSkySearchlightGlow");
+    if (isSearchlight) {
+      const dayIntensity = 0.0;
+      const nightIntensity = 2.5;
+      stdMat.color = new THREE.Color(0xa5f3fc);
+      stdMat.emissive = new THREE.Color(0x38bdf8);
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.05;
+      stdMat.metalness = 0.0;
+      stdMat.transparent = true;
+      stdMat.opacity = this.isNightActive ? 0.72 : 0.0;
+      stdMat.depthWrite = false;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      return;
+    }
+
     // 5. 渋谷ヒカリエ 東急シアターオーブ球体劇場＆首都高高架下アンバーナトリウム照明
     const isHikarieGoldOrb = matName.includes("HikarieGoldOrb");
     if (isHikarieGoldOrb) {
@@ -4402,7 +4423,7 @@ export class TokyoStationMap {
     const isQfront109Accent = matName.includes("ShibuyaQfront109Accent");
     if (isQfront109Accent) {
       const dayIntensity = 0.35;
-      const nightIntensity = 0.9;
+      const nightIntensity = 2.8;
       stdMat.emissive = new THREE.Color(0xec4899);
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
       stdMat.roughness = 0.16;
@@ -7303,6 +7324,10 @@ export class TokyoStationMap {
     for (let i = 0; i < this.shibuyaStreamEmissiveEntries.length; i++) {
       const entry = this.shibuyaStreamEmissiveEntries[i];
       entry.material.emissiveIntensity = isNight ? entry.nightIntensity : entry.dayIntensity;
+      if (entry.material.name.includes("ShibuyaSkySearchlightGlow")) {
+        entry.material.opacity = isNight ? 0.72 : 0.0;
+        entry.material.visible = isNight;
+      }
     }
   }
 

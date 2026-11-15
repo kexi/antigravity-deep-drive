@@ -62,3 +62,4 @@ trust_signals:
 - [047-shibuya-road-network-connectivity-and-geometry-polish.md](./047-shibuya-road-network-connectivity-and-geometry-polish.md): 渋谷広域道路網の全線接続保証（GLB三角形スライス監査・高架橋脚/ヒカリエ/宮下パーク退避）および主要ビル1Fファサード刷新
 - [048-shibuya-clean-building-textures-and-uv-noise-elimination.md](./048-shibuya-clean-building-textures-and-uv-noise-elimination.md): 渋谷ビル群テクスチャの人物・雑多ノイズ除去、PLATEAU UV モアレ解消、およびシェーダー・GLB 全面クリーン化
 - [049-shibuya-spline-road-pbr-jr-guard-underpass-and-radial-infrastructure.md](./049-shibuya-spline-road-pbr-jr-guard-underpass-and-radial-infrastructure.md): 渋谷スプライン曲線道路網のPBRアスファルトシェーダー刷新、JR渋谷駅高架橋の常時表示リアル造形、および放射状道路インフラの安全配置
+- [050-shibuya-109-scramble-square-photorealistic-modeling-and-signage.md](./050-shibuya-109-scramble-square-photorealistic-modeling-and-signage.md): SHIBUYA 109・渋谷スクランブルスクエアのフォトリアル3Dモデリング・実写テクスチャ・夜間発光サイネージ刷新
