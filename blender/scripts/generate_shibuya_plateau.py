@@ -278,8 +278,50 @@ def dist_point_to_triangle_2d_sq(
 EXACT_CURVED_ROAD_CLEARANCES = [
     {
         "name": "nav-road-uchibori-dori",
-        "radius": 10.8,
-        "points": [(-253.0, 365.0), (-165.0, 378.0), (0.0, 390.0), (165.0, 378.0), (255.0, 365.0)],
+        "radius": 13.5,
+        "points": [
+            (-500.0, 365.0),
+            (-268.0, 365.0),
+            (-165.0, 378.0),
+            (0.0, 390.0),
+            (165.0, 378.0),
+            (270.0, 365.0),
+        ],
+    },
+    {
+        "name": "nav-road-gaien-higashi-dori",
+        "radius": 13.5,
+        "points": [(-380.0, -360.0), (-380.0, 540.0)],
+    },
+    {
+        "name": "nav-road-marunouchi-central",
+        "radius": 11.5,
+        "points": [(-460.0, 5.0), (-200.0, 5.0)],
+    },
+    {
+        "name": "nav-road-marunouchi-nakadori",
+        "radius": 11.5,
+        "points": [(-460.0, 165.0), (-200.0, 165.0)],
+    },
+    {
+        "name": "nav-road-route246-aoyama-main",
+        "radius": 16.5,
+        "points": [(-380.0, 250.0), (-200.0, 250.0)],
+    },
+    {
+        "name": "nav-road-uchibori-dori-west",
+        "radius": 16.5,
+        "points": [(-350.0, 350.0), (-350.0, 700.0)],
+    },
+    {
+        "name": "nav-road-eitai-dori",
+        "radius": 14.0,
+        "points": [(-268.0, -100.0), (-268.0, 380.0)],
+    },
+    {
+        "name": "nav-road-roppongi-dori",
+        "radius": 16.5,
+        "points": [(-600.0, -350.0), (-180.0, -350.0)],
     },
     {
         "name": "nav-road-meiji-dori",
@@ -361,9 +403,9 @@ EXACT_CURVED_ROAD_CLEARANCES = [
     },
     {
         "name": "nav-road-shibuya-dogenzaka",
-        "radius": 9.8,
+        "radius": 7.8,
         "points": [
-            (-837.0, 248.0),
+            (-830.0, 248.0),
             (-872.0, 235.0),
             (-925.0, 215.0),
             (-975.0, 188.0),
@@ -373,19 +415,20 @@ EXACT_CURVED_ROAD_CLEARANCES = [
     },
     {
         "name": "nav-road-shibuya-miyamasuzaka",
-        "radius": 10.3,
+        "radius": 12.5,
         "points": [
             (-732.0, 248.0),
             (-685.0, 252.0),
             (-635.0, 254.0),
             (-560.0, 250.0),
-            (-480.0, 242.0),
-            (-400.0, 232.0),
+            (-480.0, 248.0),
+            (-400.0, 249.0),
+            (-380.0, 250.0),
         ],
     },
     {
         "name": "nav-road-shibuya-bunkamura-dori",
-        "radius": 8.8,
+        "radius": 7.5,
         "points": [
             (-838.0, 252.0),
             (-869.0, 282.0),
@@ -397,8 +440,8 @@ EXACT_CURVED_ROAD_CLEARANCES = [
     },
     {
         "name": "nav-road-shibuya-koen-dori",
-        "radius": 9.3,
-        "points": [(-791.0, 270.0), (-798.0, 360.0), (-805.0, 440.0), (-810.0, 520.0)],
+        "radius": 7.5,
+        "points": [(-791.0, 250.0), (-798.0, 360.0), (-805.0, 440.0), (-810.0, 520.0)],
     },
     {
         "name": "nav-road-shibuya-inokashira-organ",
@@ -515,11 +558,12 @@ CUSTOM_LANDMARK_EXCLUSIONS = [
     ("ShibuyaCerulean", -934.0, -868.0, -76.0, -14.0),
     ("ShibuyaFukuras", -840.0, -773.0, 21.0, 71.0),
     ("ShibuyaHikarie", -725.0, -667.0, 117.0, 174.0),
-    ("ShibuyaMagnet", -781.0, -769.0, 280.0, 309.0),
+    ("ShibuyaMagnet", -785.0, -775.0, 276.0, 302.0),
     ("ShibuyaMarkCity", -918.0, -844.0, 132.0, 190.0),
     ("ShibuyaMiyashitaPark", -718.0, -672.0, 283.0, 357.0),
     ("ShibuyaParco", -858.0, -812.0, 362.0, 410.0),
-    ("ShibuyaQfront109", -900.0, -805.0, 252.0, 299.0),
+    ("ShibuyaQfront", -825.0, -805.0, 277.0, 299.0),
+    ("Shibuya109", -901.0, -868.0, 252.0, 274.0),
     ("ShibuyaSakuraStage", -838.0, -772.0, -54.0, 6.0),
     ("ShibuyaScrambleSquare", -835.0, -781.0, 117.0, 173.0),
     ("ShibuyaStream", -731.0, -673.0, -44.0, 14.0),
@@ -532,10 +576,10 @@ CUSTOM_LANDMARK_EXCLUSIONS = [
 
 
 ROAD_CORRIDOR_POLYLINES = [
-    # 1. 道玄坂本線（109前〜道玄坂上〜神泉接続）
+    # 1. 道玄坂本線（109前〜道玄坂上〜神泉接続: 道路実幅12mに整合）
     {
         "name": "Dogenzaka",
-        "radius": 12.5,
+        "radius": 7.5,
         "points": [
             (-830.0, 248.0),
             (-872.0, 235.0),
@@ -545,10 +589,10 @@ ROAD_CORRIDOR_POLYLINES = [
             (-1080.0, 140.0),
         ],
     },
-    # 2. 文化村通り（109前〜東急本店〜松濤二丁目）
+    # 2. 文化村通り（109前〜東急本店〜松濤二丁目: 道路実幅12mに整合）
     {
         "name": "Bunkamura",
-        "radius": 11.5,
+        "radius": 7.2,
         "points": [
             (-838.0, 252.0),
             (-869.0, 282.0),
@@ -561,7 +605,7 @@ ROAD_CORRIDOR_POLYLINES = [
     # 3. 玉川通り・国道246号西進（セルリアンタワー〜道玄坂上〜神泉町〜山手通り）
     {
         "name": "Tamagawa_West",
-        "radius": 14.5,
+        "radius": 10.8,
         "points": [
             (-855.0, 95.0),
             (-940.0, 115.0),
@@ -572,10 +616,10 @@ ROAD_CORRIDOR_POLYLINES = [
             (-1350.0, 150.0),
         ],
     },
-    # 4. 渋谷公園通り（神南一丁目〜PARCO〜渋谷区役所・NHK放送センター）
+    # 4. 渋谷公園通り（神南一丁目〜PARCO〜渋谷区役所・NHK放送センター: 道路実幅12mに整合）
     {
         "name": "Koen_Dori",
-        "radius": 11.5,
+        "radius": 7.2,
         "points": [
             (-790.0, 265.0),
             (-798.0, 360.0),
@@ -586,7 +630,7 @@ ROAD_CORRIDOR_POLYLINES = [
     # 5. 井の頭通り・オルガン坂（スクランブル北西〜宇田川町〜PARCO前〜明治通り）
     {
         "name": "Inokashira_Organ",
-        "radius": 9.0,
+        "radius": 6.2,
         "points": [
             (-875.0, 320.0),
             (-856.0, 342.0),
@@ -599,7 +643,7 @@ ROAD_CORRIDOR_POLYLINES = [
     # 6. 桜丘町・さくら坂（サクラステージ〜インフォスタワー〜玉川通り周回路）
     {
         "name": "Sakurazaka",
-        "radius": 8.5,
+        "radius": 5.8,
         "points": [
             (-855.0, 95.0),
             (-855.0, 40.0),
@@ -613,7 +657,7 @@ ROAD_CORRIDOR_POLYLINES = [
     # 7. 円山町・神泉仲通り（道玄坂上〜神泉駅前〜松濤二丁目）
     {
         "name": "Shinsen_Nakadori",
-        "radius": 7.5,
+        "radius": 5.5,
         "points": [
             (-1080.0, 140.0),
             (-1100.0, 185.0),
@@ -627,18 +671,19 @@ ROAD_CORRIDOR_POLYLINES = [
         "name": "Miyamasuzaka",
         "radius": 12.5,
         "points": [
-            (-750.0, 248.0),
+            (-732.0, 248.0),
             (-685.0, 252.0),
             (-635.0, 254.0),
-            (-560.0, 248.0),
+            (-560.0, 250.0),
             (-480.0, 248.0),
-            (-400.0, 248.0),
+            (-400.0, 249.0),
+            (-380.0, 250.0),
         ],
     },
     # 9. 神南二丁目連絡路（宮下公園北〜勤労福祉会館前）
     {
         "name": "Jinnan_Cross",
-        "radius": 8.5,
+        "radius": 6.0,
         "points": [
             (-750.0, 440.0),
             (-778.0, 440.0),
@@ -649,7 +694,7 @@ ROAD_CORRIDOR_POLYLINES = [
     # 10. 渋谷スクランブル交差点連絡路（109前〜スクランブル中心〜ハチ公前北〜宮益坂下）
     {
         "name": "Shibuya_Scramble",
-        "radius": 13.0,
+        "radius": 11.5,
         "points": [
             (-835.0, 252.0),
             (-815.0, 248.0),
@@ -660,7 +705,7 @@ ROAD_CORRIDOR_POLYLINES = [
     # 11. 渋谷センター街・バスケットボール通り（スクランブル北西〜宇田川町交番・井の頭通り合流〜東急本店前）
     {
         "name": "Center_Gai",
-        "radius": 7.0,
+        "radius": 5.5,
         "points": [
             (-835.0, 268.0),
             (-850.0, 292.0),
@@ -673,7 +718,7 @@ ROAD_CORRIDOR_POLYLINES = [
     # 12. 渋谷ヒカリエ連絡路・金王坂（宮益坂下〜ヒカリエ前〜金王坂・国道246号合流）
     {
         "name": "Hikarie_Access",
-        "radius": 8.5,
+        "radius": 5.8,
         "points": [
             (-729.0, 248.0),
             (-729.0, 205.0),
@@ -682,31 +727,68 @@ ROAD_CORRIDOR_POLYLINES = [
             (-727.5, 102.0),
         ],
     },
+    # 13. 外苑東通り・青山〜大手町境界南北幹線（data150 東端の車道閉塞を防止）
+    {
+        "name": "Gaien_Higashi_Dori",
+        "radius": 13.5,
+        "points": [(-380.0, -360.0), (-380.0, 540.0)],
+    },
+    # 14. 丸の内中央通り・仲通り・青山通り東・内堀通り・六本木通り（広域幹線クリアランス）
+    {
+        "name": "Marunouchi_Central_Ave",
+        "radius": 11.5,
+        "points": [(-460.0, 5.0), (-200.0, 5.0)],
+    },
+    {
+        "name": "Marunouchi_Naka_Dori",
+        "radius": 11.5,
+        "points": [(-460.0, 165.0), (-200.0, 165.0)],
+    },
+    {
+        "name": "Route_246_Aoyama_Main",
+        "radius": 16.5,
+        "points": [(-380.0, 250.0), (-200.0, 250.0)],
+    },
+    {
+        "name": "Uchibori_Dori_Main",
+        "radius": 13.5,
+        "points": [(-500.0, 365.0), (-200.0, 365.0)],
+    },
+    {
+        "name": "Uchibori_Dori_West",
+        "radius": 16.5,
+        "points": [(-350.0, 350.0), (-350.0, 700.0)],
+    },
+    {
+        "name": "Roppongi_Dori",
+        "radius": 16.5,
+        "points": [(-600.0, -350.0), (-180.0, -350.0)],
+    },
 ]
 
 # 主要交差点・広場の円形クリアランス（中心とクリアランス半径 m）
 ROAD_INTERSECTION_CLEARANCES = [
-    ((-815.0, 248.0), 24.0),  # 渋谷スクランブル交差点中心
-    ((-795.0, 225.0), 22.0),  # ハチ公前広場
-    ((-830.0, 252.0), 22.0),  # 109前Y字路
-    ((-835.0, 268.0), 16.0),  # センター街入口交差点
-    ((-1080.0, 140.0), 22.0),  # 道玄坂上
-    ((-1250.0, 150.0), 22.0),  # 神泉町
-    ((-1350.0, 150.0), 22.0),  # 山手通り・神泉町（玉川通り西進合流）
-    ((-855.0, 95.0), 22.0),  # セルリアンタワー前・玉川通り（さくら坂分岐）
-    ((-750.0, 95.0), 22.0),  # 渋谷駅東口・明治通り（青山通り分岐）
-    ((-730.0, 155.0), 16.0),  # 渋谷ヒカリエ前交差点（アクセス道路・ShinQs前）
-    ((-730.0, 95.0), 18.0),  # 金王坂下・ヒカリエ南交差点（国道246号・青山通り合流）
-    ((-940.0, 345.0), 19.0),  # 東急本店前
-    ((-1060.0, 370.0), 18.0),  # 松濤二丁目
-    ((-790.0, 265.0), 19.0),  # 神南一丁目
-    ((-798.0, 360.0), 18.0),  # 渋谷PARCO前
-    ((-805.0, 440.0), 18.0),  # 勤労福祉会館前
-    ((-810.0, 520.0), 22.0),  # 渋谷区役所・NHK前
-    ((-875.0, 320.0), 16.0),  # 宇田川町交番前
-    ((-950.0, -60.0), 16.0),  # さくら坂上
-    ((-560.0, 248.0), 19.0),  # 宮益坂上
-    ((-400.0, 248.0), 19.0),  # 青山通り接続
+    ((-815.0, 248.0), 22.5),  # 渋谷スクランブル交差点中心
+    ((-795.0, 225.0), 18.0),  # ハチ公前広場
+    ((-830.0, 252.0), 14.0),  # 109前Y字路
+    ((-835.0, 268.0), 11.0),  # センター街入口交差点
+    ((-1080.0, 140.0), 19.0),  # 道玄坂上
+    ((-1250.0, 150.0), 18.0),  # 神泉町
+    ((-1350.0, 150.0), 18.0),  # 山手通り・神泉町（玉川通り西進合流）
+    ((-855.0, 95.0), 18.5),  # セルリアンタワー前・玉川通り（さくら坂分岐）
+    ((-750.0, 95.0), 18.5),  # 渋谷駅東口・明治通り（青山通り分岐）
+    ((-730.0, 155.0), 14.0),  # 渋谷ヒカリエ前交差点（アクセス道路・ShinQs前）
+    ((-730.0, 95.0), 15.0),  # 金王坂下・ヒカリエ南交差点（国道246号・青山通り合流）
+    ((-940.0, 345.0), 16.0),  # 東急本店前
+    ((-1060.0, 370.0), 15.0),  # 松濤二丁目
+    ((-790.0, 265.0), 13.5),  # 神南一丁目
+    ((-798.0, 360.0), 14.0),  # 渋谷PARCO前
+    ((-805.0, 440.0), 15.0),  # 勤労福祉会館前
+    ((-810.0, 520.0), 16.0),  # 渋谷区役所・NHK前
+    ((-875.0, 320.0), 13.5),  # 宇田川町交番前
+    ((-950.0, -60.0), 14.0),  # さくら坂上
+    ((-560.0, 248.0), 16.5),  # 宮益坂上
+    ((-400.0, 248.0), 16.5),  # 青山通り接続
 ]
 
 
@@ -827,15 +909,15 @@ def setup_materials() -> list[bpy.types.Material]:
         emissive_strength=0.35,
         image_path="apps/web/public/textures/shibuya/plateau_lod2_storefront.jpg",
     )
-    # 3: センター街・道玄坂路地裏・低層商業テナントビル（暖色店舗照明・看板）
+    # 3: センター街・道玄坂路地裏・低層商業テナントビル（明るく実在感のある商業ストアフロント）
     mat_alley = create_pbr_material(
         "PlateauAlleyCommercial",
-        (0.44, 0.41, 0.38, 1.0),
-        roughness=0.52,
-        metallic=0.18,
-        emissive_color=(1.0, 0.82, 0.52, 1.0),
-        emissive_strength=0.38,
-        image_path="apps/web/public/textures/shibuya/shibuya_dogenzaka_commercial.jpg",
+        (0.76, 0.76, 0.78, 1.0),
+        roughness=0.45,
+        metallic=0.14,
+        emissive_color=(1.0, 0.90, 0.72, 1.0),
+        emissive_strength=0.28,
+        image_path="apps/web/public/textures/shibuya/plateau_lod2_storefront.jpg",
     )
     # 4: 屋上防水床面・パラペット手すり壁・塔屋（ペントハウス）・換気ルーバー
     mat_roof = create_pbr_material(
@@ -981,6 +1063,8 @@ def generate_shibuya_plateau_city() -> str:
         vert_z_offset: dict[int, float] = {}
         next_comp_id = 1
         total_floating_dropped = 0
+        is_single_batch_tile = len(bldg_polys) == 1
+        tile_accepted_boxes: list[tuple[float, float, float, float]] = []
 
         for bid, polys in bldg_polys.items():
             gml_id = gml_ids[bid] if bid < len(gml_ids) else ""
@@ -1017,13 +1101,23 @@ def generate_shibuya_plateau_city() -> str:
                 shell_w = c_max_x - c_min_x
                 shell_d = c_world_max_z - c_world_min_z
                 shell_area_xz = max(1.0, shell_w * shell_d)
-                # Why skip narrow slivers & tiny low sheds:
+                # Why skip narrow slivers & tiny low sheds & isolated data151 shard & data155 viaducts:
                 # PLATEAU の細長い境界壁・低層物置シェル (幅 <3.5m、面積 <180m2 かつ 高さ <4.5m、
-                # または面積 <45m2 かつ 高さ <7.0m) が交差点脇やアーチ背後に孤立した小屋として残るのを防ぐ。
+                # または面積 <45m2 かつ 高さ <7.0m)、道玄坂南側の広場中央に孤立する data151 西端残骸 (-870.2, 198.1)、
+                # および data155 に混入している首都高3号線の超長大高架橋スラブ (>85m) を除外する。
+                is_isolated_dogenzaka_shard = (
+                    tile_name == "data151"
+                    and -880.0 <= c_cx <= -860.0
+                    and 183.0 <= c_cz <= 215.0
+                    and c_h < 12.0
+                )
+                is_highway_viaduct_shell = tile_name == "data155" and max(shell_w, shell_d) > 85.0
                 if (
                     min(shell_w, shell_d) < 3.5
                     or (shell_area_xz < 180.0 and c_h < 4.5)
                     or (shell_area_xz < 45.0 and c_h < 7.0)
+                    or is_isolated_dogenzaka_shard
+                    or is_highway_viaduct_shell
                 ):
                     total_landmarks_skipped += len(sp)
                     continue
@@ -1071,6 +1165,8 @@ def generate_shibuya_plateau_city() -> str:
                 ]
 
                 in_exact_road = False
+                closest_disc: tuple[float, float, float] | None = None
+                min_disc_margin = float("inf")
                 if cand_discs and shell_tris_2d:
                     for ax, az, bx, bz, cx, cz in shell_tris_2d:
                         tmin_x = min(ax, bx, cx)
@@ -1085,13 +1181,13 @@ def generate_shibuya_plateau_city() -> str:
                                 or rz > tmax_z + rr
                             ):
                                 continue
-                            if dist_point_to_triangle_2d_sq(rx, rz, ax, az, bx, bz, cx, cz) <= (
-                                rr * rr
-                            ):
+                            d2 = dist_point_to_triangle_2d_sq(rx, rz, ax, az, bx, bz, cx, cz)
+                            if d2 <= (rr * rr):
                                 in_exact_road = True
-                                break
-                        if in_exact_road:
-                            break
+                                margin = math.sqrt(max(0.0, d2)) - rr
+                                if margin < min_disc_margin:
+                                    min_disc_margin = margin
+                                    closest_disc = (rx, rz, rr)
 
                 in_intersection = any(
                     math.hypot(c_cx - ix, c_cz - iz) <= iradius
@@ -1103,9 +1199,108 @@ def generate_shibuya_plateau_city() -> str:
                 )
 
                 if in_exact_road or in_intersection or in_corridor_center:
-                    total_road_clipped += len(sp)
-                    continue
+                    # 沿道ビル（宮益坂・公園通り・道玄坂・文化村通り等）が歩道・車道クリアランスに僅かに掛かる場合、
+                    # 道路法線方向へセットバック移動（4m〜16m）して道路・ランドマーク・既存ビルと非干渉なら救済する
+                    rescued = False
+                    if (
+                        8.5 <= c_h <= 65.0
+                        and min(shell_w, shell_d) >= 4.5
+                        and max(shell_w, shell_d) <= 56.0
+                        and closest_disc is not None
+                    ):
+                        rx0, rz0, _rr0 = closest_disc
+                        vx = c_cx - rx0
+                        vz = c_cz - rz0
+                        vlen = math.hypot(vx, vz)
+                        if vlen > 1e-3:
+                            ux, uz = vx / vlen, vz / vlen
+                            for shift_m in (4.5, 7.5, 10.5, 13.5, 16.5):
+                                s_dx = ux * shift_m
+                                s_dz = uz * shift_m
+                                s_min_x = c_min_x + s_dx
+                                s_max_x = c_max_x + s_dx
+                                s_w_min_z = c_world_min_z + s_dz
+                                s_w_max_z = c_world_max_z + s_dz
+                                s_cx = c_cx + s_dx
+                                s_cz = c_cz + s_dz
+                                # 1) カスタムランドマーク非干渉
+                                hits_lm = any(
+                                    min(s_max_x, lx1 + 2.0) - max(s_min_x, lx0 - 2.0) > 0.0
+                                    and min(s_w_max_z, lz1 + 2.0) - max(s_w_min_z, lz0 - 2.0) > 0.0
+                                    for _lm, lx0, lx1, lz0, lz1 in CUSTOM_LANDMARK_EXCLUSIONS
+                                )
+                                if hits_lm:
+                                    continue
+                                # 2) 既存受入シェルとの過度な重複なし
+                                hits_existing = any(
+                                    min(s_max_x, ex1) - max(s_min_x, ex0) > 2.0
+                                    and min(s_w_max_z, ez1) - max(s_w_min_z, ez0) > 2.0
+                                    for ex0, ex1, ez0, ez1 in tile_accepted_boxes
+                                )
+                                if hits_existing:
+                                    continue
+                                # 3) 交差点・ポリライン中心非干渉 (+1.0m 安全マージン)
+                                if any(
+                                    math.hypot(s_cx - ix, s_cz - iz) <= iradius + 1.0
+                                    for (ix, iz), iradius in ROAD_INTERSECTION_CLEARANCES
+                                ) or any(
+                                    point_to_polyline_distance(s_cx, s_cz, corridor["points"])
+                                    <= corridor["radius"] + 1.0
+                                    for corridor in ROAD_CORRIDOR_POLYLINES
+                                ):
+                                    continue
+                                # 4) 全道路ディスク非干渉 (+0.8m 安全マージン)
+                                s_cand = [
+                                    (rx, rz, rr + 0.8)
+                                    for (rx, rz, rr) in road_discs
+                                    if (s_min_x - max_disc_r) <= rx <= (s_max_x + max_disc_r)
+                                    and (s_w_min_z - max_disc_r) <= rz <= (s_w_max_z + max_disc_r)
+                                ]
+                                hits_disc = False
+                                for ax, az, bx, bz, cx, cz in shell_tris_2d:
+                                    sa_x, sa_z = ax + s_dx, az + s_dz
+                                    sb_x, sb_z = bx + s_dx, bz + s_dz
+                                    sc_x, sc_z = cx + s_dx, cz + s_dz
+                                    tmin_x = min(sa_x, sb_x, sc_x)
+                                    tmax_x = max(sa_x, sb_x, sc_x)
+                                    tmin_z = min(sa_z, sb_z, sc_z)
+                                    tmax_z = max(sa_z, sb_z, sc_z)
+                                    for rx, rz, rr in s_cand:
+                                        if (
+                                            rx < tmin_x - rr
+                                            or rx > tmax_x + rr
+                                            or rz < tmin_z - rr
+                                            or rz > tmax_z + rr
+                                        ):
+                                            continue
+                                        if dist_point_to_triangle_2d_sq(
+                                            rx, rz, sa_x, sa_z, sb_x, sb_z, sc_x, sc_z
+                                        ) <= (rr * rr):
+                                            hits_disc = True
+                                            break
+                                    if hits_disc:
+                                        break
+                                if not hits_disc:
+                                    s_dy = -s_dz
+                                    for vi in vert_indices:
+                                        obj.data.vertices[vi].co.x += s_dx
+                                        obj.data.vertices[vi].co.y += s_dy
+                                    c_min_x += s_dx
+                                    c_max_x += s_dx
+                                    c_min_y += s_dy
+                                    c_max_y += s_dy
+                                    c_cx += s_dx
+                                    c_cy += s_dy
+                                    c_cz += s_dz
+                                    c_world_min_z += s_dz
+                                    c_world_max_z += s_dz
+                                    rescued = True
+                                    break
+                    if not rescued:
+                        total_road_clipped += len(sp)
+                        continue
 
+                tile_accepted_boxes.append((c_min_x, c_max_x, c_world_min_z, c_world_max_z))
                 shell_records.append(
                     {
                         "polys": sp,
@@ -1133,22 +1328,43 @@ def generate_shibuya_plateau_city() -> str:
             for rec in shell_records:
                 is_at_bid_base = rec["min_z"] <= bid_z_min + 0.5
                 supporting = None
+                overlaps_lower_xy = False
                 if not is_at_bid_base:
                     for g in reversed(supported_shells):
                         overlap_w = min(g["max_x"], rec["max_x"]) - max(g["min_x"], rec["min_x"])
                         overlap_d = min(g["max_y"], rec["max_y"]) - max(g["min_y"], rec["min_y"])
-                        xy_overlaps = overlap_w >= 1.5 and overlap_d >= 1.5
+                        if (
+                            overlap_w >= 1.2
+                            and overlap_d >= 1.2
+                            and g["min_z"] < rec["min_z"] - 1.5
+                        ):
+                            overlaps_lower_xy = True
+                        xy_overlaps = overlap_w >= 2.5 and overlap_d >= 2.5
                         z_rests_on_roof = abs(rec["min_z"] - g["max_z"]) <= 0.8
                         if xy_overlaps and z_rests_on_roof:
                             supporting = g
                             break
 
-                is_floating_slab = (
-                    not is_at_bid_base
-                    and supporting is None
-                    and rec["h"] < 5.0
-                    and (rec["min_z"] - bid_z_min) > 2.5
-                )
+                if is_single_batch_tile:
+                    # data155 のように全ビルが同一バッチ(bid=0)に統合されているタイルでは、
+                    # 道玄坂〜神泉の斜面標高差(52m〜72m)を浮遊スラブと誤認しないよう近傍地盤標高と比較する
+                    near_ground_z = min(
+                        (
+                            s["min_z"]
+                            for s in shell_records
+                            if math.hypot(s["cx"] - rec["cx"], s["cy"] - rec["cy"]) <= 45.0
+                        ),
+                        default=rec["min_z"],
+                    )
+                    is_floating_slab = supporting is None and (
+                        overlaps_lower_xy or (rec["min_z"] - near_ground_z) > 4.5
+                    )
+                else:
+                    is_floating_slab = (
+                        not is_at_bid_base
+                        and supporting is None
+                        and (rec["min_z"] - bid_z_min) > 2.0
+                    )
                 if is_floating_slab:
                     total_floating_dropped += len(rec["polys"])
                     continue
@@ -1161,7 +1377,10 @@ def generate_shibuya_plateau_city() -> str:
 
                 cid = next_comp_id
                 next_comp_id += 1
-                comp_h = max(h if len(shell_records) == 1 else rec["h"], rec["h"])
+                comp_h = max(
+                    h if (len(shell_records) == 1 and not is_single_batch_tile) else rec["h"],
+                    rec["h"],
+                )
                 comp_info[cid] = (shift_z, comp_h, rec["cx"], rec["cy"])
                 for p in rec["polys"]:
                     valid_poly_comp[p.index] = cid
@@ -1312,22 +1531,22 @@ def generate_shibuya_plateau_city() -> str:
                 continue
 
             # 垂直壁面（Wall）: ビル単位でのマテリアル一貫性（三角形対角線割れアーティファクトを100%根絶）
-            # 渋谷の都市景観に応じたマテリアル割り当て（全4階×4スパン 16m×14m 実寸スケールで圧縮モアレを防止）:
-            # - 低中層商業ビル (<35m): 繁華街テナントファサード / ライムストーン店舗 (PlateauAlleyCommercial / PlateauStorefrontMat)
-            # - 中高層オフィス (35m〜60m): アルミパネル・窓グリッド (PlateauCommercialFacade)
-            # - 高層タワー (>=60m): ガラスカーテンウォール (PlateauGlassTower)
-            if bldg_h < 35.0:
-                mat_wall = 3 if (cid % 3 != 0) else 2
-                span_u = 16.0
-                span_v = 14.0
-            elif bldg_h < 60.0:
-                mat_wall = 1
-                span_u = 16.0
-                span_v = 14.0
+            # 渋谷の都市景観に応じたマテリアル割り当て（全4階×4スパン 8.5m×11.2m 実寸スケールで無地ピラー化とモアレを防止）:
+            # - 低層商業ビル (<24m): 繁華街テナントファサード / ライムストーン店舗 (PlateauAlleyCommercial / PlateauStorefrontMat)
+            # - 中層商業・オフィス (24m〜46m): アルミパネル・窓グリッド / 路面店舗 (PlateauCommercialFacade / PlateauStorefrontMat)
+            # - 高層タワー (>=46m): ガラスカーテンウォール / オフィス窓グリッド (PlateauGlassTower / PlateauCommercialFacade)
+            if bldg_h < 24.0:
+                mat_wall = 3 if (cid % 2 == 0) else 2
+                span_u = 8.0
+                span_v = 10.5
+            elif bldg_h < 46.0:
+                mat_wall = 1 if (cid % 3 != 0) else 2
+                span_u = 8.5
+                span_v = 11.2
             else:
-                mat_wall = 0
-                span_u = 16.0
-                span_v = 14.4
+                mat_wall = 0 if (cid % 3 != 0) else 1
+                span_u = 9.0
+                span_v = 11.6
 
             f.material_index = mat_wall
 
@@ -1339,10 +1558,11 @@ def generate_shibuya_plateau_city() -> str:
             else:
                 tx, ty = 1.0, 0.0
 
+            u_phase = (cid * 0.37) % 1.0
             for loop in f.loops:
                 co = loop.vert.co
-                # 水平接線（Tangent）プロジェクション
-                u = (co.x * tx + co.y * ty) / span_u
+                # 水平接線（Tangent）プロジェクション（同一平面三角形間で100%連続かつビル別位相オフセット付き）
+                u = u_phase + (co.x * tx + co.y * ty) / span_u
                 # 足元 z=0 から上階へ垂直タイリング
                 v = co.z / span_v
                 loop[uv_layer].uv = (u, v)
@@ -1588,7 +1808,11 @@ def render_360_review(review_dir: str) -> None:
     avail_engines = [
         e.identifier for e in bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items
     ]
-    if "CYCLES" in avail_engines:
+    if "BLENDER_EEVEE_NEXT" in avail_engines:
+        scene.render.engine = "BLENDER_EEVEE_NEXT"
+    elif "BLENDER_EEVEE" in avail_engines:
+        scene.render.engine = "BLENDER_EEVEE"
+    elif "CYCLES" in avail_engines:
         scene.render.engine = "CYCLES"
         try:
             cycles_prefs = bpy.context.preferences.addons["cycles"].preferences
@@ -1611,10 +1835,6 @@ def render_360_review(review_dir: str) -> None:
         scene.cycles.glossy_bounces = 2
         scene.cycles.transparent_max_bounces = 2
         scene.cycles.use_denoising = False
-    elif "BLENDER_EEVEE_NEXT" in avail_engines:
-        scene.render.engine = "BLENDER_EEVEE_NEXT"
-    else:
-        scene.render.engine = "CYCLES"
 
     scene.render.resolution_x = 800
     scene.render.resolution_y = 450

@@ -1622,6 +1622,37 @@ if (curbCamDist < 36.0) {
     };
 
     const activeRoadIntervals = computeActiveArcIntervals(startMarkingTrim, endMarkingTrim, 4.0);
+    const shouldAddCrosswalks = Boolean(config.hasCrosswalk || config.hasCrosswalks);
+    const shouldAddStopLinesForSpan = config.hasStopLines ?? true;
+    const getLongitudinalMarkingSpan = (
+      iv: { start: number; end: number },
+      ivIdx: number,
+    ): { start: number; end: number } => {
+      const ivLen = iv.end - iv.start;
+      const isLongEnough = ivLen >= 28.0;
+      if (!isLongEnough || (!shouldAddCrosswalks && !shouldAddStopLinesForSpan)) {
+        return iv;
+      }
+      const shouldSkipStart = ivIdx === 0 && Boolean(config.skipStartCrosswalk);
+      const shouldSkipEnd =
+        ivIdx === activeRoadIntervals.length - 1 && Boolean(config.skipEndCrosswalk);
+      const fStartCross = getInterpolatedFrame(iv.start + 3.5);
+      const fStartStop = getInterpolatedFrame(iv.start + 6.3);
+      const hasStartMarking =
+        !shouldSkipStart &&
+        ((shouldAddCrosswalks && !isPointInExclusion(fStartCross.pos.x, fStartCross.pos.z, 2.0)) ||
+          (shouldAddStopLinesForSpan &&
+            !isPointInExclusion(fStartStop.pos.x, fStartStop.pos.z, 2.0)));
+      const fEndCross = getInterpolatedFrame(iv.end - 3.5);
+      const fEndStop = getInterpolatedFrame(iv.end - 6.3);
+      const hasEndMarking =
+        !shouldSkipEnd &&
+        ((shouldAddCrosswalks && !isPointInExclusion(fEndCross.pos.x, fEndCross.pos.z, 2.0)) ||
+          (shouldAddStopLinesForSpan && !isPointInExclusion(fEndStop.pos.x, fEndStop.pos.z, 2.0)));
+      const trimmedStart = hasStartMarking ? iv.start + 6.8 : iv.start;
+      const trimmedEnd = hasEndMarking ? iv.end - 6.8 : iv.end;
+      return trimmedEnd - trimmedStart >= 4.0 ? { start: trimmedStart, end: trimmedEnd } : iv;
+    };
 
     // 中央分離帯区間（medianWidth > 0 のときは交差点開口部・排他半径を除いた立体中央分離帯アイランドを構築）
     const hasRaisedMedian = medianW > 0;
@@ -1703,10 +1734,30 @@ if (curbCamDist < 36.0) {
         }
       }
     } else {
-      // 中央線（立体分離帯なしの道路: 片側2車線以上は白実線、片側1車線かつ追越し禁止は黄色実線）
+      // 中央線（立体分離帯なしの道路: 片側2車線以上は白実線、片側1車線かつ追越し禁止は黄色実線、片側1車線一般道は白破線）
       const hasCenterLine = config.hasCenterLine ?? true;
       const isMultiLaneCurved = config.lanesPerDirection >= 2;
       const isSingleLaneYellow = !isMultiLaneCurved && Boolean(config.hasYellowCenterLine);
+      const isSingleLaneDashed = !isMultiLaneCurved && !isSingleLaneYellow;
+      if (hasCenterLine && isSingleLaneDashed) {
+        for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
+          const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
+          const centerDashGeom = buildDashedRibbonGeometry(
+            0,
+            0.14,
+            baseY + 0.02,
+            4.0,
+            4.0,
+            iv.start,
+            iv.end,
+          );
+          const centerDashMesh = new THREE.Mesh(centerDashGeom, whiteLineMat);
+          centerDashMesh.name = `CurvedMarking_WhiteDashedCenter_${ivIdx}`;
+          centerDashMesh.userData.paintColor = "white";
+          centerDashMesh.receiveShadow = true;
+          group.add(centerDashMesh);
+        }
+      }
       const shouldDrawCenterLine = hasCenterLine && (isMultiLaneCurved || isSingleLaneYellow);
       if (shouldDrawCenterLine) {
         const centerMat = isMultiLaneCurved
@@ -1728,7 +1779,7 @@ if (curbCamDist < 36.0) {
             })();
 
         for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
-          const iv = activeRoadIntervals[ivIdx];
+          const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
           const centerGeom = buildArcRibbonGeometry(
             -0.09,
             0.09,
@@ -1756,7 +1807,7 @@ if (curbCamDist < 36.0) {
       for (const sideSign of [-1, 1]) {
         const centerOff = sideSign * shoulderOffset;
         for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
-          const iv = activeRoadIntervals[ivIdx];
+          const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
           const edgeGeom = buildArcRibbonGeometry(
             centerOff - 0.075,
             centerOff + 0.075,
@@ -1781,7 +1832,7 @@ if (curbCamDist < 36.0) {
         for (let lane = 1; lane < config.lanesPerDirection; lane++) {
           const laneOffset = dirSign * (medianW / 2 + lane * config.laneWidth);
           for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
-            const iv = activeRoadIntervals[ivIdx];
+            const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
             const dashedGeom = buildDashedRibbonGeometry(
               laneOffset,
               0.15,
@@ -1945,7 +1996,6 @@ if (curbCamDist < 36.0) {
       return yellowMat;
     })();
 
-    const shouldAddCrosswalks = Boolean(config.hasCrosswalk || config.hasCrosswalks);
     const lanesPerDir = config.lanesPerDirection;
 
     for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
@@ -1957,10 +2007,18 @@ if (curbCamDist < 36.0) {
       }
 
       // 横断歩道 & 停止線アプローチ
-      const approaches = [
+      const rawApproaches = [
         { name: "Start", sCross: iv.start + 3.5, sStop: iv.start + 6.3, isStart: true },
         { name: "End", sCross: iv.end - 3.5, sStop: iv.end - 6.3, isStart: false },
       ];
+      const approaches = rawApproaches.filter((app) => {
+        const shouldSkipStart = app.isStart && ivIdx === 0 && Boolean(config.skipStartCrosswalk);
+        const shouldSkipEnd =
+          !app.isStart &&
+          ivIdx === activeRoadIntervals.length - 1 &&
+          Boolean(config.skipEndCrosswalk);
+        return !shouldSkipStart && !shouldSkipEnd;
+      });
 
       for (const app of approaches) {
         const fCross = getInterpolatedFrame(app.sCross);
@@ -1990,10 +2048,12 @@ if (curbCamDist < 36.0) {
           }
         }
 
-        // 停止線 (各進入車線半幅に幅 0.40m の白実線)
+        // 停止線 (各進入車線半幅に幅 0.40m の白実線。歩行者専用道路等では抑制)
+        const shouldAddStopLines = config.hasStopLines ?? true;
         const isStartApproach = app.isStart;
         const fStop = getInterpolatedFrame(app.sStop);
-        const isStopBlocked = isPointInExclusion(fStop.pos.x, fStop.pos.z, 2.0);
+        const isStopBlocked =
+          !shouldAddStopLines || isPointInExclusion(fStop.pos.x, fStop.pos.z, 2.0);
 
         if (!isStopBlocked) {
           const stopOffLeft = isStartApproach ? -halfDriveable + 0.5 : Math.max(0.1, medianW * 0.5);
@@ -2040,14 +2100,9 @@ if (curbCamDist < 36.0) {
                   ? -(medianW * 0.5 + (lane - 0.5) * config.laneWidth)
                   : +(medianW * 0.5 + (lane - 0.5) * config.laneWidth);
 
+                // 日本の左側通行（lane=1: 中央線・分離帯側 = 最右車線, lane=lanesPerDir: 歩道側 = 最左車線）に準拠
                 const arrowType: "straight" | "straight-left" | "right" =
-                  lane === 1
-                    ? lanesPerDir >= 3
-                      ? "straight-left"
-                      : "straight"
-                    : lane === lanesPerDir
-                      ? "right"
-                      : "straight";
+                  lane === 1 ? "right" : lane === lanesPerDir ? "straight-left" : "straight";
 
                 const arrowMesh = this.markings.createLaneArrowMarking(
                   fArrow.pos.x + fArrow.normal.x * laneCenterOffset,

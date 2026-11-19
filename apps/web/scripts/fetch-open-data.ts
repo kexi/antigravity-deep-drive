@@ -38,10 +38,10 @@ const UX_EAST = -UZ_NORTH;
 const UX_NORTH = UZ_EAST;
 
 function localToWgs84(x: number, z: number): { lat: number; lon: number } {
-  const isShibuyaZone = x < -550;
+  const isShibuyaZone = x < -345;
   if (isShibuyaZone) {
     const eastM = x - SHIBUYA_LOCAL_ANCHOR_X;
-    const northM = -(z - SHIBUYA_LOCAL_ANCHOR_Z);
+    const northM = z - SHIBUYA_LOCAL_ANCHOR_Z;
     const lon = SHIBUYA_ORIGIN_LON + eastM / METERS_PER_DEG_LON;
     const lat = SHIBUYA_ORIGIN_LAT + northM / METERS_PER_DEG_LAT;
     return { lat, lon };
@@ -60,7 +60,7 @@ function wgs84ToLocal(lat: number, lon: number): { x: number; z: number } {
     const eastM = (lon - SHIBUYA_ORIGIN_LON) * METERS_PER_DEG_LON;
     const northM = (lat - SHIBUYA_ORIGIN_LAT) * METERS_PER_DEG_LAT;
     const x = SHIBUYA_LOCAL_ANCHOR_X + eastM;
-    const z = SHIBUYA_LOCAL_ANCHOR_Z - northM;
+    const z = SHIBUYA_LOCAL_ANCHOR_Z + northM;
     return {
       x: Number(x.toFixed(2)),
       z: Number(z.toFixed(2)),
@@ -102,42 +102,73 @@ async function buildShibuyaDem5aGrid() {
   const zMax = 280;
   const gridStep = 20;
 
-  let demRows: number[][] | null = null;
-  const shibuyaDemUrl = "https://cyberjapandata.gsi.go.jp/xyz/dem5a/15/29100/12906.txt";
-  try {
-    const res = await fetch(shibuyaDemUrl);
-    const isOk = res.ok;
-    if (isOk) {
-      const text = await res.text();
-      demRows = text
-        .trim()
-        .split(/\r?\n/)
-        .map((line) =>
-          line.split(",").map((cell) => {
-            const parsed = Number.parseFloat(cell);
-            return Number.isFinite(parsed) ? parsed : 15.2;
-          }),
-        );
+  // グリッド全体をカバーする地理院タイル (zoom=15) をすべて取得・キャッシュする
+  const tileCache = new Map<string, (number | null)[][] | null>();
+  const neededTiles = new Set<string>();
+  for (let z = zMin; z <= zMax; z += gridStep) {
+    for (let x = xMin; x <= xMax; x += gridStep) {
+      const { lat, lon } = localToWgs84(x, z);
+      const { tileX, tileY } = latLonToTilePixel(lat, lon, 15);
+      neededTiles.add(`${tileX}/${tileY}`);
     }
-  } catch {
-    demRows = null;
   }
+
+  await Promise.all(
+    Array.from(neededTiles).map(async (key) => {
+      const url = `https://cyberjapandata.gsi.go.jp/xyz/dem5a/15/${key}.txt`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) {
+          tileCache.set(key, null);
+          return;
+        }
+        const text = await res.text();
+        const rows = text
+          .trim()
+          .split(/\r?\n/)
+          .map((line) =>
+            line.split(",").map((cell) => {
+              const parsed = Number.parseFloat(cell);
+              return Number.isFinite(parsed) && parsed > -50 ? parsed : null;
+            }),
+          );
+        tileCache.set(key, rows);
+      } catch {
+        tileCache.set(key, null);
+      }
+    }),
+  );
 
   const elevationGrid: number[][] = [];
   for (let z = zMin; z <= zMax; z += gridStep) {
     const row: number[] = [];
     for (let x = xMin; x <= xMax; x += gridStep) {
+      const { lat, lon } = localToWgs84(x, z);
+      const { tileX, tileY, px, py } = latLonToTilePixel(lat, lon, 15);
+      const demRows = tileCache.get(`${tileX}/${tileY}`) ?? null;
+      const sampled = demRows?.[py]?.[px];
+      if (typeof sampled === "number" && Number.isFinite(sampled)) {
+        row.push(Number(sampled.toFixed(2)));
+        continue;
+      }
+      // 欠測セル (e) 時は近傍の有効セル平均を優先、無ければ渋谷川スリバチ地形フォールバック
+      let neighborSum = 0;
+      let neighborCount = 0;
       if (demRows) {
-        const { lat, lon } = localToWgs84(x, z);
-        const { px, py } = latLonToTilePixel(lat, lon, 15);
-        const sampled = demRows[py]?.[px];
-        const hasValidSample = typeof sampled === "number" && Number.isFinite(sampled);
-        if (hasValidSample) {
-          row.push(Number(sampled.toFixed(2)));
-          continue;
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            const val = demRows[py + dy]?.[px + dx];
+            if (typeof val === "number" && Number.isFinite(val)) {
+              neighborSum += val;
+              neighborCount++;
+            }
+          }
         }
       }
-      // 渋谷川・明治通り谷底 (x=-735..-715: TP +15.0m) から東西両岸（宮益坂・道玄坂・桜丘町）へせり上がるスリバチ地形
+      if (neighborCount > 0) {
+        row.push(Number((neighborSum / neighborCount).toFixed(2)));
+        continue;
+      }
       const valleyOffset = Math.abs(x - -720.0);
       const slopeGain = Math.max(0, valleyOffset - 35.0) * 0.065;
       const northSouthSlope = Math.max(0, z + 50.0) * 0.008;
@@ -359,6 +390,9 @@ async function main() {
     "13113-bldg-shibuya-mark-city": "13113-bldg-2603",
     "13113-bldg-qfront-109": "13113-bldg-223",
     "13113-bldg-shibuya-solasta": "13113-bldg-1929",
+    "13113-bldg-shibuya-miyamasu-tower": "13113-bldg-337",
+    "13113-bldg-miyamasuzaka-ue-tower": "13113-bldg-266",
+    "13113-bldg-aoyama-omotesando-square": "13113-bldg-2767",
   };
 
   const shibuyaPlateauBuildings = SHIBUYA_PLATEAU_BUILDINGS.map((b) => {

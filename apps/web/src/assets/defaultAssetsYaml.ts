@@ -350,9 +350,16 @@ signs:
     rotationY: 3.14159
     supportType: "portal"
     spanWidth: 26.6
-    label: "恵比寿 渋谷ストリーム"
-    subLabel: "Ebisu / Shibuya Stream"
-    arrowDirections: ["直進", "左折"]
+    label: "宮益坂下・原宿"
+    subLabel: "Miyamasuzaka / Harajuku"
+    leftLabel: "青山・六本木"
+    leftSubLabel: "Aoyama / Roppongi"
+    rightLabel: "三軒茶屋・道玄坂"
+    rightSubLabel: "Sangenjaya / Dogenzaka"
+    roadNumber: "246"
+    subRoadNumber: "305"
+    intersectionName: "渋谷ストリーム前"
+    arrowDirections: ["直進", "左折", "右折"]
 
   - id: "intersection_name_shibuya_stream"
     type: "intersection_name"
@@ -387,8 +394,15 @@ signs:
     rotationY: 3.14159
     supportType: "portal"
     spanWidth: 26.6
-    label: "原宿 首都高3号・国道246号"
-    subLabel: "Harajuku / Shutoko Rte 3 / Rte 246"
+    label: "原宿・新宿"
+    subLabel: "Harajuku / Shinjuku"
+    leftLabel: "青山一丁目・赤坂"
+    leftSubLabel: "Aoyama / Akasaka"
+    rightLabel: "三軒茶屋・渋谷駅西口"
+    rightSubLabel: "Sangenjaya / Shibuya W."
+    roadNumber: "246"
+    subRoadNumber: "305"
+    intersectionName: "渋谷駅東口"
     arrowDirections: ["左折", "直進", "右折"]
 
   - id: "overhead_guide_shibuya_miyamasu"
@@ -397,29 +411,50 @@ signs:
     rotationY: 1.5708
     supportType: "cantilever"
     spanWidth: 19.2
-    label: "青山 赤坂"
-    subLabel: "Aoyama / Akasaka [246]"
-    arrowDirections: ["直進", "右折"]
+    label: "道玄坂・スクランブル"
+    subLabel: "Dogenzaka / Scramble"
+    leftLabel: "原宿・新宿"
+    leftSubLabel: "Harajuku / Shinjuku"
+    rightLabel: "恵比寿・渋谷駅"
+    rightSubLabel: "Ebisu / Shibuya Sta."
+    roadNumber: "305"
+    subRoadNumber: "413"
+    intersectionName: "宮益坂下"
+    arrowDirections: ["直進", "左折", "右折"]
 
   - id: "overhead_guide_shibuya_dogenzaka"
     type: "overhead_guide"
-    position: [-926.0, 0.0, 216.0]
+    position: [-925.5, 0.0, 215.5]
     rotationY: 1.25
     supportType: "cantilever"
-    spanWidth: 16.0
-    label: "三軒茶屋 世田谷"
-    subLabel: "Sangenjaya / Setagaya [246]"
-    arrowDirections: ["直進", "左折"]
+    spanWidth: 12.4
+    label: "三軒茶屋・世田谷"
+    subLabel: "Sangenjaya / Setagaya"
+    leftLabel: "玉川通り・池尻"
+    leftSubLabel: "Tamagawa-dori / Rte 246"
+    rightLabel: "神泉・駒場"
+    rightSubLabel: "Shinsen / Komaba"
+    roadNumber: "246"
+    subRoadNumber: "413"
+    intersectionName: "道玄坂上"
+    arrowDirections: ["直進", "左折", "右折"]
 
   - id: "overhead_guide_shibuya_meiji_north"
     type: "overhead_guide"
-    position: [-773.5, 0.0, 295.0]
+    position: [-746.6, 0.0, 295.0]
     rotationY: 3.1416
     supportType: "cantilever"
     spanWidth: 16.0
-    label: "原宿 新宿"
-    subLabel: "Harajuku / Shinjuku [305]"
-    arrowDirections: ["直進"]
+    label: "原宿・新宿"
+    subLabel: "Harajuku / Shinjuku"
+    leftLabel: "表参道・青山"
+    leftSubLabel: "Omotesando / Aoyama"
+    rightLabel: "公園通り・代々木"
+    rightSubLabel: "Koen-dori / Yoyogi"
+    roadNumber: "305"
+    subRoadNumber: "413"
+    intersectionName: "宮下公園前"
+    arrowDirections: ["直進", "左折", "右折"]
 
 weatherPresets:
   - id: "sunset"

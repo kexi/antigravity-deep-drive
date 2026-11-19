@@ -104,10 +104,10 @@ const TIME_LIGHTING_PROFILES: Record<TimeOfDay, TimeLightingProfile> = {
     fogColor: 0xbae6fd,
     baseFogDensity: 0.0015,
     sunColor: 0xfffaed,
-    sunIntensity: 2.8,
+    sunIntensity: 2.9,
     ambientSkyColor: 0x93c5fd,
-    ambientGroundColor: 0x1e293b,
-    ambientIntensity: 1.05,
+    ambientGroundColor: 0x526071,
+    ambientIntensity: 1.2,
     cloudColor: 0xffffff,
     cloudShadowColor: 0x94a3b8,
     baseCloudCoverage: 0.44,
@@ -212,7 +212,7 @@ export class WeatherSystem {
     this.scene = scene;
 
     // 1. 半球環境光
-    this.hemiLight = new THREE.HemisphereLight(0xbfdbfe, 0x1e293b, 1.0);
+    this.hemiLight = new THREE.HemisphereLight(0xbfdbfe, 0x526071, 1.15);
     this.scene.add(this.hemiLight);
 
     // 2. 太陽・月光（DirectionalLight）
@@ -758,6 +758,15 @@ export class WeatherSystem {
     this.hemiLight.color.setHex(ambientSkyColor);
     this.hemiLight.groundColor.setHex(base.ambientGroundColor);
     this.hemiLight.intensity = base.ambientIntensity * ambientMultiplier;
+    if (this.scene.environment) {
+      this.scene.environmentIntensity = isNight
+        ? 0.14
+        : timeOfDay === "sunset"
+          ? 0.48
+          : timeOfDay === "morning"
+            ? 0.62
+            : 0.78;
+    }
 
     const flareAllowed = base.lensflareEnabled && !isRain && !isCloudy;
     // Why not: THREE.Lensflare を有限座標の dirLight (例: [60, 42, 180]) に直接表示すると、
@@ -892,8 +901,11 @@ export class WeatherSystem {
 
     this.hemiLight.color.setHex(preset.ambientColor);
     this.hemiLight.groundColor.setHex(
-      isNightPreset ? 0x020617 : isSunsetPreset ? 0x451a03 : 0x1e293b,
+      isNightPreset ? 0x020617 : isSunsetPreset ? 0x451a03 : 0x526071,
     );
+    if (this.scene.environment) {
+      this.scene.environmentIntensity = isNightPreset ? 0.14 : isSunsetPreset ? 0.48 : 0.78;
+    }
     this.hemiLight.intensity = isNightPreset ? 0.45 : isRainPreset ? 0.7 : 1.1;
 
     this.lensflare.visible = false;

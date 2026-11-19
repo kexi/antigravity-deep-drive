@@ -142,7 +142,7 @@ export function wgs84ToLocal(lat: number, lon: number): LocalCoordinate {
     const eastM = (lon - shibuyaOriginLon) * METERS_PER_DEG_LON;
     const northM = (lat - shibuyaOriginLat) * METERS_PER_DEG_LAT;
     const x = -695.0 + eastM;
-    const z = -15.0 - northM;
+    const z = -15.0 + northM;
     return {
       x: Number(x.toFixed(2)),
       z: Number(z.toFixed(2)),
@@ -168,12 +168,16 @@ export function wgs84ToLocal(lat: number, lon: number): LocalCoordinate {
  * 渋谷ゾーン (x < -550) では渋谷ストリーム (35.65722°N, 139.70319°E, local: -695, -15) をアンカーとして実在座標へ変換する。
  */
 export function localToWgs84(x: number, z: number): Wgs84Coordinate {
-  const isShibuyaZone = x < -550;
+  // Why x < -345:
+  // 宮益坂上 (-550) 〜 表参道 〜 青山一丁目 (-380) 〜 青山通り東端 (-346) を走行中に
+  // 丸の内側座標系（大手町・読売新聞本社付近）へ不連続ジャンプしないよう判定境界を x < -345 まで拡張し、
+  // 同時に openData.test.ts の大手町タワー判定 (-335, 110) は千代田区領域として維持する。
+  const isShibuyaZone = x < -345;
   if (isShibuyaZone) {
     const shibuyaOriginLat = 35.65722;
     const shibuyaOriginLon = 139.70319;
     const eastM = x - -695.0;
-    const northM = -(z - -15.0);
+    const northM = z - -15.0;
     const lon = shibuyaOriginLon + eastM / METERS_PER_DEG_LON;
     const lat = shibuyaOriginLat + northM / METERS_PER_DEG_LAT;
     return {
@@ -202,7 +206,7 @@ export function localToWgs84(x: number, z: number): Wgs84Coordinate {
  * - 丸の内・皇居ゾーン (`x >= -550`) では `activeOpenData.dem5a` (タイル `15/29105/12903`) をバイリニア補間する。
  */
 export function sampleGsiDemElevation(x: number, z: number): number {
-  const isShibuyaZone = x < -550;
+  const isShibuyaZone = x < -345;
   if (isShibuyaZone) {
     const shibuyaDem = (
       activeOpenData as TokyoOpenDataBundle & {
@@ -239,7 +243,18 @@ export function sampleGsiDemElevation(x: number, z: number): number {
       const e11 = shibuyaDem.elevationGrid[row1][col1];
       const top = e00 * (1 - tx) + e10 * tx;
       const bottom = e01 * (1 - tx) + e11 * tx;
-      return Number((top * (1 - tz) + bottom * tz).toFixed(2));
+      const gridElevation = top * (1 - tz) + bottom * tz;
+      const isEastOfShibuyaDem = x > shibuyaDem.xMax;
+      if (isEastOfShibuyaDem) {
+        // 宮益坂上〜表参道〜青山一丁目 (xMax=-480 .. -345) は台地標高から東側へ滑らかに連続補間し、
+        // x=-550 で大手町低地 (TP +2.9m) へ標高段差ジャンプする現象を根本解消する。
+        const span = Math.max(1, -345 - shibuyaDem.xMax);
+        const eastT = Math.max(0, Math.min(1, (x - shibuyaDem.xMax) / span));
+        const smoothT = 0.5 - 0.5 * Math.cos(Math.PI * eastT);
+        const aoyamaEastElevation = Math.max(25.5, gridElevation - 3.2 * smoothT);
+        return Number(aoyamaEastElevation.toFixed(2));
+      }
+      return Number(gridElevation.toFixed(2));
     }
 
     // フォールバック: 渋谷川・明治通り谷底 (x=-750..-680: TP +15.2m) から東側宮益坂・ヒカリエ、西側桜丘町へのスリバチ地形標高モデル
@@ -692,6 +707,78 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     warmInterior: 0xfef3c7,
   },
   {
+    buildingId: "13113-bldg-shibuya-miyamasu-tower",
+    gmlId: "bldg_4434d959-8c96-4d6c-b7bd-9d5b9fb164ad",
+    name: "渋谷宮益坂ビルディング (宮益坂中腹街区)",
+    nameEn: "Shibuya Miyamasuzaka Building",
+    address: "東京都渋谷区渋谷一丁目14番16号",
+    usage: "業務施設・商業施設",
+    measuredHeight: 58.1,
+    podiumHeight: 20.0,
+    storeysAboveGround: 15,
+    storeysBelowGround: 2,
+    roofEdgeAreaSqm: 1920.0,
+    groundElevationM: 25.4,
+    lat: 35.65962,
+    lon: 139.70374,
+    localX: -645.0,
+    localZ: 210.0,
+    width: 32.0,
+    depth: 28.0,
+    color: 0x334155,
+    podiumColor: 0xcbd5e1,
+    glass: 0x7dd3fc,
+    warmInterior: 0xfef3c7,
+  },
+  {
+    buildingId: "13113-bldg-miyamasuzaka-ue-tower",
+    gmlId: "bldg_319f3376-6233-49d3-9040-c05b87c8ee2f",
+    name: "宮益坂上フロントタワー (渋谷一丁目・宮益坂上街区)",
+    nameEn: "Miyamasuzaka-ue Front Tower",
+    address: "東京都渋谷区渋谷一丁目8番1号",
+    usage: "業務施設・商業施設",
+    measuredHeight: 71.6,
+    podiumHeight: 22.0,
+    storeysAboveGround: 17,
+    storeysBelowGround: 2,
+    roofEdgeAreaSqm: 2180.0,
+    groundElevationM: 28.5,
+    lat: 35.66031,
+    lon: 139.70471,
+    localX: -558.0,
+    localZ: 286.0,
+    width: 32.0,
+    depth: 26.0,
+    color: 0x273549,
+    podiumColor: 0xd8dee9,
+    glass: 0x60a5fa,
+    warmInterior: 0xfef08a,
+  },
+  {
+    buildingId: "13113-bldg-aoyama-omotesando-square",
+    gmlId: "bldg_9097c441-27e5-4d78-b0b7-e11bf8f9c946",
+    name: "渋谷青山通スクエア (神宮前五丁目・青山通り街区)",
+    nameEn: "Shibuya Aoyama-dori Square",
+    address: "東京都渋谷区神宮前五丁目50番5号",
+    usage: "業務施設・商業施設",
+    measuredHeight: 68.4,
+    podiumHeight: 22.0,
+    storeysAboveGround: 16,
+    storeysBelowGround: 2,
+    roofEdgeAreaSqm: 2120.0,
+    groundElevationM: 29.8,
+    lat: 35.66031,
+    lon: 139.70615,
+    localX: -428.0,
+    localZ: 286.0,
+    width: 32.0,
+    depth: 26.0,
+    color: 0x1e293b,
+    podiumColor: 0xcbd5e1,
+    glass: 0x38bdf8,
+    warmInterior: 0xfef3c7,
+  },
+  {
     buildingId: "13103-bldg-aoyama-twins",
     gmlId: "bldg_a9407f99-0b86-45d5-9c12-403190002301",
     name: "新青山ビル (青山ツイン・国道246号沿道)",
@@ -848,8 +935,8 @@ export const SHIBUYA_GSI_ROAD_SEGMENTS: readonly GsiRoadSegmentRecord[] = [
     rnkWidth: "5.5m-13m未満",
     displayName: "桜丘さくら坂 (セルリアンタワー〜インフォスタワー〜玉川通り周回路)",
     routeCode: "渋谷区特別区道",
-    start: { x: -855, z: 95 },
-    end: { x: -940, z: 115 },
+    start: { x: -855, z: 40 },
+    end: { x: -950, z: -60 },
   },
   {
     rID: "533935-shibuya-rdcl-miyamasuzaka",
@@ -955,6 +1042,8 @@ export function getRelativeTerrainDisplacement(x: number, z: number): number {
   const isNearShibuyaMeijiDori = Math.abs(x - -750) < 75 && z > -1050 && z < 1150;
   const isNearShibuyaRoute246 = Math.abs(z - 95) < 58 && x >= -1450 && x <= 30;
   const isNearShibuyaUrbanGrid = x >= -1450 && x <= -620 && z >= -1050 && z <= 1050;
+  // 宮益坂（x=-732..-380, z=248..250）〜青山通り（R246: z=95..108）の広域地形グリッド（83.3m間隔頂点）が道路・交差点に盛り上がるのを防ぐ
+  const isNearShibuyaEastCorridor = x >= -760 && x <= -330 && z >= -10 && z <= 345;
   // 10倍拡張エリアの主要大動脈（六本木通り、晴海通り、銀座中央通り、昭和通り、山手通り、皇居一周道路等）
   const isNearRoppongiDori = Math.abs(z - -350) < 40 && x >= -750 && x <= -120;
   const isNearHarumiDori = Math.abs(z - -350) < 36 && x >= -200 && x <= 800;
@@ -981,6 +1070,7 @@ export function getRelativeTerrainDisplacement(x: number, z: number): number {
     isNearShibuyaMeijiDori ||
     isNearShibuyaRoute246 ||
     isNearShibuyaUrbanGrid ||
+    isNearShibuyaEastCorridor ||
     isNearRoppongiDori ||
     isNearHarumiDori ||
     isNearGinzaChuoDori ||
@@ -1032,6 +1122,29 @@ export function pointToSegmentDistance(
   return Math.hypot(px - projX, pz - projZ);
 }
 
+// Why not omit gitleaks:allow or obfuscate corridor IDs: these are public GSI
+// experimental_rdcl corridor mappings, and gitleaks generic-api-key misclassifies
+// `-access"` followed by `"533935-shibuya-rdcl-hikarie"` as an API secret.
+const NAV_CORRIDOR_TO_GSI_RID: ReadonlyMap<string, string> = new Map<string, string>([
+  ["nav-road-meiji-dori", "533935-shibuya-rdcl-30501"],
+  ["nav-road-route246", "533935-shibuya-rdcl-24601"],
+  ["nav-road-shibuya-scramble", "533935-shibuya-rdcl-scramble"],
+  ["nav-road-shibuya-dogenzaka", "533935-shibuya-rdcl-dogenzaka"],
+  ["nav-road-shibuya-bunkamura-dori", "533935-shibuya-rdcl-bunkamura"],
+  ["nav-road-shibuya-koen-dori", "533935-shibuya-rdcl-koen-dori"],
+  ["nav-road-shibuya-inokashira-organ", "533935-shibuya-rdcl-inokashira-organ"],
+  ["nav-road-shibuya-tamagawa-west", "533935-shibuya-rdcl-tamagawa-west"],
+  ["nav-road-shibuya-shinsen-nakadori", "533935-shibuya-rdcl-shinsen-nakadori"],
+  ["nav-road-shibuya-sakurazaka-loop", "533935-shibuya-rdcl-sakurazaka"],
+  ["nav-road-shibuya-miyamasuzaka", "533935-shibuya-rdcl-miyamasuzaka"],
+  ["nav-road-shibuya-jinnan-cross", "533935-shibuya-rdcl-jinnan-cross"],
+  ["nav-road-shibuya-center-gai", "533935-shibuya-rdcl-center-gai"],
+  ["nav-road-shibuya-hikarie-access", "533935-shibuya-rdcl-hikarie"], // gitleaks:allow
+  ["nav-road-uchibori-dori", "50313-12849-i-3001"],
+  ["nav-road-hibiya-dori", "50313-12849-i-3004"],
+  ["nav-road-eitai-dori", "50313-12849-i-3003"],
+]);
+
 /**
  * 現在座標 (x, z) から最も近い国土地理院ベクトルタイル道路中心線 (experimental_rdcl) セグメントを検索する。
  */
@@ -1051,9 +1164,18 @@ export function findNearestGsiRoad(x: number, z: number): NearestGsiRoadResult {
   ];
   let bestSegment: GsiRoadSegmentRecord = segments[0];
   let minDistance = Number.POSITIVE_INFINITY;
+  let bestExpresswaySegment: GsiRoadSegmentRecord | null = null;
+  let minExpresswayDistance = Number.POSITIVE_INFINITY;
 
   for (const seg of segments) {
     const dist = pointToSegmentDistance(x, z, seg.start.x, seg.start.z, seg.end.x, seg.end.z);
+    if (seg.rdCtg === "高速自動車国道等") {
+      if (dist < minExpresswayDistance) {
+        minExpresswayDistance = dist;
+        bestExpresswaySegment = seg;
+      }
+      continue;
+    }
     const isCloser = dist < minDistance;
     if (isCloser) {
       minDistance = dist;
@@ -1072,10 +1194,25 @@ export function findNearestGsiRoad(x: number, z: number): NearestGsiRoadResult {
       const p0 = corridor.points[i];
       const p1 = corridor.points[i + 1];
       const dist = pointToSegmentDistance(x, z, p0.x, p0.z, p1.x, p1.z);
-      const isCloser = dist < minDistance;
+      // 幹線国道・主要交差点の車道上（中心から 5.5m 以内）で合流脇道（桜丘さくら坂等）へ誤判定されるのを防止
+      const isMinorTieOnMajorRoad =
+        corridor.category === "local_street" &&
+        bestSegment.rdCtg === "国道" &&
+        minDistance < 5.5 &&
+        dist < 5.5;
+      const isMajorOverride =
+        corridor.category === "national_highway" &&
+        bestSegment.rdCtg === "市区町村道等" &&
+        dist <= minDistance + 0.5;
+      const isCloser = !isMinorTieOnMajorRoad && (dist < minDistance || isMajorOverride);
       if (isCloser) {
         minDistance = dist;
-        const matchedSeg = segments.find((s) => s.routeCode === corridor.routeCode);
+        const expectedRid = NAV_CORRIDOR_TO_GSI_RID.get(corridor.id);
+        const matchedSeg = expectedRid
+          ? segments.find((s) => s.rID === expectedRid)
+          : corridor.routeCode !== "渋谷区特別区道"
+            ? segments.find((s) => s.routeCode === corridor.routeCode)
+            : undefined;
         if (matchedSeg) {
           bestSegment = matchedSeg;
         } else {
@@ -1096,6 +1233,17 @@ export function findNearestGsiRoad(x: number, z: number): NearestGsiRoadResult {
         }
       }
     }
+  }
+
+  // 高架の首都高速3号渋谷線は、明治通り交差部以外の地上市街地において地上道路中心線から 2.2m 超離れ、かつ高架中心線直上 (0.1m 未満) のときのみ返す
+  if (
+    bestExpresswaySegment &&
+    minExpresswayDistance < 0.1 &&
+    minDistance > 2.2 &&
+    Math.abs(x - -750) > 12.0
+  ) {
+    bestSegment = bestExpresswaySegment;
+    minDistance = minExpresswayDistance;
   }
 
   return {
@@ -1121,10 +1269,13 @@ export function findNearestPlateauBuilding(x: number, z: number): NearestPlateau
     Array.isArray(bundleShibuyaList) && bundleShibuyaList.length > 0
       ? bundleShibuyaList
       : SHIBUYA_PLATEAU_BUILDINGS;
-  const buildings: readonly (PlateauBuildingRecord | ShibuyaPlateauBuildingRecord)[] = [
-    ...activeOpenData.plateauBuildings,
-    ...shibuyaList,
-  ];
+  const isShibuyaAoyamaZone = x < -345;
+  const zoneBuildings: readonly (PlateauBuildingRecord | ShibuyaPlateauBuildingRecord)[] =
+    isShibuyaAoyamaZone
+      ? shibuyaList.filter((b) => !b.buildingId.startsWith("13101-"))
+      : activeOpenData.plateauBuildings;
+  const buildings: readonly (PlateauBuildingRecord | ShibuyaPlateauBuildingRecord)[] =
+    zoneBuildings.length > 0 ? zoneBuildings : [...activeOpenData.plateauBuildings, ...shibuyaList];
   let bestBuilding: PlateauBuildingRecord | ShibuyaPlateauBuildingRecord = buildings[0];
   let minEdgeDistance = Number.POSITIVE_INFINITY;
   let bestCenterDistance = Number.POSITIVE_INFINITY;
@@ -1282,8 +1433,26 @@ export function getPlateauBuildingsForMap(): PlateauBuildingRenderSpec[] {
     }
     const isNorthOfEitaiDori = x < -268 && x + w / 2 > -288;
     if (isNorthOfEitaiDori) {
-      w = Math.min(w, 68);
+      w = Math.min(w, 60);
       x = Math.min(x, -288 - w / 2);
+    }
+
+    // 外苑東通り (x = -380m, 幅員約24m → x ∈ [-396, -364]) のクリアランス確保
+    const isEastOfGaienHigashiDori = x > -380 && x - w / 2 < -364;
+    if (isEastOfGaienHigashiDori) {
+      w = Math.min(w, 60);
+      x = Math.max(x, -364 + w / 2);
+    }
+    const isWestOfGaienHigashiDori = x < -380 && x + w / 2 > -396;
+    if (isWestOfGaienHigashiDori) {
+      w = Math.min(w, 52);
+      x = Math.min(x, -396 - w / 2);
+    }
+    const isOtemachiWestBlock =
+      b.buildingId === "13101-bldg-5104" || b.buildingId === "13101-bldg-5105";
+    if (isOtemachiWestBlock) {
+      w = Math.min(w, 52);
+      x = -428;
     }
 
     // 鍛冶橋通り・馬場先門通り (x = 270m, 幅員約28m → x ∈ [252, 288]) のクリアランス確保
@@ -1609,7 +1778,7 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     displayName: "道玄坂（都道413号・SHIBUYA109〜道玄坂上坂道区間）",
     routeCode: "東京都道413号",
     category: "major_avenue",
-    widthMeters: 16.0,
+    widthMeters: 12.0,
     hasMedianLine: true,
     points: [
       { x: -830, z: 248 },
@@ -1632,8 +1801,9 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
       { x: -685, z: 252 },
       { x: -635, z: 254 },
       { x: -560, z: 250 },
-      { x: -480, z: 242 },
-      { x: -400, z: 232 },
+      { x: -480, z: 248 },
+      { x: -400, z: 249 },
+      { x: -380, z: 250 },
     ],
   },
   {
@@ -1641,7 +1811,7 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     displayName: "文化村通り（渋谷109〜東急本店〜松濤二丁目連絡路）",
     routeCode: "渋谷区道文化村通線",
     category: "local_street",
-    widthMeters: 14.0,
+    widthMeters: 12.0,
     hasMedianLine: false,
     points: [
       { x: -838, z: 252 },
@@ -1657,10 +1827,10 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     displayName: "渋谷公園通り（神南一丁目〜PARCO〜渋谷区役所・NHK方面）",
     routeCode: "渋谷区道公園通線",
     category: "major_avenue",
-    widthMeters: 15.0,
+    widthMeters: 12.0,
     hasMedianLine: true,
     points: [
-      { x: -790, z: 265 },
+      { x: -791, z: 250 },
       { x: -798, z: 360 },
       { x: -805, z: 440 },
       { x: -810, z: 520 },
@@ -1684,12 +1854,15 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
   },
   {
     id: "nav-road-shibuya-tamagawa-west",
-    displayName: "玉川通り・国道246号西進（セルリアンタワー〜道玄坂上〜神泉町〜山手通り）",
+    displayName:
+      "玉川通り・国道246号西進（明治通り〜セルリアンタワー〜道玄坂上〜神泉町〜山手通り）",
     routeCode: "国道246号",
     category: "national_highway",
     widthMeters: 20.0,
     hasMedianLine: true,
     points: [
+      { x: -750, z: 102 },
+      { x: -802, z: 98 },
       { x: -855, z: 95 },
       { x: -940, z: 115 },
       { x: -1010, z: 128 },
@@ -1809,10 +1982,10 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     displayName: "国道246号（青山通り・渋谷駅東口連絡路）",
     routeCode: "国道246号",
     category: "national_highway",
-    widthMeters: 18.0,
+    widthMeters: 20.0,
     hasMedianLine: true,
     points: [
-      { x: -736, z: 102 },
+      { x: -750, z: 102 },
       { x: -690, z: 106 },
       { x: -632, z: 108 },
       { x: -545, z: 108 },
@@ -2477,10 +2650,10 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       displayName: "国道246号（青山通り・渋谷駅東口連絡路）",
       routeCode: "国道246号",
       category: "national_highway",
-      widthMeters: 18.0,
+      widthMeters: 20.0,
       hasMedianLine: true,
       points: [
-        { x: -738, z: 102 },
+        { x: -750, z: 102 },
         { x: -690, z: 106 },
         { x: -632, z: 108 },
         { x: -545, z: 108 },
@@ -2494,7 +2667,7 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       displayName: "道玄坂（都道413号・SHIBUYA109〜道玄坂上坂道区間）",
       routeCode: "東京都道413号",
       category: "major_avenue",
-      widthMeters: 16.0,
+      widthMeters: 12.0,
       hasMedianLine: true,
       points: [
         { x: -837, z: 248 },
@@ -2517,8 +2690,9 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
         { x: -685, z: 252 },
         { x: -635, z: 254 },
         { x: -560, z: 250 },
-        { x: -480, z: 242 },
-        { x: -400, z: 232 },
+        { x: -480, z: 248 },
+        { x: -400, z: 249 },
+        { x: -380, z: 250 },
       ],
     },
     {
@@ -2526,7 +2700,7 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       displayName: "文化村通り（渋谷109〜東急本店〜松濤二丁目連絡路）",
       routeCode: "渋谷区道文化村通線",
       category: "local_street",
-      widthMeters: 14.0,
+      widthMeters: 12.0,
       hasMedianLine: false,
       points: [
         { x: -838, z: 252 },
@@ -2542,10 +2716,10 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       displayName: "渋谷公園通り（神南一丁目〜PARCO〜渋谷区役所・NHK方面）",
       routeCode: "渋谷区道公園通線",
       category: "major_avenue",
-      widthMeters: 15.0,
+      widthMeters: 12.0,
       hasMedianLine: true,
       points: [
-        { x: -791, z: 270 },
+        { x: -791, z: 250 },
         { x: -798, z: 360 },
         { x: -805, z: 440 },
         { x: -810, z: 520 },
@@ -2569,12 +2743,15 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
     },
     {
       id: "nav-road-shibuya-tamagawa-west",
-      displayName: "玉川通り・国道246号西進（セルリアンタワー〜道玄坂上〜神泉町〜山手通り）",
+      displayName:
+        "玉川通り・国道246号西進（明治通り〜セルリアンタワー〜道玄坂上〜神泉町〜山手通り）",
       routeCode: "国道246号",
       category: "national_highway",
       widthMeters: 20.0,
       hasMedianLine: true,
       points: [
+        { x: -750, z: 102 },
+        { x: -802, z: 98 },
         { x: -855, z: 95 },
         { x: -940, z: 115 },
         { x: -1010, z: 128 },

@@ -225,13 +225,19 @@ if (signCamDist < 42.0) {
     const cantileverColX = -span / 2;
     const maxArmExposeGap = Math.max(0.35, span - signBoardWidth - 0.5);
     const armExposeGap = Math.min(1.9, maxArmExposeGap);
-    const portalMainX = Math.max(-span * 0.5 + signBoardWidth * 0.5 + 0.3, -2.4);
+    const isWideDividedPortal = isPortalGantry && span >= 22.0;
+    const portalMainX = isWideDividedPortal
+      ? -Math.min(span * 0.5 - signBoardWidth * 0.5 - 0.8, 8.2)
+      : Math.max(-span * 0.5 + signBoardWidth * 0.5 + 0.3, -2.4);
     const signCenterX = isPortalGantry
       ? portalMainX
       : cantileverColX + armExposeGap + signBoardWidth * 0.5;
     const companionBoardWidth = 4.2;
     const companionBoardHeight = 2.15;
-    const companionCenterX = Math.min(span * 0.5 - companionBoardWidth * 0.5 - 0.3, 2.6);
+    const companionCenterX = isWideDividedPortal
+      ? -2.9
+      : Math.min(span * 0.5 - companionBoardWidth * 0.5 - 0.3, 2.6);
+    const oppositeBoardX = isWideDividedPortal ? 6.0 : companionCenterX;
 
     const upperBeamY = isPortalGantry ? 7.05 : 6.52;
     const lowerBeamY = isPortalGantry ? 5.05 : 5.18;
@@ -394,7 +400,7 @@ if (signCamDist < 42.0) {
         this.signBackMat,
       );
       oppBoardMesh.name = "OppositeGuideBoard";
-      oppBoardMesh.position.set(companionCenterX, boardCenterY, -0.16);
+      oppBoardMesh.position.set(oppositeBoardX, boardCenterY, -0.16);
       group.add(oppBoardMesh);
     }
 
@@ -689,7 +695,7 @@ if (signCamDist < 42.0) {
         frontMat,
       );
       backSignMesh.name = "OppositeGuideSignFace";
-      backSignMesh.position.set(companionCenterX, boardCenterY, -0.205);
+      backSignMesh.position.set(oppositeBoardX, boardCenterY, -0.205);
       backSignMesh.rotation.y = Math.PI;
       group.add(backSignMesh);
     }

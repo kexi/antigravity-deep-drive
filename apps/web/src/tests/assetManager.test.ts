@@ -332,6 +332,19 @@ models:
       expect(gantry?.spanWidth).toBe(26.6);
     }
 
+    // 渋谷エリアの頭上案内標識（青看板）に渋谷固有の方面・路線番号・交差点名が設定され、丸の内規定値が混入していないこと
+    const shibuyaOverheads = publicSigns.filter((s) => s.id.startsWith("overhead_guide_shibuya_"));
+    expect(shibuyaOverheads.length).toBe(5);
+    for (const sign of shibuyaOverheads) {
+      expect(sign.leftLabel).toBeDefined();
+      expect(sign.rightLabel).toBeDefined();
+      expect(sign.intersectionName).toBeDefined();
+      expect(sign.roadNumber).toBeDefined();
+      expect(sign.leftLabel).not.toContain("日比谷");
+      expect(sign.rightLabel).not.toContain("大手町");
+      expect(sign.intersectionName).not.toBe("行幸通り");
+    }
+
     // 中央分離帯のない行幸通り車道中央 (x = 0) にデリネーターを置かないこと
     for (const delId of ["delineator_median_south", "delineator_median_north"]) {
       const del = publicSigns.find((s) => s.id === delId);

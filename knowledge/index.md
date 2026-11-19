@@ -63,3 +63,7 @@ trust_signals:
 - [048-shibuya-clean-building-textures-and-uv-noise-elimination.md](./048-shibuya-clean-building-textures-and-uv-noise-elimination.md): 渋谷ビル群テクスチャの人物・雑多ノイズ除去、PLATEAU UV モアレ解消、およびシェーダー・GLB 全面クリーン化
 - [049-shibuya-spline-road-pbr-jr-guard-underpass-and-radial-infrastructure.md](./049-shibuya-spline-road-pbr-jr-guard-underpass-and-radial-infrastructure.md): 渋谷スプライン曲線道路網のPBRアスファルトシェーダー刷新、JR渋谷駅高架橋の常時表示リアル造形、および放射状道路インフラの安全配置
 - [050-shibuya-109-scramble-square-photorealistic-modeling-and-signage.md](./050-shibuya-109-scramble-square-photorealistic-modeling-and-signage.md): SHIBUYA 109・渋谷スクランブルスクエアのフォトリアル3Dモデリング・実写テクスチャ・夜間発光サイネージ刷新
+- [051-shibuya-wgs84-coordinate-fix-gps-bar-and-road-continuity.md](./051-shibuya-wgs84-coordinate-fix-gps-bar-and-road-continuity.md): 渋谷エリア WGS84 緯度南北反転の修正・常時表示 GPS 座標バー追加・道路接続破綻の解消
+- [052-shibuya-streetview-fidelity-terrain-lanes-signs-jr-guard.md](./052-shibuya-streetview-fidelity-terrain-lanes-signs-jr-guard.md): 渋谷エリア実写・Googleマップ比較に基づく地形平坦化・車線方向・青看板・JRガード・センター街接続改修
+- [053-shibuya-ibl-dem-r246-plateau-360-audit.md](./053-shibuya-ibl-dem-r246-plateau-360-audit.md): 渋谷エリア実写乖離の包括的監査と IBL・DEM5A・JSON同期・R246/PLATEAU・3Dランドマーク再統合
+- [054-shibuya-swarm-photorealistic-convergence-and-ux.md](./054-shibuya-swarm-photorealistic-convergence-and-ux.md): 渋谷エリア並列 /swarm 収束改修：3Dランドマーク・PLATEAU/GIS境界・道路街区連続性・URL/ギアUX・E2E検証

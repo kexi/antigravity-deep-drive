@@ -162,6 +162,10 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
       // 国道246号・青山通り連絡車道 (x < -268, z ∈ [78, 112]) に建物コライダーが侵入していないこと
       const overlapsRoute246Connector = maxX < -268 && maxZ > 78 && minZ < 112;
       expect(overlapsRoute246Connector).toBe(false);
+
+      // 外苑東通り車道・歩道 (x ∈ [-394, -364]) に建物コライダーが侵入していないこと
+      const overlapsGaienHigashi = maxX > -394 && minX < -364;
+      expect(overlapsGaienHigashi).toBe(false);
     }
 
     const waterBodies = getPlateauWaterBodies();
@@ -203,6 +207,14 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
     const shibuyaRoundTrip = wgs84ToLocal(wgs.lat, wgs.lon);
     expect(shibuyaRoundTrip.x).toBeCloseTo(-695, 1);
     expect(shibuyaRoundTrip.z).toBeCloseTo(-15, 1);
+
+    // 渋谷ストリームより北西 (+Z, -X) にあるスクランブル交差点 (-815, 248) は北緯が大きく東経が小さくなること
+    const scrambleWgs = localToWgs84(-815, 248);
+    expect(scrambleWgs.lat).toBeGreaterThan(35.659);
+    expect(scrambleWgs.lon).toBeLessThan(139.702);
+    const scrambleRoundTrip = wgs84ToLocal(scrambleWgs.lat, scrambleWgs.lon);
+    expect(scrambleRoundTrip.x).toBeCloseTo(-815, 1);
+    expect(scrambleRoundTrip.z).toBeCloseTo(248, 1);
 
     const shibuyaDem = sampleGsiDemElevation(-695, -15);
     const isShibuyaValleyElevation = shibuyaDem >= 14.0 && shibuyaDem <= 16.5;
@@ -517,6 +529,49 @@ describe("東京都 Project PLATEAU (千代田区 13101) & 国土地理院 (GSI 
       expect(found, `Missing Shibuya landmark building: ${bldgId}`).toBeDefined();
       expect(found!.h).toBeGreaterThan(50);
       expect(found!.storeysAboveGround).toBeGreaterThanOrEqual(15);
+    }
+
+    // 12. 宮益坂・青山通り東伸区間の広域地形グリッドが道路にせり出さず平坦 (0) であり、
+    // 玉川通り×さくら坂合流点 (-855, 95) 付近で渋谷川遊歩道等へ誤判定されないこと
+    expect(getRelativeTerrainDisplacement(-560, 250)).toBe(0);
+    expect(getRelativeTerrainDisplacement(-583.33, 250)).toBe(0);
+    expect(getRelativeTerrainDisplacement(-500, 166.67)).toBe(0);
+    expect(findNearestGsiRoad(-855, 95).routeCode).toBe("国道246号");
+    expect(findNearestGsiRoad(-855, 94.9).displayName).not.toContain("渋谷川遊歩道");
+  });
+
+  it("宮益坂上〜青山通り西区間 (-550, 248 / -450, 248 / -380, 248) で WGS84 座標・DEM5A 標高・最寄り PLATEAU ビルが千代田区へジャンプせず連続した渋谷・青山値を返すことを保証する", () => {
+    const miyamasuAoyamaPoints = [
+      { x: -550, z: 248 },
+      { x: -450, z: 248 },
+      { x: -380, z: 248 },
+    ];
+
+    let prevLon = 0;
+    for (const pt of miyamasuAoyamaPoints) {
+      const wgs = localToWgs84(pt.x, pt.z);
+      // 大手町・千代田区側 (35.677°N, 139.76°E) にジャンプせず、渋谷・宮益坂上〜表参道 (35.658..35.662°N, 139.703..139.709°E) に連続していること
+      expect(wgs.lat).toBeGreaterThan(35.658);
+      expect(wgs.lat).toBeLessThan(35.663);
+      expect(wgs.lon).toBeGreaterThan(139.703);
+      expect(wgs.lon).toBeLessThan(139.709);
+      expect(wgs.lon).toBeGreaterThan(prevLon);
+      prevLon = wgs.lon;
+
+      const roundTrip = wgs84ToLocal(wgs.lat, wgs.lon);
+      expect(roundTrip.x).toBeCloseTo(pt.x, 1);
+      expect(roundTrip.z).toBeCloseTo(pt.z, 1);
+
+      // DEM5A 標高が +2.9m へ急落せず、渋谷〜青山台地の連続標高 (> 20m) を維持すること
+      const demElevation = sampleGsiDemElevation(pt.x, pt.z);
+      expect(demElevation).toBeGreaterThan(20.0);
+      expect(demElevation).toBeLessThan(35.0);
+
+      // 最寄りビルが千代田区の読売新聞東京本社ビル (13101-bldg-5105) 等に誤マッチせず、渋谷区 (13113-*) のビルを返すこと
+      const nearestBldg = findNearestPlateauBuilding(pt.x, pt.z);
+      expect(nearestBldg.buildingId.startsWith("13113-")).toBe(true);
+      expect(nearestBldg.buildingId).not.toBe("13101-bldg-5105");
+      expect(nearestBldg.name).not.toContain("読売新聞");
     }
   });
 });

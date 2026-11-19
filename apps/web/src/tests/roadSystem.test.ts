@@ -8,7 +8,11 @@ import { JapaneseRoadBuilder } from "../roads/roadBuilder";
 import { JapaneseRoadMaterial } from "../roads/japaneseRoadMaterial";
 import { RoadProps } from "../roads/roadProps";
 import type { JapaneseRoadSegmentConfig } from "../roads/types";
-import { getOpenDataCurvedRoadCorridors } from "../openData/gsiPlateauLoader";
+import {
+  findNearestGsiRoad,
+  getOpenDataCurvedRoadCorridors,
+  sampleGsiDemElevation,
+} from "../openData/gsiPlateauLoader";
 import { TokyoStationMap } from "../city/tokyoStationMap";
 
 describe("日本の道路作成システムの仕様検証", () => {
@@ -218,6 +222,46 @@ describe("日本の道路作成システムの仕様検証", () => {
     );
     expect(hasFlatRoadCollider).toBe(true);
     expect(hasGuardrailCollider).toBe(true);
+
+    // 片側3車線の曲線道路において、日本の左側通行規則どおり中央寄り（lane=1）が右折専用、路肩寄り（lane=3）が直進・左折となることを保証する
+    const northThreeLane = builder.buildPolylineSegment(
+      {
+        name: "North-ThreeLane-Test",
+        lanesPerDirection: 3,
+        laneWidth: 3.4,
+        shoulderWidth: 1.2,
+        medianWidth: 1.4,
+        sidewalkWidth: 3.2,
+        curbHeight: 0.15,
+        length: 120,
+        hasYellowCenterLine: false,
+        hasWhiteDashedLines: true,
+        hasCrosswalk: true,
+        hasGuardrails: false,
+        points: [
+          { x: 0, z: 0 },
+          { x: 0, z: 120 },
+        ],
+      },
+      [
+        { x: 0, z: 0 },
+        { x: 0, z: 120 },
+      ],
+      mockWorld,
+      mockRapier,
+    );
+    const northApproachArrows: Array<{ name: string; x: number; z: number }> = [];
+    northThreeLane.group.traverse((obj) => {
+      if (obj.name.startsWith("LaneArrowGroup_") && obj.position.x > 0 && obj.position.z > 80) {
+        northApproachArrows.push({ name: obj.name, x: obj.position.x, z: obj.position.z });
+      }
+    });
+    const innerArrows = northApproachArrows.filter((a) => Math.abs(a.x - 2.4) < 0.3);
+    const outerArrows = northApproachArrows.filter((a) => Math.abs(a.x - 9.2) < 0.3);
+    expect(innerArrows.length).toBeGreaterThan(0);
+    expect(outerArrows.length).toBeGreaterThan(0);
+    expect(innerArrows.every((a) => a.name === "LaneArrowGroup_right")).toBe(true);
+    expect(outerArrows.every((a) => a.name === "LaneArrowGroup_straight-left")).toBe(true);
   });
 
   it("渋谷エリア実在放射状曲線道路網（道玄坂・文化村通り・玉川通り西進等）が buildPolylineSegment で正常に物理コライダーおよび路面メッシュを生成することを保証する", () => {
@@ -1680,5 +1724,93 @@ describe("日本の道路作成システムの仕様検証", () => {
     } finally {
       assetManager.loadFromYamlString(DEFAULT_ASSETS_YAML);
     }
+  });
+
+  it("渋谷実景整合（R246幅員統一・GPS地上/高架識別・DEM5A谷地形連続性・スクランブル斜め横断歩道中央非重複）を保証する", () => {
+    const corridors = getOpenDataCurvedRoadCorridors();
+    const r246 = corridors.find((c) => c.id === "nav-road-route246")!;
+    const tamagawa = corridors.find((c) => c.id === "nav-road-shibuya-tamagawa-west")!;
+    expect(r246.widthMeters).toBe(20.0);
+    expect(tamagawa.widthMeters).toBe(20.0);
+
+    // セルリアン前玉川通りの走行車線上 (-855, 100) や明治通り×R246走行中 (-744.85, 99.32) は地上道路、首都高中心線直上 (-830, 99) のみ首都高を返すこと
+    expect(findNearestGsiRoad(-855, 100).routeCode).toBe("国道246号");
+    expect(findNearestGsiRoad(-744.85, 99.32).routeCode).not.toBe("首都高速3号渋谷線");
+    expect(findNearestGsiRoad(-830, 99).routeCode).toBe("首都高速3号渋谷線");
+
+    // 渋谷 DEM5A: スクランブル交差点は谷底の実標高 (TP+15〜17m)、z=-40→-20間に10m超の反転崖が存在しないこと
+    const scrambleElev = sampleGsiDemElevation(-815, 248);
+    expect(scrambleElev).toBeGreaterThanOrEqual(14.8);
+    expect(scrambleElev).toBeLessThanOrEqual(17.5);
+    const cliffDeltaWest = Math.abs(
+      sampleGsiDemElevation(-840, -20) - sampleGsiDemElevation(-840, -40),
+    );
+    const cliffDeltaValley = Math.abs(
+      sampleGsiDemElevation(-700, -20) - sampleGsiDemElevation(-700, -40),
+    );
+    expect(cliffDeltaWest).toBeLessThan(3.0);
+    expect(cliffDeltaValley).toBeLessThan(3.0);
+
+    // スクランブル斜め横断歩道: NW_SE は交差点中心域 (r < 2.8m) の重複ストライプを除外すること
+    const builder = new JapaneseRoadBuilder();
+    const scramble = builder.buildScrambleDiagonalCrosswalks(44);
+    const nwSeCentralOverlaps = scramble.children.filter((child) => {
+      const m = child as THREE.Mesh;
+      if (m.userData.markingType !== "CrosswalkStripe" || m.userData.diagonalDir !== -1) {
+        return false;
+      }
+      return Math.hypot(m.position.x, m.position.z) < 2.8;
+    });
+    expect(nwSeCentralOverlaps.length).toBe(0);
+  });
+
+  it("公園通り入口の半欠け横断歩道抑止・宮益坂孤立矩形パッド撤去・外苑東通り(-376,-11)千代田ビル非侵食・ハチ公昼間視認性を保証する", async () => {
+    await RAPIER.init();
+    const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    const scene = new THREE.Scene();
+    const cityMap = new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+    scene.updateMatrixWorld(true);
+
+    // 1. 公園通り入口 (-791, 270) に半欠けの始端横断歩道・停止線が生成されないこと
+    const koenCorridor = getOpenDataCurvedRoadCorridors().find(
+      (c) => c.id === "nav-road-shibuya-koen-dori",
+    )!;
+    const koenSeg = scene.getObjectByName(`CurvedRoadSegment_${koenCorridor.displayName}`);
+    expect(koenSeg).toBeDefined();
+    expect(koenSeg?.getObjectByName("CurvedCrosswalk_Start_0_0")).toBeUndefined();
+    expect(koenSeg?.getObjectByName("CurvedStopLine_Start_0")).toBeUndefined();
+
+    // 2. 宮益坂途中 (-560, 248) や (-400, 248) に孤立した巨大矩形交差点パッドが存在しないこと
+    expect(scene.getObjectByName("Intersection_-560_248")).toBeUndefined();
+    expect(scene.getObjectByName("Intersection_-400_248")).toBeUndefined();
+
+    // 3. 公園通り・道玄坂・宮益坂の沿道街区グループが存在すること
+    expect(scene.getObjectByName("ShibuyaKoenDoriStreetscapeGroup")).toBeDefined();
+    expect(scene.getObjectByName("ShibuyaDogenzakaStreetscapeGroup")).toBeDefined();
+    expect(scene.getObjectByName("ShibuyaMiyamasuzakaStreetscapeGroup")).toBeDefined();
+
+    // 4. 外苑東通り (X:-376, Z:-11 付近, 歩道外縁 x=-368.3) に大手町プレイス (13101-bldg-5103) の基壇壁が食い込まないこと
+    const otemachiPlace = scene.getObjectByName("13101-bldg-5103") as THREE.Group | undefined;
+    expect(otemachiPlace).toBeDefined();
+    const otemachiBox = new THREE.Box3().setFromObject(otemachiPlace!);
+    expect(otemachiBox.min.x).toBeGreaterThanOrEqual(-365.0);
+
+    // 5. 宮益坂・青山西エリア (focusPosition.x < -345) で千代田区西端重複ビル群がカリングされること
+    cityMap.updateDistanceCulling(new THREE.Vector3(-376, 0, -11), 380, true);
+    expect(otemachiPlace?.visible).toBe(false);
+    const yomiuriBldg = scene.getObjectByName("13101-bldg-5105");
+    expect(yomiuriBldg?.visible).toBe(false);
+
+    // 6. ハチ公像および白御影石台座が日陰でも黒潰れしない昼間エミッシブ輝度を持つこと
+    const pedestal = scene.getObjectByName("HachikoStatuePedestal") as THREE.Mesh | undefined;
+    const bronzeBody = scene.getObjectByName("HachikoBronzeBody") as THREE.Mesh | undefined;
+    expect(pedestal).toBeDefined();
+    expect(bronzeBody).toBeDefined();
+    expect((pedestal!.material as THREE.MeshStandardMaterial).emissiveIntensity).toBeGreaterThan(
+      0.2,
+    );
+    expect((bronzeBody!.material as THREE.MeshStandardMaterial).emissiveIntensity).toBeGreaterThan(
+      0.2,
+    );
   });
 });

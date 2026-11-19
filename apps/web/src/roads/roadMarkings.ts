@@ -1036,15 +1036,41 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
     scrambleInterGroup.userData.isRoadInfrastructure = true;
     scrambleInterGroup.position.set(0, 0, 0);
 
-    const halfSpan = padSize * 0.42;
+    const halfSpan = padSize * 0.37;
     const count = Math.floor(halfSpan / stepDist) * 2;
+    const nwSeStartOffset = stripeLength * 0.5 + (stepDist - stripeWidth) + stripeWidth * 0.5;
+    const nwSeLegCount = Math.floor((halfSpan - nwSeStartOffset) / stepDist) + 1;
 
     for (const dir of [1, -1]) {
       const isNeSw = dir > 0;
       const diagAngle = (dir * Math.PI) / 4;
-      const stripeY = isNeSw ? 0.0255 : 0.027;
-      for (let i = -count / 2; i <= count / 2; i++) {
-        const offset = i * stepDist;
+      // NE_SW と NW_SE は交差中心で空間分離しているため同一標高で段差ノイズを抑止
+      const stripeY = 0.026;
+
+      const offsets: Array<{ index: number; offset: number }> = [];
+      if (isNeSw) {
+        for (let i = -count / 2; i <= count / 2; i++) {
+          offsets.push({ index: i, offset: i * stepDist });
+        }
+      } else {
+        // NW_SE は NE_SW の横断幅 (±stripeLength/2 = ±2.1m) から標準縞間隔 (0.65m) を空けた
+        // ±2.975m から外方へ 1.1m 刻みで対称配置し、中央の歯抜けや白線塊を解消する
+        for (let legIdx = nwSeLegCount - 1; legIdx >= 0; legIdx--) {
+          offsets.push({
+            index: -(legIdx + 3),
+            offset: -(nwSeStartOffset + legIdx * stepDist),
+          });
+        }
+        for (let legIdx = 0; legIdx < nwSeLegCount; legIdx++) {
+          offsets.push({
+            index: legIdx + 3,
+            offset: nwSeStartOffset + legIdx * stepDist,
+          });
+        }
+      }
+
+      for (const entry of offsets) {
+        const offset = entry.offset;
         // Why stripeLength in X and stripeWidth in Z:
         // PlaneGeometry を rotateX(-PI/2) すると X が横幅、Z が縦長になる。
         // diagAngle で回転させると Z軸方向が対角線歩行方向と一致するため、
@@ -1054,12 +1080,12 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
         stripeGeo.rotateX(-Math.PI / 2);
         stripeGeo.rotateY(diagAngle);
         const stripeMesh = new THREE.Mesh(stripeGeo, this.whitePaintMat);
-        stripeMesh.name = `ScrambleDiagonalStripe_${isNeSw ? "NE_SW" : "NW_SE"}_${i}`;
+        stripeMesh.name = `ScrambleDiagonalStripe_${isNeSw ? "NE_SW" : "NW_SE"}_${entry.index}`;
         stripeMesh.userData.markingType = "CrosswalkStripe";
         stripeMesh.userData.stripeLength = stripeLength;
         stripeMesh.userData.stripeWidth = stripeWidth;
         stripeMesh.userData.diagonalDir = dir;
-        stripeMesh.userData.stripeIndex = i;
+        stripeMesh.userData.stripeIndex = entry.index;
         stripeMesh.position.set(
           offset * Math.cos(diagAngle),
           stripeY,
@@ -1075,12 +1101,15 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
       guideDotGeo.rotateY(diagAngle);
       const dotStepDist = 1.0;
       const dotHalfCount = Math.floor(halfSpan / dotStepDist);
-      const guideDotY = isNeSw ? 0.0258 : 0.0273;
+      const guideDotY = 0.0265;
       const latOffsetMeters = stripeLength * 0.5 + 0.18;
 
       for (const sideSign of [-1, 1]) {
         for (let j = -dotHalfCount; j <= dotHalfCount; j++) {
           const longDist = j * dotStepDist;
+          if (Math.abs(longDist) < 2.95) {
+            continue;
+          }
           const posX =
             longDist * Math.cos(diagAngle) - sideSign * latOffsetMeters * Math.sin(diagAngle);
           const posZ =

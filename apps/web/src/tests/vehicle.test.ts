@@ -834,4 +834,109 @@ describe("車両およびゲームシステムの仕様検証", () => {
     expect(car.isTurnSignalBlinkOn()).toBe(false);
     expect(stalkGroup!.rotation.z).toBeCloseTo(neutralStalkRotZ, 4);
   });
+
+  it("停止中の車両に微小な前後速度ジッター (-0.2 m/s〜+0.2 m/s) が発生してもリバース入力が無い限り D 1 を維持し R へ切り替わらないこと、および明示的なリバース入力時のみ R へ遷移することを保証する", async () => {
+    await RAPIER.init();
+    const world = new RAPIER.World(new RAPIER.Vector3(0.0, -9.81, 0.0));
+    const groundDesc = RAPIER.ColliderDesc.cuboid(200, 0.5, 200)
+      .setTranslation(0, -0.5, 0)
+      .setFriction(0.95);
+    world.createCollider(groundDesc);
+
+    const vehicle = new VehiclePhysics(world, RAPIER, new THREE.Vector3(0, 0.85, 0));
+
+    // サスペンション接地安定化
+    for (let i = 0; i < 30; i++) {
+      vehicle.update(1 / 60, { throttle: 0, brake: 0, steer: 0, handbrake: false });
+      world.timestep = 1 / 60;
+      world.step();
+    }
+    expect(vehicle.getState().gear).toBe("D 1");
+
+    // 1. リバース入力無し (brake=0) で微小後退・前進速度ジッター (-0.35 m/s〜+0.2 m/s) および強い瞬間後退スパイク (-1.2 m/s) が加わっても
+    //    "D 1" から絶対に "R" へ誤遷移せず "D 1" を維持すること
+    const jitterSamplesMs = [-0.2, -0.12, -0.05, -0.35, -1.2, -0.8, -0.18, 0.0, 0.08, 0.2, -0.2];
+    for (const sampleVz of jitterSamplesMs) {
+      vehicle.rigidBody.setLinvel(new RAPIER.Vector3(0, 0, sampleVz), true);
+      vehicle.update(1 / 60, { throttle: 0, brake: 0, steer: 0, handbrake: false });
+      world.timestep = 1 / 60;
+      world.step();
+      expect(vehicle.getState().gear).toBe("D 1");
+    }
+
+    // 2. ハンドブレーキ併用制動時 (handbrake=true, brake=1.0) も停止状態で R に入らず D 1 を維持すること
+    vehicle.rigidBody.setLinvel(new RAPIER.Vector3(0, 0, -0.15), true);
+    vehicle.update(1 / 60, { throttle: 0, brake: 1.0, steer: 0, handbrake: true });
+    world.timestep = 1 / 60;
+    world.step();
+    expect(vehicle.getState().gear).toBe("D 1");
+
+    // 3. 明示的なリバース入力 (brake=1.0, throttle=0, handbrake=false) を与えた場合のみ R ギアへ遷移すること
+    for (let i = 0; i < 15; i++) {
+      vehicle.update(1 / 60, { throttle: 0, brake: 1.0, steer: 0, handbrake: false });
+      world.timestep = 1 / 60;
+      world.step();
+    }
+    expect(vehicle.getState().gear).toBe("R");
+
+    // 4. リバース入力を離して物理ステップ直後に衝突/停止で 0 km/h へ減速した際、getState() で "R" に張り付かず即座に "D 1" へ復帰すること
+    vehicle.rigidBody.setLinvel(new RAPIER.Vector3(0, 0, -1.2), true);
+    vehicle.update(1 / 60, { throttle: 0, brake: 0, steer: 0, handbrake: false });
+    vehicle.rigidBody.setLinvel(new RAPIER.Vector3(0, 0, 0), true);
+    expect(vehicle.getState().gear).toBe("D 1");
+
+    // 5. リバース入力を離して停止付近 (|forwardSpeed| < 0.4 m/s) に戻った際も、安定して D 1 へ復帰すること
+    vehicle.rigidBody.setLinvel(new RAPIER.Vector3(0, 0, -0.1), true);
+    vehicle.update(1 / 60, { throttle: 0, brake: 0, steer: 0, handbrake: false });
+    world.timestep = 1 / 60;
+    world.step();
+    expect(vehicle.getState().gear).toBe("D 1");
+  });
+
+  it("URLクエリの緯度経度 (?lat=...&lon=...&heading=...) のローカル座標変換・URL同期・StreetReaderAI 空間コンテキスト算出が正しく機能することを保証する", async () => {
+    const {
+      buildUrlWithGpsCoordinates,
+      computeStreetReaderContext,
+      getObserverRelativePosition,
+      parseUrlLocationQuery,
+    } = await import("../main");
+
+    // 1. 渋谷スクランブル交差点付近の緯度経度 URL クエリ解析と渋谷エリア自動推定
+    const shibuyaParsed = parseUrlLocationQuery("?lat=35.65959&lon=139.70187&heading=180");
+    expect(shibuyaParsed.hasLatLonQuery).toBe(true);
+    expect(shibuyaParsed.hasCustomCoordinates).toBe(true);
+    expect(shibuyaParsed.area).toBe("shibuya");
+    expect(shibuyaParsed.x).toBeLessThan(-750);
+    expect(shibuyaParsed.z).toBeGreaterThan(200);
+    expect(Math.abs(shibuyaParsed.yawRadians)).toBeCloseTo(Math.PI, 2);
+
+    // 2. ブラウザアドレスバー同期用 URL 生成 (?area=...&lat=...&lon=...&heading=... かつ古い x/z パラメータを除去)
+    const syncedUrl = buildUrlWithGpsCoordinates(
+      "http://localhost:3000/?x=-792&z=222&graphics=high",
+      {
+        area: "shibuya",
+        lat: 35.659591,
+        lon: 139.701872,
+        headingDeg: 270,
+      },
+    );
+    expect(syncedUrl).toContain("area=shibuya");
+    expect(syncedUrl).toContain("lat=35.65959");
+    expect(syncedUrl).toContain("lon=139.70187");
+    expect(syncedUrl).toContain("heading=270");
+    expect(syncedUrl).toContain("graphics=high");
+    expect(syncedUrl).not.toContain("x=-792");
+
+    // 3. StreetReaderAI 方式の進行方向基準4象限相対位置 (FRONT LEFT / FRONT RIGHT / BEHIND LEFT / BEHIND RIGHT) と空間コンテキスト
+    expect(getObserverRelativePosition(0, 0, 0, 10, 20)).toBe("FRONT RIGHT");
+    expect(getObserverRelativePosition(0, 0, 0, -10, 20)).toBe("FRONT LEFT");
+    expect(getObserverRelativePosition(0, 0, 0, 10, -20)).toBe("BEHIND RIGHT");
+    expect(getObserverRelativePosition(0, 0, 0, -10, -20)).toBe("BEHIND LEFT");
+
+    const ctxJa = computeStreetReaderContext(-750, -30, 0, "ja");
+    expect(ctxJa.currentStreetName.length).toBeGreaterThan(0);
+    expect(ctxJa.intersectionAnnouncement).toContain("前方:");
+    expect(ctxJa.nearbyPois.length).toBeGreaterThanOrEqual(1);
+    expect(ctxJa.sceneSummary).toContain("POI:");
+  });
 });

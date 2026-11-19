@@ -17,6 +17,7 @@ export class VehiclePhysics {
   private currentSpeedKmh = 0;
   private engineRpm = 800;
   private gear = "D 1";
+  private lastReverseInputActive = false;
   private roadSurfaceCondition: RoadSurfaceCondition = "wet";
   private smoothedVisualY = 0.0;
   private hasInitializedVisualFilter = false;
@@ -158,29 +159,33 @@ export class VehiclePhysics {
     let wheelBrake = 0;
 
     const isPressingThrottle = input.throttle > 0;
+    const isPressingBrake = input.brake > 0;
+    const isHandbrakeEngaged = input.handbrake;
+    const isReverseInputActive = isPressingBrake && !isPressingThrottle && !isHandbrakeEngaged;
+    this.lastReverseInputActive = isReverseInputActive;
+
     if (isPressingThrottle) {
       const powerCurve = Math.max(0.2, 1.0 - this.currentSpeedKmh / 185.0);
       engineForce = input.throttle * this.maxEngineForce * powerCurve;
     }
 
-    const isPressingBrake = input.brake > 0;
     if (isPressingBrake) {
       const isMovingForward = forwardSpeed > 0.6;
-      if (isMovingForward) {
+      const shouldApplyWheelBrake = isMovingForward || isHandbrakeEngaged || isPressingThrottle;
+      if (shouldApplyWheelBrake) {
         wheelBrake = input.brake * this.maxBrakeForce;
       } else {
-        // 停止中または後退中はリバースギア駆動
+        // 停止中または後退中かつリバース入力（S / ArrowDown 単体保持）時のみリバースギア駆動
         engineForce = -input.brake * this.maxEngineForce * 0.55;
       }
     }
 
-    // アクセルもブレーキも踏んでいない場合はエンジンブレーキを軽く効かせる
+    // アクセルもブレーキも踏んでいない場合はエンジンブレーキを効かせ、停車付近ではオートホールド制動で微振動・坂道ずり下がりを抑止
     const isCoasting = !isPressingThrottle && !isPressingBrake;
     if (isCoasting) {
-      wheelBrake = 6.5;
+      const isNearlyStationary = Math.abs(forwardSpeed) < 0.4;
+      wheelBrake = isNearlyStationary ? 48.0 : 6.5;
     }
-
-    const isHandbrakeEngaged = input.handbrake;
 
     // 3. DynamicRayCastVehicleController の全4輪へ操舵・駆動・制動・ドリフト摩擦を適用
     const numWheels = this.vehicleController.numWheels();
@@ -231,10 +236,17 @@ export class VehiclePhysics {
 
     // 5. 高速走行時のエアロダウンフォースと転倒防止アンチロールスタビライザー
     const controllerForwardSpeed = this.vehicleController.currentVehicleSpeed();
-    const measuredForwardSpeed = Number.isFinite(controllerForwardSpeed)
+    const rawMeasuredForwardSpeed = Number.isFinite(controllerForwardSpeed)
       ? controllerForwardSpeed
       : forwardSpeed;
-    this.currentSpeedKmh = Math.abs(measuredForwardSpeed) * 3.6;
+    const measuredForwardSpeed =
+      Math.abs(forwardSpeed) > Math.abs(rawMeasuredForwardSpeed)
+        ? forwardSpeed
+        : rawMeasuredForwardSpeed;
+    const rawSpeedKmh = Math.abs(measuredForwardSpeed) * 3.6;
+    const isParkedMicroJitter =
+      !isPressingThrottle && !isReverseInputActive && Math.abs(measuredForwardSpeed) < 0.15;
+    this.currentSpeedKmh = isParkedMicroJitter ? 0 : rawSpeedKmh;
 
     const downforce = this.currentSpeedKmh * 1.4 * dt;
     this.rigidBody.applyImpulse(new this.rapier.Vector3(0, -downforce, 0), true);
@@ -249,13 +261,13 @@ export class VehiclePhysics {
       );
     }
 
-    // 6. ギア・エンジンRPM更新
-    this.updateGearAndRpm(measuredForwardSpeed);
+    // 6. ギア・エンジンRPM更新（停止時の微小後退速度ジッターで D1 <-> R がチャタリングしないようヒステリシス制御）
+    this.updateGearAndRpm(measuredForwardSpeed, isReverseInputActive);
 
     // 7. コース外落下時の安全リセット（車線境界線ではなく各エリアの走行車線中央へ復帰）
     const isFallenOutOfBounds = transform.y < -10.0;
     if (isFallenOutOfBounds) {
-      const isInShibuyaZone = transform.x < -550;
+      const isInShibuyaZone = transform.x < -345;
       const safeSpawn = isInShibuyaZone
         ? new THREE.Vector3(-744.75, 1.0, -70.0)
         : new THREE.Vector3(1.75, 1.0, 26.0);
@@ -263,15 +275,30 @@ export class VehiclePhysics {
     }
   }
 
-  private updateGearAndRpm(speed: number): void {
-    const isReverse = speed < -0.25;
-    if (isReverse) {
+  /**
+   * 前後速度とリバース入力状態からギア段数 (`R` / `D 1`〜`D 4`) とエンジン回転数を更新する。
+   * Why not 未入力状態で負速度のみから `"R"` へ新規遷移させないか:
+   * 停止中（~0 km/h）やテレポート直後・段差・サスペンション反発・衝突バウンドによって瞬間的な
+   * 後退速度スパイクが生じると、リバース入力（`S` / `ArrowDown`）を押していないにもかかわらず
+   * `"D 1"` から `"R"` へ勝手にシフトし、直後の停止後も 3D メータークラスターに赤色 `R` / `[R]` が残るため。
+   * How:
+   * - `"R"` への新規遷移は明示的なリバース入力 (`isReverseInputActive`) が保持されており停止付近または後退中 (`speed < -0.25`) の場合のみ許可する。
+   * - 既に `"R"` に入っている状態からリバース入力を離した場合は、有意な後退惰性走行中 (`!isStationaryOrJitter && speed < -0.6`) のみ `"R"` を維持し、停車付近へ減速したら `"D 1"` へ復帰する。
+   * - リバース入力が無い停止・極低速状態 (`|speed| < 0.4` m/s または `speedKmh < 1.5`) では常に `"D 1"` を維持する。
+   */
+  private updateGearAndRpm(speed: number, isReverseInputActive = false): void {
+    const kmh = this.currentSpeedKmh;
+    const isStationaryOrJitter = Math.abs(speed) < 0.4 || kmh < 1.5;
+    const isReverseWithInput = isReverseInputActive && (speed < -0.25 || isStationaryOrJitter);
+    const wasInReverse = this.gear === "R";
+    const isStillCoastingBackwardInReverse = wasInReverse && !isStationaryOrJitter && speed < -0.6;
+    const shouldEngageReverse = isReverseWithInput || isStillCoastingBackwardInReverse;
+    if (shouldEngageReverse) {
       this.gear = "R";
       this.engineRpm = Math.min(5000, 800 + Math.abs(speed) * 200);
       return;
     }
 
-    const kmh = this.currentSpeedKmh;
     const isFirstGear = kmh < 30;
     if (isFirstGear) {
       this.gear = "D 1";
@@ -307,6 +334,9 @@ export class VehiclePhysics {
     this.rigidBody.setAngvel(new this.rapier.Vector3(0, 0, 0), true);
     this.currentSteer = 0;
     this.currentSpeedKmh = 0;
+    this.gear = "D 1";
+    this.engineRpm = 800;
+    this.lastReverseInputActive = false;
     this.hasInitializedVisualFilter = false;
 
     const numWheels = this.vehicleController.numWheels();
@@ -332,6 +362,14 @@ export class VehiclePhysics {
     const isStoppedOrSlowedByCollision = postStepSpeedKmh < this.currentSpeedKmh;
     if (isStoppedOrSlowedByCollision) {
       this.currentSpeedKmh = postStepSpeedKmh;
+    }
+
+    // 物理ステップ後の衝突・停止減衰で停車域 (< 1.5 km/h) に達しリバース未入力の場合は "R" 残留を防止して "D 1" へ整合する
+    const isStoppedWithoutReverseInput =
+      this.currentSpeedKmh < 1.5 && !this.lastReverseInputActive && this.gear === "R";
+    if (isStoppedWithoutReverseInput) {
+      this.gear = "D 1";
+      this.engineRpm = 800;
     }
 
     // タイヤ接地面（y=0）と車体底面（wheelRadius=0.38）が視覚的に一致するよう垂直オフセットを算出

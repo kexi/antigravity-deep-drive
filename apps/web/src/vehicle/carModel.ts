@@ -1858,10 +1858,11 @@ export class CarModel {
     ctx.fillStyle = "#0b1528";
     ctx.fillRect(0, 38, leftW, h - 72);
 
-    const isShibuyaZone = carX < -550;
+    const isShibuyaZone = carX < -345;
 
-    // 次の交差点までの距離計算（渋谷エリアは国道246号・渋谷駅東口 z = 95m、丸の内エリアは日比谷通り z = 250m を目標）
-    const targetIntersectionZ = isShibuyaZone ? 95 : 250;
+    // 次の交差点までの距離計算（渋谷エリアは宮益坂・青山通り z = 248m または国道246号・渋谷駅南 z = 102m、丸の内エリアは日比谷通り z = 250m を目標）
+    const isOnMiyamasuOrAoyama = isShibuyaZone && carX > -735 && Math.abs(carZ - 248) < 48;
+    const targetIntersectionZ = isShibuyaZone ? (isOnMiyamasuOrAoyama ? 248 : 102) : 250;
     const distToIntersection = Math.max(0, Math.round(Math.abs(targetIntersectionZ - carZ)));
     ctx.fillStyle = "#1d4ed8";
     ctx.fillRect(10, 48, leftW - 20, 128);
@@ -2045,6 +2046,11 @@ export class CarModel {
     }
     const mapBuildings = this.cachedNavMapBuildings;
     for (const bldg of mapBuildings) {
+      const isChiyodaOverlapInShibuya =
+        isShibuyaZone && bldg.buildingId.startsWith("13101-") && bldg.x < -280;
+      if (isChiyodaOverlapInShibuya) {
+        continue;
+      }
       const distFromCar = Math.hypot(bldg.x - carX, bldg.z - carZ);
       const isWithinView = distFromCar < 460;
       if (!isWithinView) {
@@ -2414,9 +2420,19 @@ export class CarModel {
           { x: -756.0, z: 354.0 },
         ],
         [
+          { x: -810.0, z: 520.0 },
+          { x: -805.0, z: 440.0 },
           { x: -798.0, z: 358.0 },
           { x: -791.0, z: 270.0 },
           { x: -815.0, z: 249.0 },
+        ],
+        [
+          { x: -750.0, z: 248.0 },
+          { x: -685.0, z: 252.0 },
+          { x: -635.0, z: 254.0 },
+          { x: -560.0, z: 250.0 },
+          { x: -480.0, z: 248.0 },
+          { x: -380.0, z: 250.0 },
         ],
       ];
 
@@ -2578,10 +2594,15 @@ export class CarModel {
     ctx.fillStyle = "#e2e8f0";
     ctx.fillText("MAP 3D", 74, h - 12);
     ctx.fillStyle = "#94a3b8";
-    ctx.fillText("AUDIO: TOKYO JDM FM 80.0MHz", 146, h - 12);
+    ctx.fillText("AUDIO: TOKYO FM 80.0", 142, h - 12);
     ctx.fillStyle = "#34d399";
-    ctx.font = "bold 12px monospace";
-    ctx.fillText(`A/C AUTO 22.0℃ | ${wgs.lat.toFixed(4)}N ${wgs.lon.toFixed(4)}E`, 368, h - 12);
+    ctx.font = "bold 11px monospace";
+    ctx.fillText(
+      `LAT ${wgs.lat.toFixed(5)}N LON ${wgs.lon.toFixed(5)}E (X:${Math.round(carX)} Z:${Math.round(carZ)})`,
+      315,
+      h - 12,
+      w - 325,
+    );
 
     tex.needsUpdate = true;
   }

@@ -845,5 +845,23 @@ describe("StructuredLogger (Zod Schema) & TimeOfDay × WeatherCondition 直交�
     expect(disposedCount).toBe(1);
     expect(weatherSystem.dirLight.shadow.map).toBeNull();
     expect(weatherSystem.dirLight.shadow.mapSize.x).toBe(2048);
+
+    // 8. IBL (scene.environment) 設定時に時間帯へ応じて environmentIntensity と地面反射色が適切に連動すること
+    const hemiLight = scene.children.find(
+      (obj): obj is THREE.HemisphereLight => obj instanceof THREE.HemisphereLight,
+    );
+    expect(hemiLight).toBeDefined();
+    scene.environment = new THREE.Texture();
+    weatherSystem.setEnvironment("day", "clear");
+    expect(scene.environmentIntensity).toBeCloseTo(0.78, 2);
+    expect(hemiLight!.groundColor.getHex()).toBe(0x526071);
+
+    weatherSystem.setEnvironment("sunset", "rain");
+    expect(scene.environmentIntensity).toBeCloseTo(0.48, 2);
+    expect(hemiLight!.groundColor.getHex()).toBe(0x451a03);
+
+    weatherSystem.setEnvironment("night", "clear");
+    expect(scene.environmentIntensity).toBeCloseTo(0.14, 2);
+    expect(hemiLight!.groundColor.getHex()).toBe(0x020617);
   });
 });

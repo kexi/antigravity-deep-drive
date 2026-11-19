@@ -108,7 +108,7 @@
         display: flex;
         flex-direction: column;
         justify-content: space-between;
-        padding-top: max(16px, env(safe-area-inset-top));
+        padding-top: max(12px, env(safe-area-inset-top));
         padding-right: max(16px, env(safe-area-inset-right));
         padding-bottom: max(16px, env(safe-area-inset-bottom));
         padding-left: max(16px, env(safe-area-inset-left));
@@ -252,12 +252,103 @@
       body.ui-off-mode .ui-restore-fab {
         display: inline-flex;
       }
-      body.ui-off-mode #ui-overlay .hud-header,
+
+      /* 常時表示 GPS 緯度経度・3D座標・方位バー（UI ON 時: 左テレメトリー欄直下 / UI OFF 時: 左上隅） */
+      .gps-live-bar {
+        position: relative;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 6px 10px;
+        width: 100%;
+        background: rgba(8, 14, 26, 0.88);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(56, 189, 248, 0.45);
+        border-radius: 10px;
+        padding: 7px 12px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.48);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-variant-numeric: tabular-nums;
+        pointer-events: auto;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .gps-live-coord {
+        font-size: 0.78rem;
+        font-weight: 800;
+        color: #38bdf8;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .gps-live-xyz {
+        font-size: 0.71rem;
+        font-weight: 600;
+        color: #cbd5e1;
+        white-space: nowrap;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .gps-copy-btn {
+        background: rgba(30, 58, 138, 0.72);
+        color: #e0f2fe;
+        border: 1px solid rgba(96, 165, 250, 0.52);
+        border-radius: 999px;
+        padding: 3px 9px;
+        font-size: 0.68rem;
+        font-weight: 700;
+        font-family: inherit;
+        cursor: pointer;
+        white-space: nowrap;
+        transition:
+          background 0.15s ease,
+          border-color 0.15s ease,
+          transform 0.1s ease;
+      }
+      .gps-copy-btn:hover {
+        background: rgba(37, 99, 235, 0.9);
+        border-color: #93c5fd;
+        color: #ffffff;
+      }
+      .gps-copy-btn:active {
+        transform: scale(0.95);
+      }
+      @media (max-width: 768px) {
+        .gps-live-bar {
+          padding: 5px 10px;
+          gap: 4px 6px;
+        }
+        .gps-live-coord {
+          font-size: 0.7rem;
+        }
+        .gps-live-xyz {
+          font-size: 0.64rem;
+        }
+      }
+      body.ui-off-mode #ui-overlay .title-box,
+      body.ui-off-mode #ui-overlay .mobile-quick-bar,
+      body.ui-off-mode #ui-overlay .gis-telemetry-box,
+      body.ui-off-mode #ui-overlay .hud-drawer-backdrop,
+      body.ui-off-mode #ui-overlay .hud-controls {
+        display: none !important;
+      }
       body.ui-off-mode #ui-overlay .footer-left-stack,
       body.ui-off-mode #ui-overlay .speedometer-box {
         opacity: 0 !important;
         visibility: hidden !important;
         pointer-events: none !important;
+      }
+      body.ui-off-mode .header-left-stack {
+        width: auto;
+        max-width: calc(100dvw - 170px);
+      }
+      body.ui-off-mode .gps-live-bar {
+        width: auto;
+        border-radius: 999px;
+        padding: 5px 12px;
       }
       /* デスクトップ等のタッチUI非表示環境では UI OFF 時に仮想コントローラーも非表示 */
       body.ui-off-mode:not([data-touch-ui="visible"]) #virtual-touch-controls {
@@ -352,7 +443,7 @@
         gap: 8px;
         max-width: calc(100% - 410px);
         min-width: 0;
-        max-height: calc(100dvh - 220px);
+        max-height: calc(100dvh - 265px);
         overflow-y: auto;
         overscroll-behavior: contain;
         scrollbar-width: thin;
@@ -519,6 +610,8 @@
       .gis-val {
         color: #f8fafc;
         font-weight: 600;
+        user-select: text;
+        -webkit-user-select: text;
       }
 
       /* スピードメーター */
@@ -527,13 +620,13 @@
         backdrop-filter: blur(16px);
         border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 14px;
-        padding: 16px 24px;
+        padding: 10px 18px;
         min-width: 170px;
         text-align: right;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
       }
       .speed-num {
-        font-size: 3rem;
+        font-size: 2.35rem;
         font-weight: 800;
         font-variant-numeric: tabular-nums;
         line-height: 1;
@@ -548,15 +641,25 @@
         margin-left: 4px;
       }
       .gear-indicator {
-        font-size: 1rem;
+        font-size: 0.95rem;
         font-weight: 700;
         color: #38bdf8;
-        margin-top: 4px;
+        margin-top: 2px;
       }
       .motion-blur-indicator {
-        font-size: 0.7rem;
+        font-size: 0.67rem;
         color: #a855f7;
-        margin-top: 4px;
+        margin-top: 2px;
+      }
+      .coord-hud-indicator {
+        font-size: 0.66rem;
+        font-weight: 700;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-variant-numeric: tabular-nums;
+        color: #7dd3fc;
+        margin-top: 3px;
+        user-select: text;
+        -webkit-user-select: text;
       }
       .turn-signal-hud-indicator {
         font-size: 0.75rem;
@@ -1260,7 +1363,8 @@
           font-size: 0.88rem;
           margin-top: 0;
         }
-        .motion-blur-indicator {
+        .motion-blur-indicator,
+        .coord-hud-indicator {
           display: none;
         }
         .touch-steer-pad {
@@ -1371,7 +1475,8 @@
           font-size: 0.85rem;
           margin-top: 0;
         }
-        .motion-blur-indicator {
+        .motion-blur-indicator,
+        .coord-hud-indicator {
           display: none;
         }
         .touch-cluster {
@@ -1899,6 +2004,27 @@
               >
             </div>
           </div>
+
+          <!-- 常時表示 GPS 緯度経度・3D座標オーバーレイバー（UI OFF モード・モバイル時も常に視認可能） -->
+          <div
+            class="gps-live-bar interactive"
+            id="gps-live-bar"
+            role="region"
+            aria-label="現在地GPS座標"
+          >
+            <span class="gps-live-coord" id="gps-live-latlon">35.65674°N, 139.70264°E</span>
+            <span class="gps-live-xyz" id="gps-live-xyz"
+              >X: -744.9 · Z: -68.0 · TP +15.2m · 北 1°</span
+            >
+            <button
+              type="button"
+              class="gps-copy-btn"
+              id="gps-copy-btn"
+              title="現在地の緯度経度・3D座標をクリップボードにコピー"
+            >
+              座標コピー
+            </button>
+          </div>
         </div>
 
         <div class="hud-drawer-backdrop interactive" id="hud-drawer-backdrop"></div>
@@ -2204,6 +2330,9 @@
           <div class="motion-blur-indicator" id="boost-status">SHADER BOOST: OFF</div>
           <div class="motion-blur-indicator" id="streaming-status">
             STREAMING: 3/9 CHUNKS · 68.5 MB
+          </div>
+          <div class="coord-hud-indicator" id="hud-coord-status">
+            35.65674°N, 139.70264°E (X:-745 Z:-68)
           </div>
           <div class="motion-blur-indicator" id="gamepad-hud-status">
             ProCon 1 待機中 (USB / Bluetooth 接続で自動認識)

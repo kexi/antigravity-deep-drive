@@ -31,6 +31,7 @@ import {
   localizeGamepadStatusText,
   localizeGraphicsQualityTexts,
   resolveInitialLocale,
+  type SupportedLocale,
 } from "./core/i18n";
 import { logger } from "./core/logger";
 import {
@@ -50,9 +51,13 @@ import { shibuyaTextureManager } from "./textures/shibuyaTextureManager";
 import {
   findNearestGsiRoad,
   findNearestPlateauBuilding,
+  getNavigationIntersections,
+  getPlateauBuildingsForMap,
+  getShibuyaPlateauBuildingsForMap,
   loadTokyoOpenData,
   localToWgs84,
   sampleGsiDemElevation,
+  wgs84ToLocal,
 } from "./openData/gsiPlateauLoader";
 import type {
   CameraMode,
@@ -65,7 +70,316 @@ import type {
   WiperMode,
 } from "./types";
 
+export type StreetReaderRelativePosition =
+  | "FRONT LEFT"
+  | "FRONT RIGHT"
+  | "BEHIND LEFT"
+  | "BEHIND RIGHT";
+
+export interface StreetReaderRelativePoiItem {
+  id: string;
+  name: string;
+  usage: string;
+  distanceMeters: number;
+  relativePosition: StreetReaderRelativePosition;
+  localizedRelativeLabel: string;
+}
+
+export interface StreetReaderSpatialContext {
+  currentStreetName: string;
+  intersectionAnnouncement: string;
+  nearestIntersectionName: string;
+  nearestIntersectionDistanceMeters: number;
+  nearestBuildingRelativePosition: StreetReaderRelativePosition;
+  nearestBuildingLocalizedRelativeLabel: string;
+  nearbyPois: StreetReaderRelativePoiItem[];
+  sceneSummary: string;
+}
+
+export interface ParsedUrlLocationQuery {
+  area: DriveAreaId;
+  hasCustomCoordinates: boolean;
+  hasLatLonQuery: boolean;
+  hasXzQuery: boolean;
+  hasHeadingQuery: boolean;
+  lat: number | null;
+  lon: number | null;
+  x: number;
+  z: number;
+  yawRadians: number;
+}
+
+/**
+ * コンパス方位角（0°=北, 90°=東, 180°=南, 270°=西）を指定緯度経度におけるローカル3D空間のヨー角（rad）へ変換する。
+ * How: 現在地 (lat, lon) とコンパス方位へ10m進んだ地点の WGS84 座標をそれぞれ `wgs84ToLocal` でローカル座標へ投影し、
+ * 渋谷ゾーン（+Z=北）と丸の内ゾーン（+Z=行幸通り軸線 284.9°）の双方で正確なローカル進行方向角を算出する。
+ */
+export function compassHeadingDegToLocalYawRad(
+  lat: number,
+  lon: number,
+  headingDeg: number,
+): number {
+  const rad = THREE.MathUtils.degToRad(headingDeg);
+  const dLat = (Math.cos(rad) * 10.0) / 110946.0;
+  const dLon = (Math.sin(rad) * 10.0) / 91188.0;
+  const originLocal = wgs84ToLocal(lat, lon);
+  const aheadLocal = wgs84ToLocal(lat + dLat, lon + dLon);
+  return Math.atan2(aheadLocal.x - originLocal.x, aheadLocal.z - originLocal.z);
+}
+
+/**
+ * ブラウザ URL クエリ文字列 (`?lat=...&lon=...&area=...&heading=...` または `?x=...&z=...`) を解析し、
+ * 初期スポーンまたはワープ用のローカル3D座標 `(x, z)`・エリア・方位角を返す。
+ */
+export function parseUrlLocationQuery(
+  search: string,
+  defaultArea: DriveAreaId = "shibuya",
+): ParsedUrlLocationQuery {
+  const urlParams = new URLSearchParams(search);
+  const rawQueryArea = urlParams.get("area");
+
+  const rawLat = urlParams.get("lat");
+  const rawLon = urlParams.get("lon") ?? urlParams.get("lng");
+  const parsedLat = rawLat !== null && rawLat.trim() !== "" ? Number(rawLat) : Number.NaN;
+  const parsedLon = rawLon !== null && rawLon.trim() !== "" ? Number(rawLon) : Number.NaN;
+  const hasLatLonQuery =
+    Number.isFinite(parsedLat) &&
+    Number.isFinite(parsedLon) &&
+    Math.abs(parsedLat) <= 90 &&
+    Math.abs(parsedLon) <= 180;
+
+  const rawX = urlParams.get("x");
+  const rawZ = urlParams.get("z");
+  const parsedX = rawX !== null && rawX.trim() !== "" ? Number(rawX) : Number.NaN;
+  const parsedZ = rawZ !== null && rawZ.trim() !== "" ? Number(rawZ) : Number.NaN;
+  const hasValidX = Number.isFinite(parsedX);
+  const hasValidZ = Number.isFinite(parsedZ);
+  const hasXzQuery = hasValidX || hasValidZ;
+
+  const localFromLatLon = hasLatLonQuery ? wgs84ToLocal(parsedLat, parsedLon) : null;
+
+  let resolvedArea: DriveAreaId = rawQueryArea === "tokyo" ? "tokyo" : defaultArea;
+  if (hasLatLonQuery && localFromLatLon) {
+    const isShibuyaByLonOrX = parsedLon < 139.735 || localFromLatLon.x < -345;
+    resolvedArea = isShibuyaByLonOrX ? "shibuya" : "tokyo";
+  } else if (hasValidX) {
+    const isShibuyaByX = parsedX < -345;
+    if (isShibuyaByX) {
+      resolvedArea = "shibuya";
+    } else if (rawQueryArea === "tokyo" || parsedX > -200) {
+      resolvedArea = "tokyo";
+    }
+  }
+
+  const areaSpawn = TokyoStationMap.getAreaSpawnTransform(resolvedArea);
+  const x = hasValidX ? parsedX : localFromLatLon ? localFromLatLon.x : areaSpawn.position.x;
+  const z = hasValidZ ? parsedZ : localFromLatLon ? localFromLatLon.z : areaSpawn.position.z;
+
+  const rawHeading = urlParams.get("heading");
+  const parsedHeading =
+    rawHeading !== null && rawHeading.trim() !== "" ? Number(rawHeading) : Number.NaN;
+  const hasHeadingQuery = Number.isFinite(parsedHeading);
+
+  let yawRadians = areaSpawn.yawRadians;
+  if (hasHeadingQuery) {
+    const isDegreeInput =
+      Math.abs(parsedHeading) > Math.PI * 2 ||
+      (hasLatLonQuery && !hasXzQuery && !(rawHeading ?? "").includes("."));
+    if (isDegreeInput) {
+      const refWgs = hasLatLonQuery ? { lat: parsedLat, lon: parsedLon } : localToWgs84(x, z);
+      yawRadians = compassHeadingDegToLocalYawRad(refWgs.lat, refWgs.lon, parsedHeading);
+    } else {
+      yawRadians = parsedHeading;
+    }
+  }
+
+  return {
+    area: resolvedArea,
+    hasCustomCoordinates: hasLatLonQuery || hasXzQuery,
+    hasLatLonQuery,
+    hasXzQuery,
+    hasHeadingQuery,
+    lat: hasLatLonQuery ? parsedLat : null,
+    lon: hasLatLonQuery ? parsedLon : null,
+    x,
+    z,
+    yawRadians,
+  };
+}
+
+/**
+ * 現在の URL のパス・既存クエリパラメータを保持したまま、`area`, `lat`, `lon`, `heading` を更新した相対 URL を構築する。
+ */
+export function buildUrlWithGpsCoordinates(
+  currentLocationHref: string,
+  params: {
+    area: DriveAreaId;
+    lat: number;
+    lon: number;
+    headingDeg: number;
+  },
+): string {
+  const url = new URL(currentLocationHref, "http://localhost:3000");
+  url.searchParams.set("area", params.area);
+  url.searchParams.set("lat", params.lat.toFixed(5));
+  url.searchParams.set("lon", params.lon.toFixed(5));
+  const normalizedHeadingDeg = ((Math.round(params.headingDeg) % 360) + 360) % 360;
+  url.searchParams.set("heading", String(normalizedHeadingDeg));
+  url.searchParams.delete("x");
+  url.searchParams.delete("z");
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+/**
+ * StreetReaderAI (`LocationProviderService.getRelativePosition`) 準拠の自車進行方向基準・4象限相対位置判定。
+ * How: 車両進行方向ベクトル `(sin(headingRad), cos(headingRad))` と右方向ベクトル `(cos(headingRad), -sin(headingRad))` への内積から
+ * `FRONT LEFT` / `FRONT RIGHT` / `BEHIND LEFT` / `BEHIND RIGHT` を算出する。
+ */
+export function getObserverRelativePosition(
+  observerX: number,
+  observerZ: number,
+  headingAngleRad: number,
+  targetX: number,
+  targetZ: number,
+): StreetReaderRelativePosition {
+  const dx = targetX - observerX;
+  const dz = targetZ - observerZ;
+  const fwdX = Math.sin(headingAngleRad);
+  const fwdZ = Math.cos(headingAngleRad);
+  const rightX = Math.cos(headingAngleRad);
+  const rightZ = -Math.sin(headingAngleRad);
+  const forwardProj = dx * fwdX + dz * fwdZ;
+  const rightProj = dx * rightX + dz * rightZ;
+  const depth = forwardProj >= 0 ? "FRONT" : "BEHIND";
+  const side = rightProj >= 0 ? "RIGHT" : "LEFT";
+  return `${depth} ${side}`;
+}
+
+function localizeStreetReaderRelativePosition(
+  rel: StreetReaderRelativePosition,
+  locale: SupportedLocale,
+): string {
+  if (locale === "en") {
+    return rel;
+  }
+  if (locale === "zh") {
+    const zhMap: Record<StreetReaderRelativePosition, string> = {
+      "FRONT LEFT": "左前方",
+      "FRONT RIGHT": "右前方",
+      "BEHIND LEFT": "左后方",
+      "BEHIND RIGHT": "右后方",
+    };
+    return zhMap[rel];
+  }
+  const jaMap: Record<StreetReaderRelativePosition, string> = {
+    "FRONT LEFT": "左前方",
+    "FRONT RIGHT": "右前方",
+    "BEHIND LEFT": "左後方",
+    "BEHIND RIGHT": "右後方",
+  };
+  return jaMap[rel];
+}
+
+/**
+ * StreetReaderAI (`StreetViewLinksService.analyzeIntersection` / `LocationProviderService.getNearbyPlaces` / `DESCRIPTION_PROMPT`) の
+ * 空間オリエンテーション・周辺ランドマーク相対方位記述ロジックを統合し、現在地のリアルタイム街路空間コンテキストを生成する。
+ */
+export function computeStreetReaderContext(
+  x: number,
+  z: number,
+  headingAngleRad: number,
+  locale: SupportedLocale = "ja",
+  maxPoiItems = 3,
+): StreetReaderSpatialContext {
+  const nearestRoad = findNearestGsiRoad(x, z);
+  const nearestBldg = findNearestPlateauBuilding(x, z);
+  const isShibuyaZone = x < -345;
+  const candidateBuildings = isShibuyaZone
+    ? getShibuyaPlateauBuildingsForMap()
+    : getPlateauBuildingsForMap();
+
+  const scoredPois = candidateBuildings
+    .map((b) => {
+      const dist = Math.hypot(x - b.x, z - b.z);
+      const rel = getObserverRelativePosition(x, z, headingAngleRad, b.x, b.z);
+      return {
+        id: b.buildingId,
+        name: locale === "en" ? b.nameEn : b.name,
+        usage: b.usage,
+        distanceMeters: Number(dist.toFixed(1)),
+        relativePosition: rel,
+        localizedRelativeLabel: localizeStreetReaderRelativePosition(rel, locale),
+      };
+    })
+    .sort((a, b) => a.distanceMeters - b.distanceMeters);
+
+  const nearbyPois = scoredPois.slice(0, Math.max(1, maxPoiItems));
+  const primaryBuildingPoi = scoredPois.find((p) => p.id === nearestBldg.buildingId) ??
+    nearbyPois[0] ?? {
+      id: nearestBldg.buildingId,
+      name: locale === "en" ? nearestBldg.nameEn : nearestBldg.name,
+      usage: nearestBldg.usage,
+      distanceMeters: nearestBldg.centerDistanceMeters,
+      relativePosition: "FRONT RIGHT" as StreetReaderRelativePosition,
+      localizedRelativeLabel: localizeStreetReaderRelativePosition("FRONT RIGHT", locale),
+    };
+
+  const intersections = getNavigationIntersections();
+  const fwdX = Math.sin(headingAngleRad);
+  const fwdZ = Math.cos(headingAngleRad);
+  let bestAheadInt: { name: string; dist: number; isAhead: boolean } | null = null;
+  let closestInt: { name: string; dist: number; isAhead: boolean } | null = null;
+
+  for (const intSpec of intersections) {
+    const dx = intSpec.x - x;
+    const dz = intSpec.z - z;
+    const dist = Math.hypot(dx, dz);
+    const forwardProj = dx * fwdX + dz * fwdZ;
+    const isAhead = forwardProj > -8 && (dist < 18 || forwardProj / Math.max(dist, 1) > 0.35);
+    if (!closestInt || dist < closestInt.dist) {
+      closestInt = { name: intSpec.name, dist, isAhead };
+    }
+    if (isAhead && (!bestAheadInt || dist < bestAheadInt.dist)) {
+      bestAheadInt = { name: intSpec.name, dist, isAhead: true };
+    }
+  }
+
+  const targetInt = bestAheadInt ?? closestInt;
+  const intName = targetInt?.name ?? "";
+  const intDistM = Number((targetInt?.dist ?? 0).toFixed(0));
+  const directionPrefix = targetInt?.isAhead
+    ? locale === "en"
+      ? "Ahead"
+      : "前方"
+    : locale === "en"
+      ? "Nearby"
+      : "近傍";
+  const intersectionAnnouncement = intName
+    ? `${directionPrefix}: ${intName} (${intDistM}m)`
+    : nearestRoad.displayName;
+
+  const poiSummary = nearbyPois
+    .map((p) => `${p.name} [${p.localizedRelativeLabel} ${Math.round(p.distanceMeters)}m]`)
+    .join(" / ");
+  const sceneSummary = `${nearestRoad.displayName} · ${intersectionAnnouncement}${poiSummary ? ` · POI: ${poiSummary}` : ""}`;
+
+  return {
+    currentStreetName: nearestRoad.displayName,
+    intersectionAnnouncement,
+    nearestIntersectionName: intName,
+    nearestIntersectionDistanceMeters: intDistM,
+    nearestBuildingRelativePosition: primaryBuildingPoi.relativePosition,
+    nearestBuildingLocalizedRelativeLabel: primaryBuildingPoi.localizedRelativeLabel,
+    nearbyPois,
+    sceneSummary,
+  };
+}
+
 async function bootstrap() {
+  const hasDocument = typeof document !== "undefined";
+  if (!hasDocument) {
+    return;
+  }
   const canvas = document.getElementById("webgl-canvas") as HTMLCanvasElement;
   const hasNoCanvas = !canvas;
   if (hasNoCanvas) {
@@ -167,9 +481,51 @@ async function bootstrap() {
   renderer.shadowMap.autoUpdate = false;
   renderer.shadowMap.needsUpdate = true;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.1;
 
   const scene = new THREE.Scene();
+  // 屋外昼間の都市空間で金属車両（Crown）・ガード下鋼材・看板・建築陰影面が黒潰れしないよう
+  // 青空ゼニス・明色ホライゾン・舗装地面バウンスの軽量プロシージャル IBL を生成する
+  try {
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color(0xa5d8ff);
+    const skyDome = new THREE.Mesh(
+      new THREE.SphereGeometry(20, 24, 16),
+      new THREE.MeshBasicMaterial({ color: 0x9ecfff, side: THREE.BackSide }),
+    );
+    const horizonRing = new THREE.Mesh(
+      new THREE.CylinderGeometry(18, 18, 10, 24, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xe6eef8, side: THREE.BackSide }),
+    );
+    const groundCap = new THREE.Mesh(
+      new THREE.CircleGeometry(20, 24),
+      new THREE.MeshBasicMaterial({ color: 0x64748b, side: THREE.DoubleSide }),
+    );
+    groundCap.rotation.x = -Math.PI / 2;
+    groundCap.position.y = -2;
+    const sunHighlight = new THREE.Mesh(
+      new THREE.SphereGeometry(2.5, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xfff8e7 }),
+    );
+    sunHighlight.position.set(4, 14, 6);
+    envScene.add(skyDome, horizonRing, groundCap, sunHighlight);
+    const envRT = pmremGenerator.fromScene(envScene, 0.04);
+    scene.environment = envRT.texture;
+    scene.environmentIntensity = 0.78;
+    skyDome.geometry.dispose();
+    (skyDome.material as THREE.Material).dispose();
+    horizonRing.geometry.dispose();
+    (horizonRing.material as THREE.Material).dispose();
+    groundCap.geometry.dispose();
+    (groundCap.material as THREE.Material).dispose();
+    sunHighlight.geometry.dispose();
+    (sunHighlight.material as THREE.Material).dispose();
+    pmremGenerator.dispose();
+  } catch {
+    // ヘッドレステスト等 WebGL 環境非対応時は IBL を省略
+  }
 
   // 2. 物理エンジン初期化 (Rapier 3D)
   updateLoadingProgress(58, "loadingStagePhysics");
@@ -213,26 +569,17 @@ async function bootstrap() {
 
   // 4. 車両物理 & 3Dモデル構築（デフォルト: 渋谷ストリーム前・明治通りからスタート）
   const urlParams = new URLSearchParams(window.location.search);
-  const rawQueryArea = urlParams.get("area");
-  const isInitialTokyo = rawQueryArea === "tokyo";
-  let currentDriveArea: DriveAreaId = isInitialTokyo ? "tokyo" : "shibuya";
-
-  const rawQueryX = urlParams.get("x");
-  const parsedQueryX = rawQueryX !== null ? Number(rawQueryX) : Number.NaN;
-  const hasValidQueryX = Number.isFinite(parsedQueryX);
-
-  const rawQueryZ = urlParams.get("z");
-  const parsedQueryZ = rawQueryZ !== null ? Number(rawQueryZ) : Number.NaN;
-  const hasValidQueryZ = Number.isFinite(parsedQueryZ);
-
-  const rawQueryHeading = urlParams.get("heading");
-  const parsedQueryHeading = rawQueryHeading !== null ? Number(rawQueryHeading) : Number.NaN;
-  const hasValidQueryHeading = Number.isFinite(parsedQueryHeading);
+  const initialLocationQuery = parseUrlLocationQuery(window.location.search, "shibuya");
+  let currentDriveArea: DriveAreaId = initialLocationQuery.area;
+  const hasValidQueryLatLon = initialLocationQuery.hasLatLonQuery;
+  const hasValidQueryX = initialLocationQuery.hasXzQuery && urlParams.get("x") !== null;
+  const hasValidQueryZ = initialLocationQuery.hasXzQuery && urlParams.get("z") !== null;
+  const hasValidQueryHeading = initialLocationQuery.hasHeadingQuery;
 
   const initialAreaSpawn = TokyoStationMap.getAreaSpawnTransform(currentDriveArea);
-  const startX = hasValidQueryX ? parsedQueryX : initialAreaSpawn.position.x;
-  const startZ = hasValidQueryZ ? parsedQueryZ : initialAreaSpawn.position.z;
-  const startYaw = hasValidQueryHeading ? parsedQueryHeading : initialAreaSpawn.yawRadians;
+  const startX = initialLocationQuery.x;
+  const startZ = initialLocationQuery.z;
+  const startYaw = initialLocationQuery.yawRadians;
   const startPosition = new THREE.Vector3(startX, initialAreaSpawn.position.y, startZ);
   let activeSpawnTransform = {
     position: startPosition.clone(),
@@ -357,7 +704,163 @@ async function bootstrap() {
   const gisRoadDisplay = document.getElementById("gis-road-display");
   const gisBldgDisplay = document.getElementById("gis-bldg-display");
   const gisStreamingDisplay = document.getElementById("gis-streaming-display");
+  const gpsLiveLatLon = document.getElementById("gps-live-latlon");
+  const gpsLiveXyz = document.getElementById("gps-live-xyz");
+  const gpsCopyBtn = document.getElementById("gps-copy-btn") as HTMLButtonElement | null;
+  const hudCoordStatus = document.getElementById("hud-coord-status");
   const streamingStatus = document.getElementById("streaming-status");
+
+  interface GpsTelemetrySnapshot {
+    lat: number;
+    lon: number;
+    x: number;
+    z: number;
+    elevationTpM: number;
+    headingDeg: number;
+    roadName: string;
+    streetscapeContext?: StreetReaderSpatialContext;
+  }
+
+  let latestGpsTelemetry: GpsTelemetrySnapshot = {
+    lat: 35.65674,
+    lon: 139.70264,
+    x: startPosition.x,
+    z: startPosition.z,
+    elevationTpM: 15.2,
+    headingDeg: 1,
+    roadName: "",
+  };
+
+  let lastUrlSyncTimeMs = -1000;
+  let lastUrlSyncX = Number.NaN;
+  let lastUrlSyncZ = Number.NaN;
+  let lastUrlSyncHeadingDeg = Number.NaN;
+  let lastSyncedUrlString = "";
+
+  const syncBrowserUrlWithGps = (
+    snapshot: { x: number; z: number; lat: number; lon: number; headingDeg: number },
+    force = false,
+  ) => {
+    const hasHistoryReplaceState =
+      typeof window !== "undefined" && typeof window.history?.replaceState === "function";
+    if (!hasHistoryReplaceState) {
+      return;
+    }
+
+    const nowMs = performance.now();
+    const movedDistM = Math.hypot(snapshot.x - lastUrlSyncX, snapshot.z - lastUrlSyncZ);
+    const headingDeltaDeg = Math.abs(snapshot.headingDeg - lastUrlSyncHeadingDeg);
+    const hasMovedEnough =
+      !Number.isFinite(movedDistM) || movedDistM >= 0.5 || headingDeltaDeg >= 3;
+    const isThrottleReady = nowMs - lastUrlSyncTimeMs >= 400;
+    const shouldSyncUrl = force || (isThrottleReady && hasMovedEnough);
+    if (!shouldSyncUrl) {
+      return;
+    }
+
+    const resolvedArea: DriveAreaId =
+      snapshot.lon < 139.735 || snapshot.x < -345 ? "shibuya" : "tokyo";
+    const nextUrl = buildUrlWithGpsCoordinates(window.location.href, {
+      area: resolvedArea,
+      lat: snapshot.lat,
+      lon: snapshot.lon,
+      headingDeg: snapshot.headingDeg,
+    });
+    const isUrlChanged = nextUrl !== lastSyncedUrlString;
+    if (isUrlChanged) {
+      window.history.replaceState(null, "", nextUrl);
+      lastSyncedUrlString = nextUrl;
+    }
+    lastUrlSyncTimeMs = nowMs;
+    lastUrlSyncX = snapshot.x;
+    lastUrlSyncZ = snapshot.z;
+    lastUrlSyncHeadingDeg = snapshot.headingDeg;
+  };
+
+  const COMPASS_LABELS_JA = ["北", "北東", "東", "南東", "南", "南西", "西", "北西"] as const;
+  const COMPASS_LABELS_EN = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
+
+  const updateGpsDisplays = (
+    pos: { x: number; z: number },
+    headingAngleRad: number,
+    roadName?: string,
+    forceUrlSync = false,
+  ): GpsTelemetrySnapshot => {
+    const wgs = localToWgs84(pos.x, pos.z);
+    const demTp = sampleGsiDemElevation(pos.x, pos.z);
+    const fwdX = Math.sin(headingAngleRad);
+    const fwdZ = Math.cos(headingAngleRad);
+    const wgsAhead = localToWgs84(pos.x + fwdX * 10, pos.z + fwdZ * 10);
+    const dLat = wgsAhead.lat - wgs.lat;
+    const dLon = (wgsAhead.lon - wgs.lon) * Math.cos((wgs.lat * Math.PI) / 180);
+    const headingDeg =
+      ((Math.round(THREE.MathUtils.radToDeg(Math.atan2(dLon, dLat))) % 360) + 360) % 360;
+    const compassIdx = Math.round(headingDeg / 45) % 8;
+    const locale = i18n.getLocale();
+    const compassLabel =
+      locale === "en" ? COMPASS_LABELS_EN[compassIdx] : COMPASS_LABELS_JA[compassIdx];
+    const streetscapeContext = computeStreetReaderContext(pos.x, pos.z, headingAngleRad, locale);
+    const resolvedRoadName = roadName ?? streetscapeContext.currentStreetName;
+
+    latestGpsTelemetry = {
+      lat: wgs.lat,
+      lon: wgs.lon,
+      x: Number(pos.x.toFixed(2)),
+      z: Number(pos.z.toFixed(2)),
+      elevationTpM: demTp,
+      headingDeg,
+      roadName: resolvedRoadName,
+      streetscapeContext,
+    };
+
+    syncBrowserUrlWithGps(latestGpsTelemetry, forceUrlSync);
+
+    const latLonText = `${wgs.lat.toFixed(5)}°N, ${wgs.lon.toFixed(5)}°E`;
+    if (gisCoordDisplay) {
+      gisCoordDisplay.textContent = `${latLonText} (TP +${demTp.toFixed(2)}m)`;
+    }
+    if (gpsLiveLatLon) {
+      gpsLiveLatLon.textContent = latLonText;
+    }
+    if (gpsLiveXyz) {
+      gpsLiveXyz.textContent = `X: ${pos.x.toFixed(1)} · Z: ${pos.z.toFixed(1)} · TP +${demTp.toFixed(1)}m · ${compassLabel} ${headingDeg}°`;
+      gpsLiveXyz.title = streetscapeContext.sceneSummary;
+    }
+    if (hudCoordStatus) {
+      hudCoordStatus.textContent = `${latLonText} (X:${Math.round(pos.x)} Z:${Math.round(pos.z)})`;
+    }
+    return latestGpsTelemetry;
+  };
+
+  updateGpsDisplays(startPosition, startYaw, undefined, true);
+
+  gpsCopyBtn?.addEventListener("click", async () => {
+    const loc = latestGpsTelemetry;
+    syncBrowserUrlWithGps(loc, true);
+    const copyText = `${loc.lat.toFixed(6)}°N, ${loc.lon.toFixed(6)}°E (X:${loc.x.toFixed(1)}, Z:${loc.z.toFixed(1)}, Yaw:${loc.headingDeg}°, Road:${loc.roadName})`;
+    try {
+      await navigator.clipboard.writeText(copyText);
+      const prevLabel = gpsCopyBtn.textContent ?? "座標コピー";
+      gpsCopyBtn.textContent = "✓ コピー完了!";
+      window.setTimeout(() => {
+        if (gpsCopyBtn.textContent === "✓ コピー完了!") {
+          gpsCopyBtn.textContent = prevLabel;
+        }
+      }, 1600);
+    } catch {
+      // クリップボード権限が無い環境でも構造化ログに正確な座標を出力する
+    }
+    logger.info("gis", "coord.copied", "現在地の緯度経度・3D座標をクリップボードへコピー", {
+      lat: loc.lat,
+      lon: loc.lon,
+      x: loc.x,
+      z: loc.z,
+      headingDeg: loc.headingDeg,
+      road: loc.roadName,
+      url: window.location.href,
+    });
+    gpsCopyBtn.blur();
+  });
 
   let warpBannerHideTimerId: number | null = null;
   let isWarpStreamingInProgress = false;
@@ -758,6 +1261,7 @@ async function bootstrap() {
         };
         vehiclePhysics.resetPosition(spawn.position, spawn.yawRadians);
         syncAreaButtons(area);
+        updateGpsDisplays(spawn.position, spawn.yawRadians, undefined, true);
 
         isWarpStreamingInProgress = true;
         if (warpBannerHideTimerId !== null) {
@@ -1392,6 +1896,12 @@ async function bootstrap() {
     setTurnSignalState("off", "reset");
     vehiclePhysics.resetPosition(activeSpawnTransform.position, activeSpawnTransform.yawRadians);
     cityMap.updateDistanceCulling(activeSpawnTransform.position, 380, true);
+    updateGpsDisplays(
+      activeSpawnTransform.position,
+      activeSpawnTransform.yawRadians,
+      undefined,
+      true,
+    );
     logger.info("vehicle", "vehicle.reset", "Vehicle reset to start position", {
       area: currentDriveArea,
       x: activeSpawnTransform.position.x,
@@ -1636,10 +2146,63 @@ async function bootstrap() {
   });
 
   const shouldAutoStart =
-    urlParams.get("autostart") === "1" || hasValidQueryX || hasValidQueryZ || hasValidQueryHeading;
+    urlParams.get("autostart") === "1" ||
+    hasValidQueryLatLon ||
+    hasValidQueryX ||
+    hasValidQueryZ ||
+    hasValidQueryHeading;
   if (shouldAutoStart) {
     dismissTitleScreen("url_query");
   }
+
+  const teleportVehicleToLocal = (
+    x: number,
+    z: number,
+    headingRad = 0,
+    speedKmh = 0,
+    forceUrlSync = true,
+  ) => {
+    const inferredArea: DriveAreaId = x < -345 ? "shibuya" : "tokyo";
+    const hasAreaChanged = inferredArea !== currentDriveArea;
+    if (hasAreaChanged) {
+      currentDriveArea = inferredArea;
+      syncAreaButtons(currentDriveArea);
+    }
+    // Why y = 0.62m (wheelRadius 0.38 + suspensionRestLength 0.32 - 0.08):
+    // y = 0.02m だとシャシー底面が路面下へめり込んで Rapier 貫通反発パルスを誘発するため、サスペンション静止高へ配置する
+    const targetPos = new THREE.Vector3(x, 0.62, z);
+    activeSpawnTransform = {
+      position: targetPos.clone(),
+      yawRadians: headingRad,
+    };
+    vehiclePhysics.resetPosition(targetPos, headingRad);
+    const speedMs = speedKmh / 3.6;
+    const vx = -Math.sin(headingRad) * speedMs;
+    const vz = -Math.cos(headingRad) * speedMs;
+    const status = streamingSystem.updateFrame({
+      vehicleX: x,
+      vehicleZ: z,
+      velocityX: vx,
+      velocityZ: vz,
+      headingAngleRad: headingRad,
+      speedKmh,
+      deltaSeconds: 0.05,
+    });
+    const budgetActiveRadius = streamingSystem.getBudgetProfile().activeRadiusM;
+    const cullingDistanceM = Math.max(280, Math.min(420, budgetActiveRadius));
+    cityMap.updateDistanceCulling(targetPos, cullingDistanceM, true);
+    updateGpsDisplays(targetPos, headingRad, undefined, forceUrlSync);
+    return status;
+  };
+
+  window.addEventListener("popstate", () => {
+    const parsed = parseUrlLocationQuery(window.location.search, currentDriveArea);
+    if (parsed.hasCustomCoordinates) {
+      teleportVehicleToLocal(parsed.x, parsed.z, parsed.yawRadians, 0, false);
+    } else if (parsed.area !== currentDriveArea) {
+      setDriveArea(parsed.area);
+    }
+  });
 
   // デバッグ・E2E検証用にオープンワールドストリーミングAPIを window へ公開
   (window as unknown as { __DEEP_DRIVE_STREAMING__?: unknown }).__DEEP_DRIVE_STREAMING__ = {
@@ -1653,26 +2216,8 @@ async function bootstrap() {
       setDriveArea(area);
       return streamingSystem.getStatus();
     },
-    teleportVehicle: (x: number, z: number, headingRad = 0, speedKmh = 0) => {
-      const targetPos = new THREE.Vector3(x, 0.02, z);
-      vehiclePhysics.resetPosition(targetPos, headingRad);
-      const speedMs = speedKmh / 3.6;
-      const vx = -Math.sin(headingRad) * speedMs;
-      const vz = -Math.cos(headingRad) * speedMs;
-      const status = streamingSystem.updateFrame({
-        vehicleX: x,
-        vehicleZ: z,
-        velocityX: vx,
-        velocityZ: vz,
-        headingAngleRad: headingRad,
-        speedKmh,
-        deltaSeconds: 0.05,
-      });
-      const budgetActiveRadius = streamingSystem.getBudgetProfile().activeRadiusM;
-      const cullingDistanceM = Math.max(280, Math.min(420, budgetActiveRadius));
-      cityMap.updateDistanceCulling(targetPos, cullingDistanceM, true);
-      return status;
-    },
+    teleportVehicle: (x: number, z: number, headingRad = 0, speedKmh = 0) =>
+      teleportVehicleToLocal(x, z, headingRad, speedKmh, true),
     simulateFailureAndTrigger: async (chunkId: WorldChunkId) => {
       streamingSystem.forceEvictChunk(chunkId);
       streamingSystem.setSimulatedChunkFailure(chunkId, true);
@@ -1688,6 +2233,17 @@ async function bootstrap() {
     },
     retryFailedChunks: () => handleManualStreamingRetry(),
     forceEvictChunk: (chunkId: WorldChunkId) => streamingSystem.forceEvictChunk(chunkId),
+  };
+
+  // デバッグ・外部参照用に現在地 GPS / 3D 座標 / StreetReaderAI 空間コンテキスト API を window へ公開
+  (window as unknown as { __DEEP_DRIVE_GPS__?: unknown }).__DEEP_DRIVE_GPS__ = {
+    getCurrentLocation: () => ({ ...latestGpsTelemetry }),
+    getStreetscapeContext: () => latestGpsTelemetry.streetscapeContext ?? null,
+    teleportToLatLon: (lat: number, lon: number, headingDeg = 0) => {
+      const local = wgs84ToLocal(lat, lon);
+      const yawRad = compassHeadingDegToLocalYawRad(lat, lon, headingDeg);
+      return teleportVehicleToLocal(local.x, local.z, yawRad, 0, true);
+    },
   };
 
   // デバッグ・自動検証用に主要コンポーネントを window へ公開
@@ -2067,7 +2623,7 @@ async function bootstrap() {
       gisHudElapsedSec = 0;
       const currentLocale = i18n.getLocale();
       const dict = i18n.t();
-      const isInShibuyaZone = carPos.x < -550;
+      const isInShibuyaZone = carPos.x < -345;
       const hasGisAreaHeader = Boolean(gisAreaHeader);
       if (hasGisAreaHeader) {
         const nextAreaHeaderText = isInShibuyaZone
@@ -2080,23 +2636,36 @@ async function bootstrap() {
         }
       }
 
-      const hasGisCoordDisplay = Boolean(gisCoordDisplay);
-      if (hasGisCoordDisplay) {
-        const wgs = localToWgs84(carPos.x, carPos.z);
-        const demTp = sampleGsiDemElevation(carPos.x, carPos.z);
-        gisCoordDisplay!.textContent = `${wgs.lat.toFixed(5)}°N, ${wgs.lon.toFixed(5)}°E (TP +${demTp.toFixed(2)}m)`;
-      }
+      const nearestRoad = findNearestGsiRoad(carPos.x, carPos.z);
+      const gpsSnapshot = updateGpsDisplays(
+        carPos,
+        vehicleState.headingAngle,
+        nearestRoad.displayName,
+      );
+      const streetContext = gpsSnapshot.streetscapeContext;
 
       const hasGisRoadDisplay = Boolean(gisRoadDisplay);
       if (hasGisRoadDisplay) {
-        const nearestRoad = findNearestGsiRoad(carPos.x, carPos.z);
-        gisRoadDisplay!.textContent = formatGsiRoadTelemetry(nearestRoad, currentLocale);
+        const baseRoadText = formatGsiRoadTelemetry(nearestRoad, currentLocale);
+        const intersectionSuffix = streetContext?.intersectionAnnouncement
+          ? ` · ${streetContext.intersectionAnnouncement}`
+          : "";
+        gisRoadDisplay!.textContent = `${baseRoadText}${intersectionSuffix}`;
       }
 
       const hasGisBldgDisplay = Boolean(gisBldgDisplay);
       if (hasGisBldgDisplay) {
         const nearestBldg = findNearestPlateauBuilding(carPos.x, carPos.z);
-        gisBldgDisplay!.textContent = formatPlateauBuildingTelemetry(nearestBldg, currentLocale);
+        const baseBldgText = formatPlateauBuildingTelemetry(nearestBldg, currentLocale);
+        const relBadge = streetContext
+          ? currentLocale === "en"
+            ? ` [${streetContext.nearestBuildingRelativePosition}]`
+            : ` [${streetContext.nearestBuildingLocalizedRelativeLabel} · ${streetContext.nearestBuildingRelativePosition}]`
+          : "";
+        gisBldgDisplay!.textContent = `${baseBldgText}${relBadge}`;
+        if (streetContext) {
+          gisBldgDisplay!.title = streetContext.sceneSummary;
+        }
       }
 
       syncStreamingHudAndBanner(streamingSystem.getStatus());

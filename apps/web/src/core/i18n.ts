@@ -897,6 +897,9 @@ const BUILDING_NAME_ZH_BY_ID: Readonly<Record<string, string>> = {
   "13113-bldg-qfront-109": "涩谷QFRONT・SHIBUYA109 十字路口街区",
   "13113-bldg-shibuya-parco": "涩谷PARCO (公园通・风琴坂街区)",
   "13113-bldg-shibuya-solasta": "涩谷Solasta (道玄坂・南平台街区)",
+  "13113-bldg-shibuya-miyamasu-tower": "涩谷宫益坂大厦 (宫益坂中段街区)",
+  "13113-bldg-miyamasuzaka-ue-tower": "宫益坂上Front Tower (涩谷一丁目・宫益坂上街区)",
+  "13113-bldg-aoyama-omotesando-square": "涩谷青山通广场 (神宫前五丁目・青山通街区)",
   "13103-bldg-aoyama-twins": "新青山大厦 (青山双子塔・国道246号沿线)",
   "13103-bldg-akasaka-intercity": "青山通大道塔楼 (赤坂・表参道街区)",
 };
