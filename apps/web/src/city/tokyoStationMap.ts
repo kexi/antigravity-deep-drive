@@ -8,9 +8,16 @@ import {
   type CreatedRoadSignInstance,
   type SignPhysicsContext,
 } from "../roads/roadSignSystem";
-import type { RoadSignPlacement } from "../assets/schema";
+import type { RoadSignPlacement, RoadDefinition } from "../assets/schema";
 import { JapaneseRoadMaterial } from "../roads/japaneseRoadMaterial";
-import type { JapaneseRoadSegmentConfig } from "../roads/types";
+import type {
+  JapaneseIntersectionConfig,
+  JapaneseRoadSegmentConfig,
+  RoadExclusionBox,
+  RoadExclusionCorridor,
+} from "../roads/types";
+import { computeRoadCrossSection } from "../roads/roadCrossSection";
+import { logger } from "../core/logger";
 import { PuddleMaterial, type PuddleEnvironmentSyncParams } from "../shaders/puddleShader";
 import {
   GinkgoFoliageMaterial,
@@ -104,6 +111,7 @@ export class TokyoStationMap {
   private roadBuilder: JapaneseRoadBuilder;
   private signPhysicsContext: SignPhysicsContext | null = null;
   private customSignInstances = new Map<string, CreatedRoadSignInstance>();
+  private roadOverrides = new Map<string, RoadDefinition>();
   private proceduralStationGroup: THREE.Group | null = null;
   private proceduralShibuyaStreamGroup: THREE.Group | null = null;
   private proceduralScrambleSquareGroup: THREE.Group | null = null;
@@ -392,7 +400,38 @@ export class TokyoStationMap {
     const groundCollider = world.createCollider(groundColliderDesc, groundBody);
     this.registerCollider(groundCollider, false);
 
-    // ヘルパー: 道路セグメントを構築しマテリアル・コライダー配列へ登録する
+    // 登録済み直線道路・交差点パッドのメタデータを保持し、交差点隅切り・曲線歩道クリッピングで共有する
+    interface StraightRoadRecord {
+      cx: number;
+      cz: number;
+      minX: number;
+      maxX: number;
+      minZ: number;
+      maxZ: number;
+      isEastWest: boolean;
+      carriagewayWidth: number;
+      sidewalkWidth: number;
+    }
+    interface PendingIntersectionSpec {
+      ix: number;
+      iz: number;
+      widthX: number;
+      depthZ: number;
+      lanesX: number;
+      lanesZ: number;
+      hasCrosswalks: boolean;
+      hasCenterDiamond?: boolean;
+      hasGuideDots?: boolean;
+      crosswalkN?: boolean;
+      crosswalkS?: boolean;
+      crosswalkE?: boolean;
+      crosswalkW?: boolean;
+      hasCornerSidewalks?: boolean;
+    }
+    const registeredStraightRoads: StraightRoadRecord[] = [];
+    const pendingIntersections: PendingIntersectionSpec[] = [];
+
+    // ヘルパー: 道路セグメントを構築しマテリアル・コライダー・空間メタデータを登録する
     const addRoadSegment = (
       config: JapaneseRoadSegmentConfig,
       center: THREE.Vector3,
@@ -400,11 +439,33 @@ export class TokyoStationMap {
     ): void => {
       const res = this.roadBuilder.buildSegment(config, world, rapier, center, rotationY);
       this.removeAttachedLights(res.group);
+      res.group.userData.roadName = config.name;
       this.group.add(res.group);
+      for (const m of res.materials) {
+        if (config.name && !m.userData.roadName) {
+          m.userData.roadName = config.name;
+        }
+      }
       this.roadMaterials.push(...res.materials);
       this.puddleMaterials.push(...res.puddleMaterials);
       this.colliders.push(...res.colliders);
       this.obstacleColliderHandles.push(...res.obstacleColliderHandles);
+
+      const cross = computeRoadCrossSection(config);
+      const isEastWest = Math.abs(Math.sin(rotationY)) > 0.7;
+      const halfSpanX = isEastWest ? config.length * 0.5 : cross.halfDriveable;
+      const halfSpanZ = isEastWest ? cross.halfDriveable : config.length * 0.5;
+      registeredStraightRoads.push({
+        cx: center.x,
+        cz: center.z,
+        minX: center.x - halfSpanX,
+        maxX: center.x + halfSpanX,
+        minZ: center.z - halfSpanZ,
+        maxZ: center.z + halfSpanZ,
+        isEastWest,
+        carriagewayWidth: cross.driveableWidth,
+        sidewalkWidth: config.sidewalkWidth,
+      });
     };
 
     // --- A. 行幸通り（メインアベニュー: 丸の内中央通り z=5・丸の内仲通り z=165・日比谷通り z=250 の各交差点で分割） ---
@@ -460,8 +521,8 @@ export class TokyoStationMap {
       { cx: -415.5, len: 49, rot: Math.PI / 2 },
       { cx: -325.0, len: 88, rot: Math.PI / 2 },
       { cx: -210.5, len: 89, rot: Math.PI / 2 },
-      { cx: -79.75, len: 132.5, rot: Math.PI / 2 },
-      { cx: 79.75, len: 132.5, rot: -Math.PI / 2 },
+      { cx: -79.5, len: 133, rot: Math.PI / 2 },
+      { cx: 79.5, len: 133, rot: -Math.PI / 2 },
       { cx: 211.5, len: 91, rot: -Math.PI / 2 },
       { cx: 361.5, len: 157, rot: -Math.PI / 2 },
     ];
@@ -518,9 +579,9 @@ export class TokyoStationMap {
     const hibiyaSegments: Array<{ cx: number; len: number; rot: number }> = [
       { cx: -210.5, len: 89, rot: Math.PI / 2 },
       { cx: -90.0, len: 112, rot: Math.PI / 2 }, // x=-146 .. -34 (楠公通りアプローチ合流西側まで)
-      { cx: 79.75, len: 132.5, rot: -Math.PI / 2 },
+      { cx: 79.5, len: 133, rot: -Math.PI / 2 },
       { cx: 211.5, len: 91, rot: -Math.PI / 2 },
-      { cx: 382, len: 196, rot: -Math.PI / 2 },
+      { cx: 381.5, len: 197, rot: -Math.PI / 2 },
     ];
     for (const seg of hibiyaSegments) {
       addRoadSegment(
@@ -552,7 +613,7 @@ export class TokyoStationMap {
     for (const seg of [
       { cx: -437.0, len: 86, rot: Math.PI / 2 },
       { cx: -307.5, len: 53, rot: Math.PI / 2 },
-      { cx: 382, len: 196, rot: -Math.PI / 2 },
+      { cx: 381.5, len: 197, rot: -Math.PI / 2 },
     ]) {
       addRoadSegment(
         {
@@ -588,8 +649,8 @@ export class TokyoStationMap {
         speedLimit: 50,
         segments: [
           { cz: -45.5, len: 79 }, // z = -85 .. -6
-          { cz: 48.5, len: 65 }, // z = 16 .. 81（国道246号交差点 z = 95 南側まで）
-          { cz: 131.5, len: 45 }, // z = 109 .. 154（国道246号交差点 z = 95 北側から）
+          { cz: 49.0, len: 66 }, // z = 16 .. 82（国道246号交差点 z = 95 南側まで）
+          { cz: 131.0, len: 46 }, // z = 108 .. 154（国道246号交差点 z = 95 北側から）
           { cz: 205.0, len: 58 }, // z = 176 .. 234
           { cz: 309.0, len: 86 }, // z = 266 .. 352
         ],
@@ -691,42 +752,25 @@ export class TokyoStationMap {
         crosswalkS?: boolean;
         crosswalkE?: boolean;
         crosswalkW?: boolean;
+        hasCornerSidewalks?: boolean;
       },
     ): void => {
-      const interGroup = new THREE.Group();
-      interGroup.name = `Intersection_${ix}_${iz}`;
-      interGroup.userData.isRoadInfrastructure = true;
-      interGroup.position.set(ix, 0.0115, iz);
-
-      const padGeo = new THREE.PlaneGeometry(widthX, depthZ, 8, 8);
-      padGeo.rotateX(-Math.PI / 2);
-      const padMesh = new THREE.Mesh(padGeo, intersectionPadMat);
-      padMesh.userData.isRoadInfrastructure = true;
-      padMesh.receiveShadow = true;
-      interGroup.add(padMesh);
-
-      const interMarkings = this.roadBuilder.buildIntersectionMarkingGroup(widthX, depthZ, {
+      pendingIntersections.push({
+        ix,
+        iz,
+        widthX,
+        depthZ,
         lanesX,
         lanesZ,
         hasCrosswalks,
-        hasCenterDiamond: options?.hasCenterDiamond ?? (lanesX >= 2 && lanesZ >= 2),
-        hasGuideDots: options?.hasGuideDots ?? true,
+        hasCenterDiamond: options?.hasCenterDiamond,
+        hasGuideDots: options?.hasGuideDots,
         crosswalkN: options?.crosswalkN,
         crosswalkS: options?.crosswalkS,
         crosswalkE: options?.crosswalkE,
         crosswalkW: options?.crosswalkW,
+        hasCornerSidewalks: options?.hasCornerSidewalks,
       });
-      interMarkings.userData.isRoadInfrastructure = true;
-      interGroup.add(interMarkings);
-
-      this.group.add(interGroup);
-
-      // 交差点内の平坦路面コライダー（車道セグメントと同じ上面高さ y = 0.012 で段差なく接続）
-      const padColDesc = rapier.ColliderDesc.cuboid(widthX / 2, 0.25, depthZ / 2)
-        .setTranslation(ix, 0.512 - 0.25, iz)
-        .setFriction(0.85)
-        .setRestitution(0.02);
-      this.registerCollider(world.createCollider(padColDesc, groundBody), false);
     };
 
     const intersectionXs = [-268, 0, 270];
@@ -825,10 +869,12 @@ export class TokyoStationMap {
     addIntersectionPadAndMarkings(-815, 248, 44, 44, 3, 3, false, {
       hasCenterDiamond: false,
       hasGuideDots: false,
+      hasCornerSidewalks: false,
     });
     addIntersectionPadAndMarkings(-750, 248, 32, 24, 3, 2, false, {
       hasCenterDiamond: false,
       hasGuideDots: false,
+      hasCornerSidewalks: false,
     });
 
     // 渋谷スクランブル交差点 象徴の対角線X字型スクランブル横断歩道（斜め横断歩道）
@@ -846,6 +892,7 @@ export class TokyoStationMap {
     // 中央ダイヤ標示を押すと、斜め道路と直角白線が格子状に衝突して「碁盤の目」の視覚的印象を生むため、
     // 横断歩道・ダイヤ標示を無効化し、平滑なアスファルト舗装接続面と物理コライダーのみを供給する。
     // また旧グリッド座標（z = 95）の架空交差点パッド（-750, 95 および -730, 95）は完全廃止。
+    // 注意: 青山一丁目（-380, 250）は Section P の expandedIntersections 側に集約し重複配置を防止する。
     const shibuyaRadialIntersections = [
       { x: -1080, z: 140, w: 36, d: 32, lx: 2, lz: 2 }, // 道玄坂上交差点（玉川通り合流）
       { x: -1250, z: 150, w: 34, d: 32, lx: 2, lz: 2 }, // 神泉町交差点（旧山手通り交差）
@@ -860,12 +907,12 @@ export class TokyoStationMap {
       { x: -855, z: 95, w: 32, d: 28, lx: 2, lz: 2 }, // セルリアンタワー前・玉川通り（国道246号・さくら坂入口）
       { x: -940, z: 115, w: 28, d: 26, lx: 2, lz: 1 }, // さくら坂西口・玉川通り合流交差点
       { x: -750, z: 102, w: 34, d: 30, lx: 3, lz: 2 }, // 渋谷駅南・明治通り×国道246号（渋谷ストリーム北）交差点
-      { x: -380, z: 250, w: 30, d: 28, lx: 2, lz: 2 }, // 青山一丁目（宮益坂・青山通り×外苑東通り）交差点
     ];
     for (const ri of shibuyaRadialIntersections) {
       addIntersectionPadAndMarkings(ri.x, ri.z, ri.w, ri.d, ri.lx, ri.lz, false, {
         hasCenterDiamond: false,
         hasGuideDots: false,
+        hasCornerSidewalks: false,
       });
     }
 
@@ -932,198 +979,7 @@ export class TokyoStationMap {
     // I-9. 公園通り北側（西武・マルイ・MODI・神南）＆道玄坂沿道の連続歩道広場・商業ビル街並み補完
     this.buildShibuyaStreetscapeFillInfrastructure(world, rapier, groundBody);
 
-    // --- J. 国土地理院 道路中心線 (experimental_rdcl) & PLATEAU 道路網オープンデータに基づく曲線・屈曲道路区間 ---
-    const curvedRoadCorridors = getOpenDataCurvedRoadCorridors();
-    for (let corridorIdx = 0; corridorIdx < curvedRoadCorridors.length; corridorIdx++) {
-      const curvedCorridor = curvedRoadCorridors[corridorIdx];
-      const corridorBaseY = 0.011 + corridorIdx * 0.00012;
-      const isScrambleLink = curvedCorridor.id === "nav-road-shibuya-scramble";
-      const isCenterGai = curvedCorridor.id === "nav-road-shibuya-center-gai";
-      const isHikarieAccess = curvedCorridor.id === "nav-road-shibuya-hikarie-access";
-      const isInokashiraOrgan = curvedCorridor.id === "nav-road-shibuya-inokashira-organ";
-      const isSakurazakaLoop = curvedCorridor.id === "nav-road-shibuya-sakurazaka-loop";
-      const isDogenzaka = curvedCorridor.id === "nav-road-shibuya-dogenzaka";
-      const lanesPerDir =
-        curvedCorridor.widthMeters >= 20.0
-          ? 3
-          : Math.max(1, Math.min(3, Math.round(curvedCorridor.widthMeters / 8.5)));
-      const isArterialCategory = curvedCorridor.category !== "local_street";
-
-      let medianWidth = 0;
-      let medianExclusionZones: Array<{ x: number; z: number; radius: number }> | undefined;
-      let startTrimMeters: number | undefined;
-      let endTrimMeters: number | undefined;
-      let skipStartCrosswalk = false;
-      const skipEndCrosswalk = false;
-      if (curvedCorridor.id === "nav-road-meiji-dori") {
-        medianWidth = 1.4;
-        medianExclusionZones = [{ x: -750, z: 102, radius: 22 }];
-        startTrimMeters = 0.0;
-        skipStartCrosswalk = true;
-      } else if (curvedCorridor.id === "nav-road-meiji-dori-ebisu-curve") {
-        medianWidth = 1.4;
-        startTrimMeters = 0.0;
-        skipStartCrosswalk = true;
-      } else if (curvedCorridor.id === "nav-road-meiji-dori-harajuku-curve") {
-        medianWidth = 1.4;
-        startTrimMeters = 22.0;
-        medianExclusionZones = [
-          { x: -756, z: 354, radius: 22 },
-          { x: -762, z: 420, radius: 22 },
-          { x: -750, z: 430, radius: 22 },
-        ];
-      } else if (curvedCorridor.id === "nav-road-yamate-dori") {
-        medianWidth = 1.4;
-        medianExclusionZones = [{ x: -1350, z: 150, radius: 26 }];
-      } else if (curvedCorridor.id === "nav-road-shibuya-tamagawa-west") {
-        medianWidth = 1.2;
-        startTrimMeters = 18.0;
-        medianExclusionZones = [
-          { x: -750, z: 102, radius: 22 },
-          { x: -855, z: 95, radius: 22 },
-          { x: -940, z: 115, radius: 22 },
-          { x: -1080, z: 140, radius: 46 },
-          { x: -1250, z: 150, radius: 22 },
-          { x: -1350, z: 150, radius: 24 },
-        ];
-      } else if (curvedCorridor.id === "nav-road-route246") {
-        medianWidth = 1.0;
-        startTrimMeters = 16.0;
-        medianExclusionZones = [
-          { x: -750, z: 102, radius: 28 },
-          { x: -380, z: 98, radius: 22 },
-        ];
-      } else if (curvedCorridor.id === "nav-road-shibuya-miyamasuzaka") {
-        medianWidth = 0;
-        endTrimMeters = 18.0;
-        medianExclusionZones = [
-          { x: -729, z: 248, radius: 12 },
-          { x: -380, z: 250, radius: 18 },
-        ];
-      } else if (isDogenzaka) {
-        medianWidth = 0;
-        startTrimMeters = 8.0;
-        medianExclusionZones = [
-          { x: -837, z: 250, radius: 9.0 },
-          { x: -1080, z: 140, radius: 46 },
-        ];
-      } else if (curvedCorridor.id === "nav-road-shibuya-shinsen-nakadori") {
-        medianExclusionZones = [{ x: -1080, z: 140, radius: 46 }];
-      } else if (curvedCorridor.id === "nav-road-shibuya-koen-dori") {
-        startTrimMeters = 12.5;
-        skipStartCrosswalk = true;
-        medianExclusionZones = [
-          { x: -791, z: 250, radius: 13.0 },
-          { x: -799, z: 356, radius: 17.5 },
-          { x: -805, z: 440, radius: 13.0 },
-        ];
-      } else if (curvedCorridor.id === "nav-road-shibuya-jinnan-cross") {
-        medianExclusionZones = [
-          { x: -750, z: 430, radius: 22 },
-          { x: -762, z: 420, radius: 22 },
-          { x: -805, z: 440, radius: 13.5 },
-        ];
-      } else if (curvedCorridor.id === "nav-road-shibuya-bunkamura-dori") {
-        startTrimMeters = 8.0;
-        medianExclusionZones = [
-          { x: -838, z: 252, radius: 9.0 },
-          { x: -875, z: 320, radius: 16 },
-          { x: -940, z: 345, radius: 18 },
-        ];
-      } else if (isCenterGai) {
-        startTrimMeters = 8.0;
-        endTrimMeters = 15.0;
-        medianExclusionZones = [
-          { x: -875, z: 320, radius: 15 },
-          { x: -940, z: 345, radius: 18 },
-        ];
-      } else if (isInokashiraOrgan) {
-        startTrimMeters = 11.0;
-        endTrimMeters = 22.0;
-        medianExclusionZones = [{ x: -798, z: 360, radius: 16 }];
-      } else if (isSakurazakaLoop) {
-        medianExclusionZones = [
-          { x: -855, z: 95, radius: 22 },
-          { x: -940, z: 115, radius: 24 },
-        ];
-        endTrimMeters = 18.0;
-      } else if (curvedCorridor.id === "nav-road-uchibori-dori") {
-        medianWidth = 1.2;
-        medianExclusionZones = [{ x: 156, z: 379, radius: 14 }];
-      }
-
-      // Why isScrambleLink の白線・ガードレールを抑制するか:
-      // スクランブル交差点連絡路（109前〜スクランブル中心〜宮益坂下）は交差点内部を東西に貫通する。
-      // ここに東西の白破線やガードレールを描画すると、対角線X字型スクランブル横断歩道や歩行者広場と激しく衝突し、
-      // 交差点内部が「白線のジャングル」と化すため、平滑なアスファルト路面のみを供給する。
-      const markingExclusionZones: Array<{ x: number; z: number; radius: number }> = [
-        ...(medianExclusionZones ?? []),
-        { x: -815, z: 248, radius: 26 }, // スクランブル交差点
-        { x: -750, z: 248, radius: 18 }, // 宮益坂下交差点
-      ];
-
-      const polyRes = this.roadBuilder.buildPolylineSegment(
-        {
-          name: curvedCorridor.displayName,
-          lanesPerDirection: lanesPerDir,
-          laneWidth: isHikarieAccess ? 2.9 : 3.4,
-          shoulderWidth: isHikarieAccess ? 0.5 : 1.2,
-          medianWidth,
-          medianExclusionZones,
-          markingExclusionZones,
-          startTrimMeters,
-          endTrimMeters,
-          skipStartCrosswalk,
-          skipEndCrosswalk,
-          sidewalkWidth:
-            isScrambleLink ||
-            isCenterGai ||
-            isHikarieAccess ||
-            isInokashiraOrgan ||
-            isSakurazakaLoop
-              ? 0
-              : 3.2,
-          curbHeight: 0.15,
-          length: 120,
-          hasCenterLine: !isScrambleLink && !isCenterGai,
-          hasShoulderLines: !isScrambleLink && !isCenterGai,
-          hasStopLines: !isScrambleLink && !isCenterGai,
-          hasYellowCenterLine: lanesPerDir === 1 && isArterialCategory && !isScrambleLink,
-          hasWhiteDashedLines: lanesPerDir >= 2 && !isScrambleLink,
-          hasCrosswalk: isArterialCategory && !isScrambleLink && !isCenterGai,
-          // Why tamagawa-west のガードレールを抑制するか:
-          // 玉川通り西進（明治通り〜セルリアンタワー〜神泉町）は首都高高架下の都市幹線であり、
-          // 南側から桜丘さくら坂（nav-road-shibuya-sakurazaka-loop: x=-940, z=115）やヒカリエ連絡路が合流する。
-          // 連続金属ガードレールを敷くと合流口を塞ぎ「見えない壁」となるため、歩道縁石（curb）のみで自然に区切る。
-          hasGuardrails:
-            isArterialCategory &&
-            !isScrambleLink &&
-            !isCenterGai &&
-            curvedCorridor.id !== "nav-road-shibuya-tamagawa-west",
-          hasManholes: !isScrambleLink && !isCenterGai,
-          hasTrafficLights: false,
-          speedLimitSign:
-            curvedCorridor.id.includes("meiji-dori") ||
-            curvedCorridor.id === "nav-road-route246" ||
-            curvedCorridor.id === "nav-road-shibuya-tamagawa-west" ||
-            curvedCorridor.id === "nav-road-yamate-dori" ||
-            curvedCorridor.category === "national_highway"
-              ? 50
-              : 40,
-          points: curvedCorridor.points,
-        },
-        curvedCorridor.points,
-        world,
-        rapier,
-        corridorBaseY,
-      );
-      this.removeAttachedLights(polyRes.group);
-      this.group.add(polyRes.group);
-      this.roadMaterials.push(...polyRes.materials);
-      this.puddleMaterials.push(...polyRes.puddleMaterials);
-      this.colliders.push(...polyRes.colliders);
-      this.obstacleColliderHandles.push(...polyRes.obstacleColliderHandles);
-    }
+    // --- J. 曲線・屈曲道路区間（Section P で全直線道路・交差点が登録された後に一括構築して片側クリッピングを適用） ---
 
     // --- K. 10倍広域マップ拡張: 渋谷南北・西側延伸大動脈（原宿・代々木・恵比寿・山手通り・神泉・駒沢通り） ---
     // Why not addRoadSegment による直線グリッド道路:
@@ -1145,7 +1001,7 @@ export class TokyoStationMap {
           lanesPerDirection: 3,
           laneWidth: 3.5,
           shoulderWidth: 1.5,
-          sidewalkWidth: 4.5,
+          sidewalkWidth: 4.0,
           curbHeight: 0.15,
           length: roppongiSeg.len,
           hasYellowCenterLine: false,
@@ -1202,13 +1058,14 @@ export class TokyoStationMap {
     addIntersectionPadAndMarkings(-380, 98, 28, 40, 2, 2, false, {
       hasCenterDiamond: false,
       hasGuideDots: false,
+      hasCornerSidewalks: false,
     });
 
     // 4. 青山通り（国道246号）本線東西（z = 250: 青山一丁目〜赤坂見附）
     // Why not cx: -465（表参道区間）: 表参道区間（z = 250, x = -534..-396）は宮益坂・スクランブル（z = 248）と
     // 水平直角グリッドを形成するため撤去。赤坂見附永代通り接続区間のみ直線維持。
     for (const r246Main of [
-      { cx: -324, len: 80 }, // 青山一丁目 x=-364 .. 赤坂見附永代通り接続 x=-284
+      { cx: -322.5, len: 83 }, // 青山一丁目 x=-364 .. 赤坂見附永代通り西端 x=-281
     ]) {
       addRoadSegment(
         {
@@ -1240,7 +1097,7 @@ export class TokyoStationMap {
         lanesPerDirection: 3,
         laneWidth: 3.5,
         shoulderWidth: 1.5,
-        sidewalkWidth: 4.5,
+        sidewalkWidth: 4.0,
         curbHeight: 0.15,
         length: 453,
         hasYellowCenterLine: false,
@@ -1262,7 +1119,7 @@ export class TokyoStationMap {
         lanesPerDirection: 3,
         laneWidth: 3.5,
         shoulderWidth: 1.5,
-        sidewalkWidth: 4.5,
+        sidewalkWidth: 4.0,
         curbHeight: 0.15,
         length: 318,
         hasYellowCenterLine: false,
@@ -1287,7 +1144,7 @@ export class TokyoStationMap {
         lanesPerDirection: 3,
         laneWidth: 3.5,
         shoulderWidth: 1.5,
-        sidewalkWidth: 4.5,
+        sidewalkWidth: 4.0,
         curbHeight: 0.15,
         length: 418,
         hasYellowCenterLine: false,
@@ -1307,7 +1164,7 @@ export class TokyoStationMap {
     // 中央通り歩道ガードレールが内堀通り車道を横断してしまうため、交差点南北で分割する
     for (const chuoNorthSeg of [
       { cz: 316.5, len: 101 }, // 大手町北 z=266 .. 内堀通り交点南 z=367
-      { cz: 612.5, len: 443 }, // 内堀通り交点北 z=391 .. 秋葉原 z=834
+      { cz: 614.0, len: 446 }, // 内堀通り交点北 z=391 .. 竹橋・秋葉原交差点南端 z=837
     ]) {
       addRoadSegment(
         {
@@ -1391,8 +1248,8 @@ export class TokyoStationMap {
     // 2. 晴海通り（日比谷公園〜数寄屋橋〜銀座四丁目〜歌舞伎座〜昭和通り: z = -350）
     for (const harumiSeg of [
       { cx: 78, len: 124 }, // 数寄屋橋 x=16 .. 銀座四丁目 x=140
-      { cx: 402, len: 460 }, // 銀座四丁目 x=172 .. 東銀座昭和通り x=632
-      { cx: 734, len: 132 }, // 昭和通り東 x=668 .. 勝鬨橋方面 x=800
+      { cx: 400.5, len: 457 }, // 銀座四丁目 x=172 .. 昭和通り交差点西端 x=629
+      { cx: 735.5, len: 129 }, // 昭和通り交差点東端 x=671 .. 勝鬨橋方面 x=800
     ]) {
       addRoadSegment(
         {
@@ -1400,7 +1257,7 @@ export class TokyoStationMap {
           lanesPerDirection: 3,
           laneWidth: 3.5,
           shoulderWidth: 1.5,
-          sidewalkWidth: 4.5,
+          sidewalkWidth: 4.0,
           curbHeight: 0.15,
           length: harumiSeg.len,
           hasYellowCenterLine: false,
@@ -1428,7 +1285,7 @@ export class TokyoStationMap {
           lanesPerDirection: 3,
           laneWidth: 3.5,
           shoulderWidth: 1.5,
-          sidewalkWidth: 4.5,
+          sidewalkWidth: 4.0,
           curbHeight: 0.15,
           length: hibiyaSouthSeg.len,
           hasYellowCenterLine: false,
@@ -1448,7 +1305,7 @@ export class TokyoStationMap {
     for (const shimbashiSeg of [
       { cx: -134, len: 236 }, // 虎ノ門 x=-252 .. 新橋 x=-16
       { cx: 78, len: 124 }, // 新橋 x=16 .. 銀座南 x=140
-      { cx: 402, len: 460 }, // 銀座南 x=172 .. 汐留昭和通り x=632
+      { cx: 400.5, len: 457 }, // 銀座南 x=172 .. 昭和通り交差点西端 x=629
     ]) {
       addRoadSegment(
         {
@@ -1456,7 +1313,7 @@ export class TokyoStationMap {
           lanesPerDirection: 3,
           laneWidth: 3.5,
           shoulderWidth: 1.5,
-          sidewalkWidth: 4.5,
+          sidewalkWidth: 4.0,
           curbHeight: 0.15,
           length: shimbashiSeg.len,
           hasYellowCenterLine: false,
@@ -1480,16 +1337,24 @@ export class TokyoStationMap {
       depth: number;
       lanesX: number;
       lanesZ: number;
+      hasCornerSidewalks?: boolean;
     }> = [
       // 青山・六本木・赤坂（港区側交差点のみ維持）
       { x: -380, z: -350, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 六本木交差点
       { x: -380, z: 5, width: 22, depth: 16, lanesX: 1, lanesZ: 2 }, // 新宿通り・外苑東通り交差点
       { x: -380, z: 165, width: 22, depth: 16, lanesX: 1, lanesZ: 2 }, // 丸の内仲通り延長・外苑東通り交差点
-      { x: -180, z: -150, width: 32, depth: 26, lanesX: 3, lanesZ: 2 }, // 赤坂・溜池
       { x: -380, z: 250, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 青山一丁目交差点
       { x: -380, z: 365, width: 28, depth: 26, lanesX: 2, lanesZ: 2 }, // 四谷・外苑東通り・内堀通り西交差点
       // 皇居周回（三宅坂・半蔵門・竹橋・楠公通り）
-      { x: -23.75, z: 250, width: 20.5, depth: 24, lanesX: 1, lanesZ: 3 }, // 楠公通りアプローチ合流（日比谷通り側開口）
+      {
+        x: -23.5,
+        z: 250,
+        width: 21,
+        depth: 24,
+        lanesX: 1,
+        lanesZ: 3,
+        hasCornerSidewalks: false,
+      }, // 楠公通りアプローチ拡幅接続（日比谷通り側開口）
       { x: 156, z: 379, width: 24, depth: 24, lanesX: 2, lanesZ: 2 }, // 内堀通り・中央通り交点
       { x: -350, z: 365, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 三宅坂交差点
       { x: -350, z: 850, width: 32, depth: 32, lanesX: 3, lanesZ: 3 }, // 半蔵門・千鳥ヶ淵交差点
@@ -1497,12 +1362,12 @@ export class TokyoStationMap {
       // 銀座・数寄屋橋・晴海通り・新橋・汐留
       { x: 0, z: -350, width: 32, depth: 32, lanesX: 3, lanesZ: 3 }, // 数寄屋橋交差点
       { x: 156, z: -350, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 銀座四丁目交差点（世界的大交差点）
-      { x: 650, z: -350, width: 36, depth: 32, lanesX: 4, lanesZ: 3 }, // 東銀座・三原橋交差点
+      { x: 650, z: -350, width: 42, depth: 32, lanesX: 4, lanesZ: 3 }, // 東銀座・三原橋交差点
       { x: 0, z: -750, width: 32, depth: 32, lanesX: 3, lanesZ: 3 }, // 新橋交差点（SL広場前）
-      { x: 650, z: -750, width: 36, depth: 32, lanesX: 4, lanesZ: 3 }, // 汐留交差点
+      { x: 650, z: -750, width: 42, depth: 32, lanesX: 4, lanesZ: 3 }, // 汐留交差点
       // 昭和通り（鍛冶橋・永代）
-      { x: 650, z: 5, width: 36, depth: 26, lanesX: 4, lanesZ: 2 },
-      { x: 650, z: 250, width: 36, depth: 32, lanesX: 4, lanesZ: 3 },
+      { x: 650, z: 5, width: 42, depth: 26, lanesX: 4, lanesZ: 2 },
+      { x: 650, z: 250, width: 42, depth: 32, lanesX: 4, lanesZ: 3 },
       // 神田・秋葉原
       { x: 156, z: 850, width: 32, depth: 26, lanesX: 2, lanesZ: 2 },
     ];
@@ -1515,7 +1380,424 @@ export class TokyoStationMap {
         expInt.lanesX,
         expInt.lanesZ,
         true,
+        { hasCornerSidewalks: expInt.hasCornerSidewalks },
       );
+    }
+
+    // --- J(再配置). 国土地理院 & PLATEAU 曲線・屈曲道路区間（全直線・交差点登録後に片側別クリッピング付きで構築） ---
+    const curvedRoadCorridors = getOpenDataCurvedRoadCorridors();
+    const resolveCorridorCrossParams = (curvedCorridor: (typeof curvedRoadCorridors)[number]) => {
+      const id = curvedCorridor.id;
+      const isScrambleLink = id === "nav-road-shibuya-scramble";
+      const isCenterGai = id === "nav-road-shibuya-center-gai";
+      const isHikarieAccess = id === "nav-road-shibuya-hikarie-access";
+      const isInokashiraOrgan = id === "nav-road-shibuya-inokashira-organ";
+      const isSakurazakaLoop = id === "nav-road-shibuya-sakurazaka-loop";
+      const lanesPerDir =
+        curvedCorridor.widthMeters >= 20.0
+          ? 3
+          : Math.max(1, Math.min(3, Math.round(curvedCorridor.widthMeters / 8.5)));
+      const laneWidth = isHikarieAccess ? 2.9 : 3.4;
+      const shoulderWidth = isHikarieAccess ? 0.5 : 1.2;
+
+      let medianWidth = 0;
+      if (
+        id === "nav-road-meiji-dori" ||
+        id === "nav-road-meiji-dori-ebisu-curve" ||
+        id === "nav-road-meiji-dori-harajuku-curve" ||
+        id === "nav-road-yamate-dori"
+      ) {
+        medianWidth = 1.4;
+      } else if (id === "nav-road-shibuya-tamagawa-west" || id === "nav-road-uchibori-dori") {
+        medianWidth = 1.2;
+      } else if (id === "nav-road-route246") {
+        medianWidth = 1.0;
+      }
+
+      const halfWidth = lanesPerDir * laneWidth + shoulderWidth + medianWidth * 0.5;
+      const sidewalkWidth =
+        isScrambleLink || isCenterGai
+          ? 0
+          : isInokashiraOrgan
+            ? 2.2
+            : isSakurazakaLoop || isHikarieAccess
+              ? 2.0
+              : 3.2;
+
+      return {
+        lanesPerDir,
+        laneWidth,
+        shoulderWidth,
+        medianWidth,
+        halfWidth,
+        sidewalkWidth,
+        isScrambleLink,
+        isCenterGai,
+        isHikarieAccess,
+        isInokashiraOrgan,
+        isSakurazakaLoop,
+      };
+    };
+
+    const corridorDescriptors = curvedRoadCorridors.map((c) => {
+      const spec = resolveCorridorCrossParams(c);
+      const pts = c.points.map((p) => new THREE.Vector3(p.x, 0, p.z));
+      const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal", 0.5);
+      const totalLen = Math.max(1, curve.getLength());
+      const steps = Math.max(40, Math.ceil(totalLen / 2.0));
+      const sampledPoints: Array<{ x: number; z: number; tx: number; tz: number }> = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const p = curve.getPointAt(t);
+        const tan = curve.getTangentAt(t);
+        sampledPoints.push({ x: p.x, z: p.z, tx: tan.x, tz: tan.z });
+      }
+      return {
+        id: c.id,
+        corridor: c,
+        spec,
+        samples: sampledPoints,
+        exclusionCorridor: {
+          id: c.id,
+          sampledPoints,
+          halfWidth: spec.halfWidth,
+        } satisfies RoadExclusionCorridor,
+      };
+    });
+
+    const sidewalkExclusionBoxes: RoadExclusionBox[] = [
+      ...pendingIntersections.map((p) => ({
+        minX: p.ix - p.widthX * 0.5,
+        maxX: p.ix + p.widthX * 0.5,
+        minZ: p.iz - p.depthZ * 0.5,
+        maxZ: p.iz + p.depthZ * 0.5,
+      })),
+      ...registeredStraightRoads.map((r) => ({
+        minX: r.minX,
+        maxX: r.maxX,
+        minZ: r.minZ,
+        maxZ: r.maxZ,
+      })),
+    ];
+
+    for (let corridorIdx = 0; corridorIdx < corridorDescriptors.length; corridorIdx++) {
+      const desc = corridorDescriptors[corridorIdx];
+      const curvedCorridor = desc.corridor;
+      const spec = desc.spec;
+      const corridorBaseY = 0.011 + corridorIdx * 0.00012;
+      const isDogenzaka = curvedCorridor.id === "nav-road-shibuya-dogenzaka";
+      const isArterialCategory = curvedCorridor.category !== "local_street";
+
+      let medianExclusionZones: Array<{ x: number; z: number; radius: number }> | undefined;
+      let startTrimMeters: number | undefined;
+      let endTrimMeters: number | undefined;
+      let skipStartCrosswalk = false;
+      const skipEndCrosswalk = false;
+
+      if (curvedCorridor.id === "nav-road-meiji-dori") {
+        medianExclusionZones = [{ x: -750, z: 102, radius: 22 }];
+        startTrimMeters = 0.0;
+        skipStartCrosswalk = true;
+      } else if (curvedCorridor.id === "nav-road-meiji-dori-ebisu-curve") {
+        startTrimMeters = 0.0;
+        skipStartCrosswalk = true;
+      } else if (curvedCorridor.id === "nav-road-meiji-dori-harajuku-curve") {
+        startTrimMeters = 22.0;
+        medianExclusionZones = [
+          { x: -756, z: 354, radius: 22 },
+          { x: -762, z: 420, radius: 22 },
+          { x: -750, z: 430, radius: 22 },
+        ];
+      } else if (curvedCorridor.id === "nav-road-yamate-dori") {
+        medianExclusionZones = [{ x: -1350, z: 150, radius: 26 }];
+      } else if (curvedCorridor.id === "nav-road-shibuya-tamagawa-west") {
+        startTrimMeters = 18.0;
+        medianExclusionZones = [
+          { x: -750, z: 102, radius: 22 },
+          { x: -855, z: 95, radius: 22 },
+          { x: -940, z: 115, radius: 22 },
+          { x: -1080, z: 140, radius: 46 },
+          { x: -1250, z: 150, radius: 22 },
+          { x: -1350, z: 150, radius: 24 },
+        ];
+      } else if (curvedCorridor.id === "nav-road-route246") {
+        startTrimMeters = 16.0;
+        medianExclusionZones = [
+          { x: -750, z: 102, radius: 28 },
+          { x: -380, z: 98, radius: 22 },
+        ];
+      } else if (curvedCorridor.id === "nav-road-shibuya-miyamasuzaka") {
+        endTrimMeters = 18.0;
+        medianExclusionZones = [
+          { x: -729, z: 248, radius: 12 },
+          { x: -380, z: 250, radius: 18 },
+        ];
+      } else if (isDogenzaka) {
+        startTrimMeters = 8.0;
+        medianExclusionZones = [
+          { x: -837, z: 250, radius: 9.0 },
+          { x: -1080, z: 140, radius: 46 },
+        ];
+      } else if (curvedCorridor.id === "nav-road-shibuya-shinsen-nakadori") {
+        medianExclusionZones = [{ x: -1080, z: 140, radius: 46 }];
+      } else if (curvedCorridor.id === "nav-road-shibuya-koen-dori") {
+        startTrimMeters = 12.5;
+        skipStartCrosswalk = true;
+        medianExclusionZones = [
+          { x: -791, z: 250, radius: 13.0 },
+          { x: -799, z: 356, radius: 17.5 },
+          { x: -805, z: 440, radius: 13.0 },
+        ];
+      } else if (curvedCorridor.id === "nav-road-shibuya-jinnan-cross") {
+        medianExclusionZones = [
+          { x: -750, z: 430, radius: 22 },
+          { x: -762, z: 420, radius: 22 },
+          { x: -805, z: 440, radius: 13.5 },
+        ];
+      } else if (curvedCorridor.id === "nav-road-shibuya-bunkamura-dori") {
+        startTrimMeters = 8.0;
+        medianExclusionZones = [
+          { x: -838, z: 252, radius: 9.0 },
+          { x: -875, z: 320, radius: 16 },
+          { x: -940, z: 345, radius: 18 },
+        ];
+      } else if (spec.isCenterGai) {
+        startTrimMeters = 8.0;
+        endTrimMeters = 15.0;
+        medianExclusionZones = [
+          { x: -875, z: 320, radius: 15 },
+          { x: -940, z: 345, radius: 18 },
+        ];
+      } else if (spec.isInokashiraOrgan) {
+        startTrimMeters = 11.0;
+        endTrimMeters = 22.0;
+        medianExclusionZones = [{ x: -798, z: 360, radius: 16 }];
+      } else if (spec.isSakurazakaLoop) {
+        medianExclusionZones = [
+          { x: -855, z: 95, radius: 22 },
+          { x: -940, z: 115, radius: 24 },
+        ];
+        endTrimMeters = 18.0;
+      } else if (curvedCorridor.id === "nav-road-uchibori-dori") {
+        medianExclusionZones = [{ x: 156, z: 379, radius: 14 }];
+      }
+
+      const markingExclusionZones: Array<{ x: number; z: number; radius: number }> = [
+        ...(medianExclusionZones ?? []),
+        { x: -815, z: 248, radius: 26 },
+        { x: -750, z: 248, radius: 18 },
+      ];
+
+      // 明治通り本線と恵比寿カーブは (-750, -210) で交差点なく直列・頭合わせで連続接続するため相互除外から外す
+      const sidewalkExclusionCorridors = corridorDescriptors
+        .filter((other) => {
+          if (other.id === curvedCorridor.id) {
+            return false;
+          }
+          const isMeijiEbisuHeadJoin =
+            (curvedCorridor.id === "nav-road-meiji-dori" &&
+              other.id === "nav-road-meiji-dori-ebisu-curve") ||
+            (curvedCorridor.id === "nav-road-meiji-dori-ebisu-curve" &&
+              other.id === "nav-road-meiji-dori");
+          return !isMeijiEbisuHeadJoin;
+        })
+        .map((other) => other.exclusionCorridor);
+
+      const sidewalkExclusionZones: Array<{ x: number; z: number; radius: number }> = [
+        { x: -847, z: 250, radius: 13 }, // SHIBUYA109前 Y字路三角広場
+        ...(curvedCorridor.id === "nav-road-shibuya-koen-dori" ||
+        curvedCorridor.id === "nav-road-shibuya-bunkamura-dori" ||
+        isDogenzaka
+          ? [{ x: -815, z: 248, radius: 25 }]
+          : []),
+      ];
+
+      const polyRes = this.roadBuilder.buildPolylineSegment(
+        {
+          name: curvedCorridor.displayName,
+          lanesPerDirection: spec.lanesPerDir,
+          laneWidth: spec.laneWidth,
+          shoulderWidth: spec.shoulderWidth,
+          medianWidth: spec.medianWidth,
+          medianExclusionZones,
+          markingExclusionZones,
+          sidewalkExclusionCorridors,
+          sidewalkExclusionBoxes,
+          sidewalkExclusionZones,
+          startTrimMeters,
+          endTrimMeters,
+          skipStartCrosswalk,
+          skipEndCrosswalk,
+          sidewalkWidth: spec.sidewalkWidth,
+          sidewalkPavingStyle:
+            curvedCorridor.id === "nav-road-uchibori-dori" ? "granite_slab" : "interlocking_brick",
+          curbHeight: 0.15,
+          length: 120,
+          hasCenterLine: !spec.isScrambleLink && !spec.isCenterGai,
+          hasShoulderLines: !spec.isScrambleLink && !spec.isCenterGai,
+          hasStopLines: !spec.isScrambleLink && !spec.isCenterGai,
+          hasYellowCenterLine: spec.lanesPerDir === 1 && isArterialCategory && !spec.isScrambleLink,
+          hasWhiteDashedLines: spec.lanesPerDir >= 2 && !spec.isScrambleLink,
+          hasCrosswalk: isArterialCategory && !spec.isScrambleLink && !spec.isCenterGai,
+          hasGuardrails:
+            isArterialCategory &&
+            !spec.isScrambleLink &&
+            !spec.isCenterGai &&
+            curvedCorridor.id !== "nav-road-shibuya-tamagawa-west",
+          hasManholes: !spec.isScrambleLink && !spec.isCenterGai,
+          hasTrafficLights: false,
+          speedLimitSign:
+            curvedCorridor.id.includes("meiji-dori") ||
+            curvedCorridor.id === "nav-road-route246" ||
+            curvedCorridor.id === "nav-road-shibuya-tamagawa-west" ||
+            curvedCorridor.id === "nav-road-yamate-dori" ||
+            curvedCorridor.category === "national_highway"
+              ? 50
+              : 40,
+          points: curvedCorridor.points,
+        },
+        curvedCorridor.points,
+        world,
+        rapier,
+        corridorBaseY,
+      );
+      this.removeAttachedLights(polyRes.group);
+      polyRes.group.userData.roadName = curvedCorridor.displayName;
+      for (const m of polyRes.materials) {
+        if (!m.userData.roadName) {
+          m.userData.roadName = curvedCorridor.displayName;
+        }
+      }
+      this.group.add(polyRes.group);
+      this.roadMaterials.push(...polyRes.materials);
+      this.puddleMaterials.push(...polyRes.puddleMaterials);
+      this.colliders.push(...polyRes.colliders);
+      this.obstacleColliderHandles.push(...polyRes.obstacleColliderHandles);
+    }
+
+    // --- Q. 予約済み全交差点の自動アーム解決＆統一構築（隅切り R 歩道・T字路閉鎖辺連続歩道・安全コライダー） ---
+    for (const spec of pendingIntersections) {
+      const halfW = spec.widthX * 0.5;
+      const halfD = spec.depthZ * 0.5;
+      const arms: NonNullable<JapaneseIntersectionConfig["arms"]> = {};
+
+      // 1. 直線道路との接続判定
+      for (const r of registeredStraightRoads) {
+        const armSidewalkSpec = {
+          carriagewayWidth: r.carriagewayWidth,
+          sidewalkLeft: r.sidewalkWidth,
+          sidewalkRight: r.sidewalkWidth,
+        };
+        if (!r.isEastWest && Math.abs(r.cx - spec.ix) <= halfW * 0.65) {
+          const isNorthConn = Math.abs(r.minZ - (spec.iz + halfD)) <= 4.0;
+          if (isNorthConn) {
+            arms.north = armSidewalkSpec;
+          }
+          const isSouthConn = Math.abs(r.maxZ - (spec.iz - halfD)) <= 4.0;
+          if (isSouthConn) {
+            arms.south = armSidewalkSpec;
+          }
+        } else if (r.isEastWest && Math.abs(r.cz - spec.iz) <= halfD * 0.65) {
+          const isEastConn = Math.abs(r.minX - (spec.ix + halfW)) <= 4.0;
+          if (isEastConn) {
+            arms.east = armSidewalkSpec;
+          }
+          const isWestConn = Math.abs(r.maxX - (spec.ix - halfW)) <= 4.0;
+          if (isWestConn) {
+            arms.west = armSidewalkSpec;
+          }
+        }
+      }
+
+      // 2. 曲線道路コリドーの通過・端点接続を補完
+      for (const desc of corridorDescriptors) {
+        const cw = desc.spec.halfWidth * 2;
+        const sw = desc.spec.sidewalkWidth;
+        const curvedArmSpec = { carriagewayWidth: cw, sidewalkLeft: sw, sidewalkRight: sw };
+        const nTol = Math.max(halfW * 0.75, desc.spec.halfWidth + 2.5);
+        const eTol = Math.max(halfD * 0.75, desc.spec.halfWidth + 2.5);
+
+        for (const s of desc.samples) {
+          if (!arms.north && Math.abs(s.tx) < Math.abs(s.tz) * 1.4) {
+            if (Math.hypot(s.x - spec.ix, s.z - (spec.iz + halfD)) <= nTol) {
+              arms.north = curvedArmSpec;
+            }
+          }
+          if (!arms.south && Math.abs(s.tx) < Math.abs(s.tz) * 1.4) {
+            if (Math.hypot(s.x - spec.ix, s.z - (spec.iz - halfD)) <= nTol) {
+              arms.south = curvedArmSpec;
+            }
+          }
+          if (!arms.east && Math.abs(s.tz) < Math.abs(s.tx) * 1.4) {
+            if (Math.hypot(s.x - (spec.ix + halfW), s.z - spec.iz) <= eTol) {
+              arms.east = curvedArmSpec;
+            }
+          }
+          if (!arms.west && Math.abs(s.tz) < Math.abs(s.tx) * 1.4) {
+            if (Math.hypot(s.x - (spec.ix - halfW), s.z - spec.iz) <= eTol) {
+              arms.west = curvedArmSpec;
+            }
+          }
+        }
+      }
+
+      // 3. 隣接交差点パッドとの直接辺接触を補完（例: 日比谷通り・楠公アプローチ西辺）
+      for (const other of pendingIntersections) {
+        if (other === spec) {
+          continue;
+        }
+        const oHalfW = other.widthX * 0.5;
+        const oHalfD = other.depthZ * 0.5;
+        if (Math.abs(other.iz - spec.iz) <= 4.0) {
+          const ewCarry = other.lanesZ >= 3 ? 24 : Math.min(other.depthZ - 4, 20);
+          if (!arms.east && Math.abs(spec.ix + halfW - (other.ix - oHalfW)) <= 1.5) {
+            arms.east = { carriagewayWidth: ewCarry, sidewalkLeft: 4.0, sidewalkRight: 4.0 };
+          }
+          if (!arms.west && Math.abs(spec.ix - halfW - (other.ix + oHalfW)) <= 1.5) {
+            arms.west = { carriagewayWidth: ewCarry, sidewalkLeft: 4.0, sidewalkRight: 4.0 };
+          }
+        }
+        if (Math.abs(other.ix - spec.ix) <= 4.0) {
+          const nsCarry = other.lanesX >= 3 ? 24 : Math.min(other.widthX - 4, 20);
+          if (!arms.north && Math.abs(spec.iz + halfD - (other.iz - oHalfD)) <= 1.5) {
+            arms.north = { carriagewayWidth: nsCarry, sidewalkLeft: 4.0, sidewalkRight: 4.0 };
+          }
+          if (!arms.south && Math.abs(spec.iz - halfD - (other.iz + oHalfD)) <= 1.5) {
+            arms.south = { carriagewayWidth: nsCarry, sidewalkLeft: 4.0, sidewalkRight: 4.0 };
+          }
+        }
+      }
+
+      const armCount = [arms.north, arms.south, arms.east, arms.west].filter(Boolean).length;
+      const shouldBuildCorners = spec.hasCornerSidewalks ?? armCount >= 2;
+      const interRes = this.roadBuilder.buildIntersection(
+        {
+          x: spec.ix,
+          z: spec.iz,
+          widthX: spec.widthX,
+          depthZ: spec.depthZ,
+          lanesX: spec.lanesX,
+          lanesZ: spec.lanesZ,
+          hasCrosswalks: spec.hasCrosswalks,
+          hasCenterDiamond: spec.hasCenterDiamond,
+          hasGuideDots: spec.hasGuideDots,
+          crosswalkN: spec.crosswalkN,
+          crosswalkS: spec.crosswalkS,
+          crosswalkE: spec.crosswalkE,
+          crosswalkW: spec.crosswalkW,
+          arms: armCount > 0 ? arms : undefined,
+          hasCornerSidewalks: shouldBuildCorners,
+          sidewalkPavingStyle: "granite_slab",
+        },
+        world,
+        rapier,
+        groundBody,
+        intersectionPadMat,
+      );
+      this.group.add(interRes.group);
+      this.puddleMaterials.push(...interRes.puddleMaterials);
+      this.colliders.push(...interRes.colliders);
+      this.obstacleColliderHandles.push(...interRes.obstacleColliderHandles);
     }
   }
 
@@ -7137,7 +7419,9 @@ export class TokyoStationMap {
       }
       const pn = obj.parent?.name ?? "";
       const isSidewalkMesh =
-        obj.name.startsWith("CurvedSidewalk_") || obj.name.startsWith("CurvedCurb_");
+        Boolean(obj.userData?.isSidewalkSurface) ||
+        obj.name.startsWith("CurvedSidewalk_") ||
+        obj.name.startsWith("CurvedCurb_");
       if (isSidewalkMesh) {
         shibuyaSidewalkMeshes.push(obj as THREE.Mesh);
       }
@@ -9183,5 +9467,112 @@ export class TokyoStationMap {
     };
 
     return visibleCount;
+  }
+
+  /**
+   * AssetManagerUI 等から編集された道路定義をランタイムの該当道路メッシュ・シェーダーへ即時反映する
+   */
+  public applyRoadDefinitionOverride(road: RoadDefinition): { matchedSegments: number } {
+    return logger.withTrace("cityMap", "road.override", () => {
+      this.roadOverrides.set(road.id, road);
+
+      const norm = (val: string): string => val.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const roadIdKey = norm(road.id);
+      const roadCoreTokens = road.id
+        .toLowerCase()
+        .split(/[_-]+/)
+        .filter(
+          (t) =>
+            t.length >= 3 &&
+            t !== "dori" &&
+            t !== "road" &&
+            t !== "ave" &&
+            t !== "street" &&
+            t !== "route" &&
+            t !== "shibuya",
+        );
+
+      const matchesRoadName = (candidateName: unknown): boolean => {
+        if (typeof candidateName !== "string" || candidateName.length === 0) {
+          return false;
+        }
+        const candNorm = norm(candidateName);
+        if (
+          candNorm === roadIdKey ||
+          roadIdKey.includes(candNorm) ||
+          candNorm.includes(roadIdKey)
+        ) {
+          return true;
+        }
+        return roadCoreTokens.length > 0 && roadCoreTokens.every((tok) => candNorm.includes(tok));
+      };
+
+      let matchedMaterials = 0;
+      for (const mat of this.roadMaterials) {
+        if (matchesRoadName(mat.userData?.roadName)) {
+          mat.uRoadWidth.value = Math.max(4.0, road.width);
+          matchedMaterials += 1;
+        }
+      }
+
+      let matchedSegments = 0;
+      for (const child of this.group.children) {
+        if (!matchesRoadName(child.userData?.roadName)) {
+          continue;
+        }
+        matchedSegments += 1;
+        child.traverse((obj) => {
+          if (obj === child) {
+            return;
+          }
+          const name = obj.name;
+          if (
+            obj.userData?.isSidewalkSurface ||
+            name.startsWith("StraightSidewalk_") ||
+            name.startsWith("StraightCurb_") ||
+            name.startsWith("StraightLGutter_") ||
+            name.startsWith("CurvedSidewalk_") ||
+            name.startsWith("CurvedCurb_") ||
+            name.startsWith("CurvedLGutter_")
+          ) {
+            obj.visible = road.hasSidewalk;
+          } else if (obj.userData?.markingType === "Crosswalk" || name.includes("Crosswalk")) {
+            obj.visible = road.markings.hasCrosswalks;
+          } else if (
+            obj.userData?.markingType === "TactilePaving" ||
+            name.includes("Tactile") ||
+            name.includes("Braille")
+          ) {
+            obj.visible = road.markings.hasTactilePaving;
+          } else if (name.includes("Shoulder")) {
+            obj.visible = road.markings.hasShoulderLines;
+          } else if (name.includes("Guardrail")) {
+            obj.visible = road.props.hasGuardrails;
+          } else if (name.includes("Manhole")) {
+            obj.visible = road.props.hasManholes;
+          } else if (name.includes("Median")) {
+            obj.visible = road.hasMedian;
+          }
+        });
+      }
+
+      logger.info("roads", "road_definition_override_applied", "道路定義オーバーライドを適用", {
+        roadId: road.id,
+        roadName: road.name,
+        width: road.width,
+        hasSidewalk: road.hasSidewalk,
+        matchedMaterials,
+        matchedSegments,
+      });
+
+      return { matchedSegments };
+    });
+  }
+
+  /**
+   * ランタイム適用済みの道路定義オーバーライドを取得する
+   */
+  public getAppliedRoadOverride(roadId: string): RoadDefinition | undefined {
+    return this.roadOverrides.get(roadId);
   }
 }

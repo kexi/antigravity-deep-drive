@@ -1080,6 +1080,7 @@ export class AssetManagerUI {
         <div class="sign-field">
           <label for="asset-road-centerline">Center Line Type</label>
           <select id="asset-road-centerline">
+            <option value="solid_white" ${road.markings.centerLineType === "solid_white" ? "selected" : ""}>solid_white</option>
             <option value="solid_yellow" ${road.markings.centerLineType === "solid_yellow" ? "selected" : ""}>solid_yellow</option>
             <option value="dashed_white" ${road.markings.centerLineType === "dashed_white" ? "selected" : ""}>dashed_white</option>
             <option value="none" ${road.markings.centerLineType === "none" ? "selected" : ""}>none</option>
@@ -1090,6 +1091,34 @@ export class AssetManagerUI {
           <select id="asset-road-median">
             <option value="true" ${road.hasMedian ? "selected" : ""}>true</option>
             <option value="false" ${!road.hasMedian ? "selected" : ""}>false</option>
+          </select>
+        </div>
+        <div class="sign-field">
+          <label for="asset-road-has-sidewalk">Has Sidewalk</label>
+          <select id="asset-road-has-sidewalk">
+            <option value="true" ${road.hasSidewalk ? "selected" : ""}>true</option>
+            <option value="false" ${!road.hasSidewalk ? "selected" : ""}>false</option>
+          </select>
+        </div>
+        <div class="sign-field">
+          <label for="asset-road-has-crosswalks">Has Crosswalks</label>
+          <select id="asset-road-has-crosswalks">
+            <option value="true" ${road.markings.hasCrosswalks ? "selected" : ""}>true</option>
+            <option value="false" ${!road.markings.hasCrosswalks ? "selected" : ""}>false</option>
+          </select>
+        </div>
+        <div class="sign-field">
+          <label for="asset-road-has-tactile">Has Tactile Paving</label>
+          <select id="asset-road-has-tactile">
+            <option value="true" ${road.markings.hasTactilePaving ? "selected" : ""}>true</option>
+            <option value="false" ${!road.markings.hasTactilePaving ? "selected" : ""}>false</option>
+          </select>
+        </div>
+        <div class="sign-field">
+          <label for="asset-road-has-guardrails">Has Guardrails</label>
+          <select id="asset-road-has-guardrails">
+            <option value="true" ${road.props.hasGuardrails ? "selected" : ""}>true</option>
+            <option value="false" ${!road.props.hasGuardrails ? "selected" : ""}>false</option>
           </select>
         </div>
       </div>
@@ -1122,9 +1151,20 @@ export class AssetManagerUI {
       );
       const centerLineType = ((
         container.querySelector("#asset-road-centerline") as HTMLSelectElement
-      )?.value ?? "solid_yellow") as "solid_yellow" | "dashed_white" | "none";
+      )?.value ?? "solid_yellow") as "solid_white" | "solid_yellow" | "dashed_white" | "none";
       const hasMedian =
         (container.querySelector("#asset-road-median") as HTMLSelectElement)?.value === "true";
+      const hasSidewalk =
+        (container.querySelector("#asset-road-has-sidewalk") as HTMLSelectElement)?.value ===
+        "true";
+      const hasCrosswalks =
+        (container.querySelector("#asset-road-has-crosswalks") as HTMLSelectElement)?.value ===
+        "true";
+      const hasTactilePaving =
+        (container.querySelector("#asset-road-has-tactile") as HTMLSelectElement)?.value === "true";
+      const hasGuardrails =
+        (container.querySelector("#asset-road-has-guardrails") as HTMLSelectElement)?.value ===
+        "true";
 
       try {
         const updated = this.manager.updateRoadConfig(road.id, {
@@ -1132,10 +1172,17 @@ export class AssetManagerUI {
           lanes: Number.isFinite(lanes) && lanes > 0 ? lanes : road.lanes,
           speedLimit: Number.isFinite(speedLimit) && speedLimit > 0 ? speedLimit : road.speedLimit,
           sidewalkWidth: Number.isFinite(sidewalkWidth) ? sidewalkWidth : road.sidewalkWidth,
+          hasSidewalk,
           hasMedian,
           markings: {
             ...road.markings,
             centerLineType,
+            hasCrosswalks,
+            hasTactilePaving,
+          },
+          props: {
+            ...road.props,
+            hasGuardrails,
           },
         });
         this.bridge.onApplyRoadToScene?.(updated);
@@ -2000,9 +2047,11 @@ export class AssetManagerUI {
     road: RoadDefinition,
   ): void {
     const midY = h * 0.56;
+    const medianM = road.hasMedian ? 1.5 : 0;
     const totalW = road.width + (road.hasSidewalk ? road.sidewalkWidth * 2 : 0);
     const scale = Math.min(8.5, (w - 36) / Math.max(10, totalW));
     const roadPx = road.width * scale;
+    const medianPx = medianM * scale;
     const swPx = road.hasSidewalk ? road.sidewalkWidth * scale : 0;
     const startX = (w - (roadPx + swPx * 2)) * 0.5;
     const roadLeft = startX + swPx;
@@ -2011,16 +2060,77 @@ export class AssetManagerUI {
     const roadBottom = midY + 34;
     const roadH = roadBottom - roadTop;
 
-    // 歩道
+    // 歩道＋タイル目地＋面取り縁石＋点字ブロック＋ガードレール
     if (road.hasSidewalk && swPx > 0) {
-      ctx.fillStyle = "#475569";
+      ctx.fillStyle = "#64748b";
       ctx.fillRect(startX, roadTop - 2, swPx, roadH + 4);
       ctx.fillRect(roadRight, roadTop - 2, swPx, roadH + 4);
+
+      // タイル舗装目地グリッド
+      ctx.strokeStyle = "rgba(15, 23, 42, 0.28)";
+      ctx.lineWidth = 0.8;
+      ctx.setLineDash([]);
+      const tileStep = Math.max(5, scale * 0.6);
+      for (const swStart of [startX, roadRight]) {
+        for (let tx = swStart + tileStep; tx < swStart + swPx - 1; tx += tileStep) {
+          ctx.beginPath();
+          ctx.moveTo(tx, roadTop - 2);
+          ctx.lineTo(tx, roadBottom + 2);
+          ctx.stroke();
+        }
+        for (let ty = roadTop + tileStep; ty < roadBottom; ty += tileStep) {
+          ctx.beginPath();
+          ctx.moveTo(swStart, ty);
+          ctx.lineTo(swStart + swPx, ty);
+          ctx.stroke();
+        }
+      }
+
+      // コンクリート縁石（歩道車道境界）＋ 60cm 目地
+      const curbPx = Math.max(2, scale * 0.22);
+      ctx.fillStyle = "#cbd5e1";
+      ctx.fillRect(roadLeft - curbPx, roadTop - 2, curbPx, roadH + 4);
+      ctx.fillRect(roadRight, roadTop - 2, curbPx, roadH + 4);
+
+      // L型側溝（アスファルト際明灰コンクリートエプロン）
+      const gutterPx = Math.max(2, scale * 0.24);
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillRect(roadLeft, roadTop, gutterPx, roadH);
+      ctx.fillRect(roadRight - gutterPx, roadTop, gutterPx, roadH);
+
+      // JIS T 9251 点字警告ブロック（横断歩道手前）
+      if (road.markings.hasCrosswalks && road.markings.hasTactilePaving) {
+        ctx.fillStyle = "#facc15";
+        const tileW = Math.min(swPx - curbPx - 1, Math.max(2.5, scale * 0.6));
+        if (tileW > 1.5) {
+          ctx.fillRect(roadLeft - curbPx - tileW - 1, roadTop + 3, tileW, 14);
+          ctx.fillRect(roadRight + curbPx + 1, roadTop + 3, tileW, 14);
+        }
+      }
+
+      // 歩行者防護柵（ガードレール）
+      if (road.props.hasGuardrails) {
+        ctx.strokeStyle = "#e2e8f0";
+        ctx.lineWidth = 1.6;
+        const grOffset = curbPx + Math.max(1.5, scale * 0.25);
+        for (const gx of [roadLeft - grOffset, roadRight + grOffset]) {
+          ctx.beginPath();
+          ctx.moveTo(gx, roadTop + 20);
+          ctx.lineTo(gx, roadBottom - 2);
+          ctx.stroke();
+        }
+      }
     }
 
-    // 車道アスファルト
+    // 車道アスファルト（L型側溝の内側）
     ctx.fillStyle = "#1e293b";
     ctx.fillRect(roadLeft, roadTop, roadPx, roadH);
+    if (road.hasSidewalk && swPx > 0) {
+      const gutterPx = Math.max(2, scale * 0.24);
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillRect(roadLeft, roadTop, gutterPx, roadH);
+      ctx.fillRect(roadRight - gutterPx, roadTop, gutterPx, roadH);
+    }
 
     // 上部の横断歩道エリア（縦断ラインが横断歩道・停止線と重ならないよう下端を明確に分離）
     const hasCrosswalk = road.markings.hasCrosswalks;
@@ -2031,42 +2141,80 @@ export class AssetManagerUI {
     const laneLineEndY = roadBottom - 3;
 
     const centerX = roadLeft + roadPx * 0.5;
+    const halfMedianPx = medianPx * 0.5;
     const lanesPerDir = Math.max(1, Math.floor(road.lanes * 0.5));
-    const halfRoadPx = roadPx * 0.5;
-    const laneWidthPx = halfRoadPx / lanesPerDir;
+    const halfDirPx = Math.max(4, (roadPx - medianPx) * 0.5);
+    const laneWidthPx = halfDirPx / lanesPerDir;
 
     // 路肩実線（横断歩道・停止線区間は除外して描画）
-    const shoulderInsetPx = Math.max(2, scale * 0.65);
-    ctx.strokeStyle = "rgba(248, 250, 252, 0.88)";
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([]);
-    for (const edgeX of [roadLeft + shoulderInsetPx, roadRight - shoulderInsetPx]) {
-      ctx.beginPath();
-      ctx.moveTo(edgeX, laneLineStartY);
-      ctx.lineTo(edgeX, laneLineEndY);
-      ctx.stroke();
+    const shoulderInsetPx = Math.max(3, scale * 0.65);
+    if (road.markings.hasShoulderLines) {
+      ctx.strokeStyle = "rgba(248, 250, 252, 0.88)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+      for (const edgeX of [roadLeft + shoulderInsetPx, roadRight - shoulderInsetPx]) {
+        ctx.beginPath();
+        ctx.moveTo(edgeX, laneLineStartY);
+        ctx.lineTo(edgeX, laneLineEndY);
+        ctx.stroke();
+      }
     }
 
-    // 車線境界白破線（複数車線の場合：各車線を分割して描画し、横断歩道区間は除外）
+    // 車線境界線（複数車線の場合：停止線手前は進路変更禁止黄色実線、後方・対向は白破線）
     if (lanesPerDir > 1) {
-      ctx.strokeStyle = "rgba(248, 250, 252, 0.85)";
-      ctx.lineWidth = 1.4;
-      ctx.setLineDash([5, 5]);
+      const noLaneChangeEndY = hasCrosswalk
+        ? Math.min(laneLineEndY, laneLineStartY + 18)
+        : laneLineStartY;
       for (let i = 1; i < lanesPerDir; i++) {
-        const offsetPx = i * laneWidthPx;
-        for (const sign of [-1, 1]) {
-          const divX = centerX + sign * offsetPx;
+        const offsetPx = halfMedianPx + i * laneWidthPx;
+        // 左側（上向き進行側）：横断歩道・停止線手前区間は黄色実線、その後方は白破線
+        const inboundDivX = centerX - offsetPx;
+        if (hasCrosswalk && noLaneChangeEndY > laneLineStartY + 2) {
+          ctx.strokeStyle = "#f59e0b";
+          ctx.lineWidth = 1.6;
+          ctx.setLineDash([]);
           ctx.beginPath();
-          ctx.moveTo(divX, laneLineStartY);
-          ctx.lineTo(divX, laneLineEndY);
+          ctx.moveTo(inboundDivX, laneLineStartY);
+          ctx.lineTo(inboundDivX, noLaneChangeEndY);
           ctx.stroke();
         }
+        if (laneLineEndY > noLaneChangeEndY + 2) {
+          ctx.strokeStyle = "rgba(248, 250, 252, 0.85)";
+          ctx.lineWidth = 1.4;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.moveTo(inboundDivX, noLaneChangeEndY);
+          ctx.lineTo(inboundDivX, laneLineEndY);
+          ctx.stroke();
+        }
+
+        // 右側（下向き対向側）：白破線
+        const oncomingDivX = centerX + offsetPx;
+        ctx.strokeStyle = "rgba(248, 250, 252, 0.85)";
+        ctx.lineWidth = 1.4;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(oncomingDivX, laneLineStartY);
+        ctx.lineTo(oncomingDivX, laneLineEndY);
+        ctx.stroke();
       }
       ctx.setLineDash([]);
     }
 
-    // センターライン（横断歩道・停止線区間は除外）
-    if (road.markings.centerLineType !== "none") {
+    // 立体中央分離帯 or センターライン
+    if (road.hasMedian && medianPx >= 2) {
+      ctx.fillStyle = "#64748b";
+      ctx.fillRect(centerX - halfMedianPx, laneLineStartY, medianPx, laneLineEndY - laneLineStartY);
+      ctx.strokeStyle = "rgba(248, 250, 252, 0.9)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([]);
+      ctx.strokeRect(
+        centerX - halfMedianPx - 1,
+        laneLineStartY,
+        medianPx + 2,
+        laneLineEndY - laneLineStartY,
+      );
+    } else if (road.markings.centerLineType !== "none") {
       ctx.strokeStyle = road.markings.centerLineType === "solid_yellow" ? "#f59e0b" : "#f8fafc";
       ctx.lineWidth = 2;
       ctx.setLineDash(road.markings.centerLineType === "dashed_white" ? [6, 6] : []);
@@ -2091,9 +2239,9 @@ export class AssetManagerUI {
         ctx.fillRect(sx, crosswalkTop, stripeW, crosswalkH);
       }
 
-      // 進行車線（左側通行 = 左半分）の停止線（センターライン・路肩線と重ならないマージン付き）
+      // 進行車線（左側通行 = 左半分）の停止線（センターライン/分離帯・路肩線と重ならないマージン付き）
       const stopLeft = roadLeft + shoulderInsetPx + 1.5;
-      const stopRight = centerX - 2.0;
+      const stopRight = centerX - halfMedianPx - 2.0;
       if (stopRight > stopLeft + 2) {
         ctx.fillRect(stopLeft, stopLineY - 1.5, stopRight - stopLeft, 2.5);
       }
@@ -2106,8 +2254,8 @@ export class AssetManagerUI {
       ctx.textAlign = "center";
       const arrowY = laneLineStartY + (laneLineEndY - laneLineStartY) * 0.58;
       for (let i = 0; i < lanesPerDir; i++) {
-        const inboundX = centerX - (i + 0.5) * laneWidthPx;
-        const oncomingX = centerX + (i + 0.5) * laneWidthPx;
+        const inboundX = centerX - halfMedianPx - (i + 0.5) * laneWidthPx;
+        const oncomingX = centerX + halfMedianPx + (i + 0.5) * laneWidthPx;
         ctx.fillText("↑", inboundX, arrowY);
         ctx.fillText("↓", oncomingX, arrowY);
       }
@@ -2122,7 +2270,11 @@ export class AssetManagerUI {
       20,
     );
     ctx.fillStyle = "#cbd5e1";
-    ctx.fillText(`Road: ${road.width}m | Sidewalk: ${road.sidewalkWidth}m`, 12, h - 10);
+    ctx.fillText(
+      `Road: ${road.width}m | Sidewalk: ${road.hasSidewalk ? road.sidewalkWidth : 0}m${road.hasMedian ? " | Median" : ""}`,
+      12,
+      h - 10,
+    );
   }
 
   private drawWeatherPresetPreview(

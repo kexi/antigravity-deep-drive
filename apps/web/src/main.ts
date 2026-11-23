@@ -1970,7 +1970,8 @@ async function bootstrap() {
       onApplyTexture3DToScene: () => {
         renderer.shadowMap.needsUpdate = true;
       },
-      onApplyRoadToScene: () => {
+      onApplyRoadToScene: (road) => {
+        cityMap.applyRoadDefinitionOverride(road);
         renderer.shadowMap.needsUpdate = true;
       },
       onApplySignToScene: (sign) => {

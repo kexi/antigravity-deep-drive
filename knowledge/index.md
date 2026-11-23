@@ -67,3 +67,4 @@ trust_signals:
 - [052-shibuya-streetview-fidelity-terrain-lanes-signs-jr-guard.md](./052-shibuya-streetview-fidelity-terrain-lanes-signs-jr-guard.md): 渋谷エリア実写・Googleマップ比較に基づく地形平坦化・車線方向・青看板・JRガード・センター街接続改修
 - [053-shibuya-ibl-dem-r246-plateau-360-audit.md](./053-shibuya-ibl-dem-r246-plateau-360-audit.md): 渋谷エリア実写乖離の包括的監査と IBL・DEM5A・JSON同期・R246/PLATEAU・3Dランドマーク再統合
 - [054-shibuya-swarm-photorealistic-convergence-and-ux.md](./054-shibuya-swarm-photorealistic-convergence-and-ux.md): 渋谷エリア並列 /swarm 収束改修：3Dランドマーク・PLATEAU/GIS境界・道路街区連続性・URL/ギアUX・E2E検証
+- [055-road-and-sidewalk-architecture-overhaul.md](./055-road-and-sidewalk-architecture-overhaul.md): 道路作成システム・歩道断面幾何学・交差点隅切りの統合刷新

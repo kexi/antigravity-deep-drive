@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { Procedural3DTextureGenerator } from "../textures/procedural3DTexture";
+import type { SidewalkPavingStyle } from "../roads/types";
 
 export interface PuddleShaderOptions {
   baseColor?: number;
@@ -13,6 +14,7 @@ export interface PuddleShaderOptions {
   skyHorizonColor?: number;
   skyZenithColor?: number;
   nightFactor?: number;
+  sidewalkPavingStyle?: "none" | SidewalkPavingStyle;
 }
 
 export interface PuddleEnvironmentSyncParams {
@@ -52,6 +54,7 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
   public uSkyZenithColor: { value: THREE.Color };
   public uNightFactor: { value: number };
   public uRoadVolumeTex: { value: THREE.Data3DTexture };
+  public uSidewalkPavingMode: { value: number };
 
   constructor(options: PuddleShaderOptions = {}) {
     super({
@@ -59,6 +62,14 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
       roughness: options.baseRoughness ?? 0.88,
       metalness: options.baseMetalness ?? 0.1,
     });
+
+    const pavingStyle = options.sidewalkPavingStyle ?? "none";
+    const pavingModeMap: Record<"none" | SidewalkPavingStyle, number> = {
+      none: 0,
+      granite_slab: 1,
+      interlocking_brick: 2,
+      concrete_tile: 3,
+    };
 
     this.uRainWetness = { value: 0.0 };
     this.uTime = { value: 0.0 };
@@ -77,7 +88,11 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
     this.uRoadVolumeTex = {
       value: Procedural3DTextureGenerator.getSharedAsphalt3DTexture(),
     };
-    this.customProgramCacheKey = () => "puddle-planar-mirror-shader-v4";
+    this.uSidewalkPavingMode = { value: pavingModeMap[pavingStyle] };
+    this.customProgramCacheKey = () =>
+      pavingStyle === "none"
+        ? "puddle-planar-mirror-shader-v4"
+        : `puddle-sidewalk-paving-v5-${pavingStyle}`;
 
     this.onBeforeCompile = (shader) => {
       shader.uniforms.uRainWetness = this.uRainWetness;
@@ -91,13 +106,15 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
       shader.uniforms.uSkyZenithColor = this.uSkyZenithColor;
       shader.uniforms.uNightFactor = this.uNightFactor;
       shader.uniforms.uRoadVolumeTex = this.uRoadVolumeTex;
+      shader.uniforms.uSidewalkPavingMode = this.uSidewalkPavingMode;
 
-      // 頂点シェーダー: ワールド座標の伝達
+      // 頂点シェーダー: ワールド座標・舗装メートルUVの伝達
       shader.vertexShader = shader.vertexShader.replace(
         "#include <common>",
         /* glsl */ `
         #include <common>
         varying vec3 vWorldPosition;
+        varying vec2 vPavingUv;
         `,
       );
 
@@ -106,6 +123,7 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
         /* glsl */ `
         #include <worldpos_vertex>
         vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vPavingUv = uv;
         `,
       );
 
@@ -125,7 +143,9 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
         uniform vec3 uSkyZenithColor;
         uniform float uNightFactor;
         uniform sampler3D uRoadVolumeTex;
+        uniform int uSidewalkPavingMode;
         varying vec3 vWorldPosition;
+        varying vec2 vPavingUv;
 
         // 擬似乱数ハッシュ
         vec2 puddleHash2D(vec2 p) {
@@ -291,15 +311,83 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
           vec3 reflectedRadiance = envColor + sunSpecular + rippleEdgeSparkle;
           return mix(waterTint, reflectedRadiance, fresnel) * (0.85 + 0.15 * puddleDepth);
         }
+
+        // 歩道舗装パターン評価: x=タイル明暗, y=目地溝マスク, z=横断勾配dH/du, w=縦断勾配dH/dv
+        vec4 evaluateSidewalkPaving(vec2 uvMeters, float camDist) {
+          if (uSidewalkPavingMode == 0 || camDist > 58.0) {
+            return vec4(1.0, 0.0, 0.0, 0.0);
+          }
+
+          float maxDist = (uSidewalkPavingMode == 2) ? 50.0 : 58.0;
+          float fadeStart = (uSidewalkPavingMode == 2) ? 30.0 : 36.0;
+          float lodFade = 1.0 - smoothstep(fadeStart, maxDist, camDist);
+
+          float tileW = 0.45;
+          float tileL = 0.45;
+          float staggerScale = 0.5;
+          float groutHalf = 0.022;
+          float toneRange = 0.14;
+
+          if (uSidewalkPavingMode == 2) {
+            // インターロッキングブロック (0.10m x 0.20m ランニングボンド)
+            tileW = 0.10;
+            tileL = 0.20;
+            staggerScale = 0.5;
+            groutHalf = 0.055;
+            toneRange = 0.24;
+          } else if (uSidewalkPavingMode == 3) {
+            // コンクリート平板 (0.30m x 0.30m 格子目地)
+            tileW = 0.30;
+            tileL = 0.30;
+            staggerScale = 0.0;
+            groutHalf = 0.028;
+            toneRange = 0.16;
+          }
+
+          float rowIdx = floor(uvMeters.x / tileW);
+          float stagger = mod(abs(rowIdx), 2.0) * staggerScale;
+          vec2 cellUv = vec2(uvMeters.x / tileW, uvMeters.y / tileL + stagger);
+          vec2 cellId = floor(cellUv);
+          vec2 cellFrac = fract(cellUv);
+
+          vec2 rand2 = puddleHash2D(cellId);
+          float edgeDistX = min(cellFrac.x, 1.0 - cellFrac.x);
+          float edgeDistY = min(cellFrac.y, 1.0 - cellFrac.y);
+          float edgeDist = min(edgeDistX, edgeDistY);
+          float groutMask = (1.0 - smoothstep(groutHalf * 0.45, groutHalf, edgeDist)) * lodFade;
+
+          float gx = (smoothstep(0.0, groutHalf, cellFrac.x) - smoothstep(1.0 - groutHalf, 1.0, cellFrac.x));
+          float gy = (smoothstep(0.0, groutHalf, cellFrac.y) - smoothstep(1.0 - groutHalf, 1.0, cellFrac.y));
+          float bevelGradX = (cellFrac.x < 0.12 || cellFrac.x > 0.88) ? (0.5 - step(0.5, cellFrac.x)) * (1.0 - gx) : 0.0;
+          float bevelGradY = (cellFrac.y < 0.12 || cellFrac.y > 0.88) ? (0.5 - step(0.5, cellFrac.y)) * (1.0 - gy) : 0.0;
+
+          float curbGrime = (uSidewalkPavingMode == 1 || uSidewalkPavingMode == 2)
+            ? smoothstep(0.32, 0.01, abs(uvMeters.x)) * 0.10
+            : 0.0;
+          float tileTone = mix(1.0, (1.0 - toneRange * 0.5 + rand2.x * toneRange) * (1.0 - curbGrime), lodFade);
+          return vec4(tileTone, groutMask, bevelGradX * lodFade, bevelGradY * lodFade);
+        }
         `,
       );
 
-      // 3D ボリュームテクスチャによる石畳・アスファルト微細粒子変調（距離 LOD: 28m 以内のみ 1 回評価）
+      // 3D ボリュームテクスチャによる石畳・アスファルト微細粒子変調（距離 LOD: 28m 以内のみ 1 回評価） + 歩道舗装目地
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <color_fragment>",
         /* glsl */ `
         #include <color_fragment>
-        if (length(cameraPosition - vWorldPosition) < 28.0) {
+        float pavingCamDist = length(cameraPosition - vWorldPosition);
+        vec4 sidewalkPaving = evaluateSidewalkPaving(vPavingUv, pavingCamDist);
+        if (uSidewalkPavingMode > 0) {
+          diffuseColor.rgb *= sidewalkPaving.x;
+          if (uSidewalkPavingMode == 2) {
+            vec2 brickCell = floor(vec2(vPavingUv.x / 0.10, vPavingUv.y / 0.20 + mod(abs(floor(vPavingUv.x / 0.10)), 2.0) * 0.5));
+            float brickHue = puddleHash2D(brickCell).y;
+            vec3 brickTint = mix(vec3(0.95, 0.96, 1.0), vec3(1.05, 0.98, 0.92), brickHue);
+            diffuseColor.rgb *= mix(vec3(1.0), brickTint, 1.0 - smoothstep(30.0, 50.0, pavingCamDist));
+          }
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.52, sidewalkPaving.y);
+        }
+        if (pavingCamDist < 28.0) {
           vec3 stoneCoordFine = vWorldPosition * 0.36;
           vec4 stoneVolFine = texture(uRoadVolumeTex, stoneCoordFine);
           diffuseColor.rgb *= mix(0.93, 1.07, stoneVolFine.r);
@@ -307,13 +395,19 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
         `,
       );
 
-      // 法線マップ適用部: リップルによる水面法線の変調（距離 LOD: 165m 以内まで水面法線を平坦化）
+      // 法線マップ適用部: 舗装目地段差 + リップルによる水面法線の変調（距離 LOD: 165m 以内まで水面法線を平坦化）
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <normal_fragment_maps>",
         /* glsl */ `
         #include <normal_fragment_maps>
 
         float normalCamDist = length(cameraPosition - vWorldPosition);
+        if (uSidewalkPavingMode > 0 && normalCamDist < 36.0) {
+          vec3 jointShift = vec3(sidewalkPaving.z * 0.14, 0.0, sidewalkPaving.w * 0.14);
+          vec3 jointViewPerturb = mat3(viewMatrix) * jointShift;
+          vec3 jointCombined = normal + clamp(jointViewPerturb, vec3(-0.18), vec3(0.18));
+          normal = jointCombined / max(length(jointCombined), 0.001);
+        }
         if (uRainWetness > 0.01 && normalCamDist < 165.0) {
           float normalDistFade = 1.0 - smoothstep(115.0, 165.0, normalCamDist);
           float pMap = samplePuddleBasin(vWorldPosition.xz);
@@ -339,6 +433,10 @@ export class PuddleMaterial extends THREE.MeshStandardMaterial {
         /* glsl */ `
         #include <metalnessmap_fragment>
         float puddleCamDist = length(cameraPosition - vWorldPosition);
+        if (uSidewalkPavingMode > 0 && uRainWetness > 0.01 && puddleCamDist < 58.0) {
+          diffuseColor.rgb *= mix(1.0, 0.65, sidewalkPaving.y * clamp(uRainWetness, 0.0, 1.0));
+          roughnessFactor = clamp(roughnessFactor + sidewalkPaving.y * 0.14, 0.1, 0.96);
+        }
         if (uRainWetness > 0.01 && puddleCamDist < 175.0) {
           float puddleDistFade = 1.0 - smoothstep(125.0, 175.0, puddleCamDist);
           float pNoise = samplePuddleBasin(vWorldPosition.xz);

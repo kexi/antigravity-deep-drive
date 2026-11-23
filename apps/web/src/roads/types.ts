@@ -5,6 +5,56 @@ import type * as THREE from "three";
  * 国土交通省「道路構造令」（第4種第1級/第2級 市街地幹線道路仕様）に準拠
  */
 
+export type SidewalkPavingStyle = "granite_slab" | "interlocking_brick" | "concrete_tile";
+
+export interface RoadExclusionCorridor {
+  id?: string;
+  sampledPoints: ReadonlyArray<{ x: number; z: number }>;
+  halfWidth: number;
+}
+
+export interface RoadExclusionBox {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+export interface IntersectionArmSpec {
+  carriagewayWidth: number;
+  sidewalkLeft?: number;
+  sidewalkRight?: number;
+}
+
+export interface JapaneseIntersectionConfig {
+  name?: string;
+  x: number;
+  z: number;
+  widthX: number;
+  depthZ: number;
+  arms?: {
+    north?: IntersectionArmSpec;
+    south?: IntersectionArmSpec;
+    east?: IntersectionArmSpec;
+    west?: IntersectionArmSpec;
+  };
+  curbHeight?: number;
+  curbWidth?: number;
+  cornerFilletRadius?: number;
+  hasCornerSidewalks?: boolean;
+  sidewalkPavingStyle?: SidewalkPavingStyle;
+  lanesX?: number;
+  lanesZ?: number;
+  hasCrosswalks?: boolean;
+  hasCenterDiamond?: boolean;
+  crosswalkN?: boolean;
+  crosswalkS?: boolean;
+  crosswalkE?: boolean;
+  crosswalkW?: boolean;
+  hasGuideDots?: boolean;
+  baseY?: number;
+}
+
 export interface JapaneseRoadSegmentConfig {
   name?: string;
   lanesPerDirection: number; // 片側車線数 (例: 2 = 往復4車線, 3 = 往復6車線)
@@ -12,7 +62,12 @@ export interface JapaneseRoadSegmentConfig {
   shoulderWidth: number; // 路肩・側帯幅員 (日本標準: 0.5m - 1.25m)
   medianWidth?: number; // 中央分離帯幅員 (0 = 黄色中央線のみ, >0 = 植栽/防護柵ブロック)
   sidewalkWidth: number; // 歩道幅員 (日本標準: 2.5m - 4.5m)
+  leftSidewalkWidth?: number; // 左歩道幅員の上書き指定
+  rightSidewalkWidth?: number; // 右歩道幅員の上書き指定
   curbHeight: number; // 縁石マウントアップ高さ (日本標準: 0.15m - 0.20m)
+  curbWidth?: number; // 縁石幅員 (日本標準: 0.15m - 0.22m, 既定 0.20m)
+  sidewalkCrossSlope?: number; // 歩道横断排水勾配 (日本標準: 1.5% = 0.015)
+  sidewalkPavingStyle?: SidewalkPavingStyle; // 歩道舗装パターン
   length: number; // セグメント長 (m)
   hasCenterLine?: boolean; // 中央線描画の有無（既定: true。スクランブル交差点直下等で中央線を抑止）
   hasShoulderLines?: boolean; // 路側帯実線描画の有無（既定: true）
@@ -32,6 +87,9 @@ export interface JapaneseRoadSegmentConfig {
   skipEndCrosswalk?: boolean; // 連続接続継ぎ目で終端側の横断歩道・停止線描画を抑制する
   medianExclusionZones?: ReadonlyArray<{ x: number; z: number; radius: number }>; // 中央分離帯を開口する交差点座標群
   markingExclusionZones?: ReadonlyArray<{ x: number; z: number; radius: number }>; // 交差点中心付近で車線境界線・中央線・路側帯線を切るための除外ゾーン
+  sidewalkExclusionCorridors?: ReadonlyArray<RoadExclusionCorridor>; // 交差コリドー群による片側別歩道クリッピング
+  sidewalkExclusionBoxes?: ReadonlyArray<RoadExclusionBox>; // 交差点パッド・直交車道AABBによる歩道クリッピング
+  sidewalkExclusionZones?: ReadonlyArray<{ x: number; z: number; radius: number }>; // 広場・円形除外ゾーンによる歩道クリッピング
   points?: ReadonlyArray<{ x: number; z: number }>; // オープンデータ道路中心線ポリライン頂点列 (ワールドまたはローカル座標)
 }
 

@@ -6,6 +6,8 @@ import { DEFAULT_ASSETS_YAML } from "../assets/defaultAssetsYaml";
 import publicAssetsYaml from "../../public/config/assets.yml?raw";
 import { JapaneseRoadBuilder } from "../roads/roadBuilder";
 import { JapaneseRoadMaterial } from "../roads/japaneseRoadMaterial";
+import { PuddleMaterial } from "../shaders/puddleShader";
+import { computeRoadCrossSection, evaluateCurbRampHeight } from "../roads/roadCrossSection";
 import { RoadProps } from "../roads/roadProps";
 import type { JapaneseRoadSegmentConfig } from "../roads/types";
 import {
@@ -112,6 +114,7 @@ describe("日本の道路作成システムの仕様検証", () => {
     expect(result.colliders.length).toBe(18);
     expect(result.obstacleColliderHandles.length).toBe(15);
 
+    const beforeMedianColliderCount = createdColliders.length;
     const medianResult = builder.buildSegment(
       { ...config, medianWidth: 1.6 },
       mockWorld,
@@ -119,8 +122,11 @@ describe("日本の道路作成システムの仕様検証", () => {
       new THREE.Vector3(0, 0, 0),
       0,
     );
-    expect(medianResult.colliders.length).toBe(19);
-    expect(medianResult.obstacleColliderHandles.length).toBe(16);
+    // 分離帯無し18個 + 分離帯デリネーター(1) + 立体中央分離帯アイランド2区間(2) = 21個（障害物18個）
+    expect(medianResult.colliders.length).toBe(21);
+    expect(medianResult.obstacleColliderHandles.length).toBe(18);
+    expect(medianResult.group.getObjectByName("StraightCentralMedian_Curb_0")).toBeDefined();
+    expect(createdColliders[beforeMedianColliderCount].width).toBeCloseTo(18.6, 2);
 
     // 5. 横断歩道（crossZ = length * 0.25 = 25m）の前後にガードレール開口部が設けられ、歩行者の通路を塞がないことを保証する
     const guardrailGroups = result.group.children.filter(
@@ -1615,7 +1621,11 @@ describe("日本の道路作成システムの仕様検証", () => {
               maxZ: box.max.z,
             });
           }
-        } else if (n.startsWith("CurvedSidewalk_") || n.startsWith("CurvedCurb_")) {
+        } else if (
+          Boolean(obj.userData?.isSidewalkSurface) ||
+          n.startsWith("CurvedSidewalk_") ||
+          n.startsWith("CurvedCurb_")
+        ) {
           sidewalkMeshes.push(obj);
         } else if (obj.geometry instanceof THREE.BoxGeometry) {
           const p = obj.geometry.parameters;
@@ -1812,5 +1822,322 @@ describe("日本の道路作成システムの仕様検証", () => {
     expect((bronzeBody!.material as THREE.MeshStandardMaterial).emissiveIntensity).toBeGreaterThan(
       0.2,
     );
+  });
+
+  it("統一断面（視覚/物理幅1:1・浮きなし・1.5%排水勾配）・バリアフリー切り下げ・L型側溝・曲線点字ブロックを保証する", async () => {
+    await RAPIER.init();
+    const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    const builder = new JapaneseRoadBuilder();
+
+    const spec = computeRoadCrossSection({
+      lanesPerDirection: 2,
+      laneWidth: 3.5,
+      shoulderWidth: 1.5,
+      sidewalkWidth: 4.0,
+      curbHeight: 0.15,
+      length: 80,
+    });
+    expect(spec.left.totalWidth).toBeCloseTo(4.0, 4);
+    expect(spec.right.totalWidth).toBeCloseTo(4.0, 4);
+    expect(spec.left.backEdgeHeight).toBeGreaterThan(spec.curbHeight + 0.04);
+
+    // 直線セグメント: 視覚歩道/縁石/L型側溝・浮きなし・切り下げ・1.5%排水勾配・物理幅1:1
+    const straight = builder.buildSegment(
+      {
+        name: "Test-CrossSection-Road",
+        lanesPerDirection: 2,
+        laneWidth: 3.5,
+        shoulderWidth: 1.5,
+        sidewalkWidth: 4.0,
+        curbHeight: 0.15,
+        length: 100,
+        hasCrosswalk: true,
+        hasGuardrails: true,
+        hasTrafficLights: false,
+      },
+      world,
+      RAPIER,
+      new THREE.Vector3(0, 0, 0),
+      0,
+    );
+
+    const leftGutter = straight.group.getObjectByName("StraightLGutter_L") as THREE.Mesh;
+    const leftCurb = straight.group.getObjectByName("StraightCurb_L") as THREE.Mesh;
+    const leftSw = straight.group.getObjectByName("StraightSidewalk_L") as THREE.Mesh;
+    expect(leftGutter).toBeDefined();
+    expect(leftCurb).toBeDefined();
+    expect(leftSw).toBeDefined();
+
+    // 浮きなし: 縁石・歩道ともに bottomY === 0、かつ横断歩道(z=25)付近で切り下げ上面(0.02m)と標準上面(0.15m)が共存
+    const curbPos = leftCurb.geometry.getAttribute("position") as THREE.BufferAttribute;
+    let curbMinY = Infinity;
+    let curbTopMaxAtRamp = -Infinity;
+    let curbTopMaxNormal = -Infinity;
+    let crossSlopeMaxTopY = -Infinity;
+    for (let i = 0; i < curbPos.count; i++) {
+      const y = curbPos.getY(i);
+      const z = curbPos.getZ(i);
+      if (y < curbMinY) curbMinY = y;
+      if (Math.abs(z - 25) <= 2.0 && y > curbTopMaxAtRamp) {
+        curbTopMaxAtRamp = y;
+      }
+      if (z < 20.0 && y > curbTopMaxNormal) {
+        curbTopMaxNormal = y;
+      }
+    }
+    expect(curbMinY).toBeCloseTo(0, 4);
+    expect(curbTopMaxAtRamp).toBeCloseTo(0.02, 2);
+    expect(curbTopMaxNormal).toBeCloseTo(0.15, 2);
+
+    const swPos = leftSw.geometry.getAttribute("position") as THREE.BufferAttribute;
+    let swMinY = Infinity;
+    let swMinX = Infinity;
+    let swMaxX = -Infinity;
+    for (let i = 0; i < swPos.count; i++) {
+      const x = swPos.getX(i);
+      const y = swPos.getY(i);
+      if (y < swMinY) swMinY = y;
+      if (x < swMinX) swMinX = x;
+      if (x > swMaxX) swMaxX = x;
+      if (y > crossSlopeMaxTopY) crossSlopeMaxTopY = y;
+    }
+    expect(swMinY).toBeCloseTo(0, 4);
+    expect(crossSlopeMaxTopY).toBeCloseTo(spec.left.backEdgeHeight, 3);
+    // 左歩道メッシュ(edge + curb外側)は halfDriveable(8.5) + sidewalkWidth(4.0) = 12.5 まで一致
+    expect(swMaxX).toBeCloseTo(12.5, 2);
+    expect(swMinX).toBeCloseTo(8.5 + spec.curbWidth, 2);
+
+    // 曲線切り下げ & ramp evaluation の検証
+    expect(
+      evaluateCurbRampHeight(25, 0.15, [{ center: 25, halfWidth: 2.2, transitionLength: 1.2 }]),
+    ).toBeCloseTo(0.02, 4);
+    expect(
+      evaluateCurbRampHeight(10, 0.15, [{ center: 25, halfWidth: 2.2, transitionLength: 1.2 }]),
+    ).toBeCloseTo(0.15, 4);
+
+    // 曲線道路: ガードレール横断歩道開口・白破線 vs 18m黄線非重複・曲線点字ブロック・片側T字クリッピング
+    const curvedT = builder.buildPolylineSegment(
+      {
+        name: "Test-Curved-With-T-Exclusion",
+        lanesPerDirection: 2,
+        laneWidth: 3.4,
+        shoulderWidth: 1.2,
+        sidewalkWidth: 3.2,
+        sidewalkPavingStyle: "interlocking_brick",
+        curbHeight: 0.15,
+        length: 120,
+        hasCrosswalk: true,
+        hasWhiteDashedLines: true,
+        hasGuardrails: true,
+        hasManholes: true,
+        hasTrafficLights: false,
+        // 左側(x > 0)中盤 (z = 40..60) だけを他道路Aで除外 → 右側(x < 0)は連続残存し左側だけクリップされる
+        sidewalkExclusionBoxes: [{ minX: 5, maxX: 25, minZ: 45, maxZ: 65 }],
+      },
+      [
+        { x: 0, z: 0 },
+        { x: 0, z: 35 },
+        { x: 1, z: 70 },
+        { x: 2, z: 110 },
+      ],
+      world,
+      RAPIER,
+      0.011,
+    );
+
+    const rightSwSegments = curvedT.group.children.filter((c) =>
+      c.name.startsWith("CurvedSidewalk_R"),
+    );
+    const leftSwSegments = curvedT.group.children.filter((c) =>
+      c.name.startsWith("CurvedSidewalk_L"),
+    );
+    const curvedBrailles = curvedT.group.children.filter((c) =>
+      c.name.startsWith("CurvedTactileWarning_"),
+    );
+    const curvedGuardrails = curvedT.group.children.filter((c) =>
+      c.name.startsWith("CurvedGuardrail_"),
+    );
+    const curvedGutters = curvedT.group.children.filter((c) => c.name.startsWith("CurvedLGutter_"));
+    expect(rightSwSegments.length).toBeGreaterThanOrEqual(1);
+    expect(leftSwSegments.length).toBeGreaterThanOrEqual(2);
+    expect(curvedBrailles.length).toBeGreaterThanOrEqual(2);
+    expect(curvedGutters.length).toBeGreaterThanOrEqual(2);
+    expect(curvedGuardrails.length).toBeGreaterThanOrEqual(2);
+
+    // 曲線白破線（CurvedMarking_LaneDivider_）と黄色進路変更禁止実線（CurvedMarking_YellowNoLaneChange_）が同一区間上で重複しないこと
+    const yellowMeshes = curvedT.group.children.filter(
+      (c): c is THREE.Mesh =>
+        c instanceof THREE.Mesh && c.name.startsWith("CurvedMarking_YellowNoLaneChange_"),
+    );
+    const dashMeshes = curvedT.group.children.filter(
+      (c): c is THREE.Mesh =>
+        c instanceof THREE.Mesh && c.name.startsWith("CurvedMarking_LaneDivider_"),
+    );
+    expect(yellowMeshes.length).toBeGreaterThan(0);
+    expect(dashMeshes.length).toBeGreaterThan(0);
+    const yb = new THREE.Box3();
+    const db = new THREE.Box3();
+    for (const ym of yellowMeshes) {
+      yb.setFromObject(ym);
+      for (const dm of dashMeshes) {
+        db.setFromObject(dm);
+        const ox = Math.min(yb.max.x, db.max.x) - Math.max(yb.min.x, db.min.x);
+        const oz = Math.min(yb.max.z, db.max.z) - Math.max(yb.min.z, db.min.z);
+        expect(ox > 0.05 && oz > 0.05).toBe(false);
+      }
+    }
+  });
+
+  it("交差点隅切りR歩道・T字連続歩道・PuddleMaterial舗装シェーダー・全体都市マップ整合（重複0・孤立0・接続誤差0・渋谷歩道復活）を保証する", async () => {
+    await RAPIER.init();
+    const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    const builder = new JapaneseRoadBuilder();
+
+    // 1. PuddleMaterial の舗装シェーダー uniform 確認
+    const matGranite = new PuddleMaterial({ sidewalkPavingStyle: "granite_slab" });
+    const matBrick = new PuddleMaterial({ sidewalkPavingStyle: "interlocking_brick" });
+    const matTile = new PuddleMaterial({ sidewalkPavingStyle: "concrete_tile" });
+    expect(matGranite.uSidewalkPavingMode.value).toBe(1);
+    expect(matBrick.uSidewalkPavingMode.value).toBe(2);
+    expect(matTile.uSidewalkPavingMode.value).toBe(3);
+
+    // 2. 交差点ビルド単体検証: 四隅隅切り天面法線(+Y)＆コーナーコライダーのワールドY高さ
+    const groundBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, -0.5, 0);
+    const groundBody = world.createRigidBody(groundBodyDesc);
+    const tIntersection = builder.buildIntersection(
+      {
+        name: "TestTIntersection",
+        x: 0,
+        z: 0,
+        widthX: 26,
+        depthZ: 26,
+        lanesX: 2,
+        lanesZ: 2,
+        hasCrosswalks: true,
+        arms: {
+          south: { carriagewayWidth: 17, sidewalkLeft: 4, sidewalkRight: 4 },
+          east: { carriagewayWidth: 17, sidewalkLeft: 4, sidewalkRight: 4 },
+          west: { carriagewayWidth: 17, sidewalkLeft: 4, sidewalkRight: 4 },
+        },
+        hasCornerSidewalks: true,
+      },
+      world,
+      RAPIER,
+      groundBody,
+    );
+    // 北辺はT字閉鎖辺連続歩道、SE/SWは隅切りR歩道が生成されること
+    expect(tIntersection.group.getObjectByName("IntersectionSidewalkEdge_North")).toBeDefined();
+    expect(tIntersection.group.getObjectByName("IntersectionSidewalkCorner_SE")).toBeDefined();
+    expect(tIntersection.group.getObjectByName("IntersectionSidewalkCorner_SW")).toBeDefined();
+
+    // 隅切りスラブ天面法線が上向き (+Y > 0.9) であること
+    const seCorner = tIntersection.group.getObjectByName(
+      "IntersectionSidewalkCorner_SE",
+    ) as THREE.Mesh;
+    const seNorm = seCorner.geometry.getAttribute("normal") as THREE.BufferAttribute;
+    const sePos = seCorner.geometry.getAttribute("position") as THREE.BufferAttribute;
+    let upwardTopNormals = 0;
+    for (let i = 0; i < sePos.count; i++) {
+      if (sePos.getY(i) > 0.14 && seNorm.getY(i) > 0.9) {
+        upwardTopNormals += 1;
+      }
+    }
+    expect(upwardTopNormals).toBeGreaterThanOrEqual(4);
+
+    // corner collider のワールド上端高さが路面+縁石高さ (~0.1615) 付近で地中に埋まらないこと
+    const swCollider = tIntersection.colliders[1];
+    expect(swCollider).toBeDefined();
+    const swTranslationY = swCollider.translation().y;
+    expect(swTranslationY).toBeGreaterThan(0.05);
+    expect(swTranslationY).toBeLessThan(0.15);
+
+    // 3. TokyoStationMap 全体の監査（重複交差点0・直線〜交差点接続誤差0・直線歩道コーナー重複0・曲線点字ブロック存在・渋谷3路線歩道復活）
+    const scene = new THREE.Scene();
+    const cityMap = new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+    scene.updateMatrixWorld(true);
+
+    const intersectionNames = new Map<string, number>();
+    let curvedTactileCount = 0;
+    let cornerTactileCount = 0;
+    let cornerSidewalkCount = 0;
+    const straightSwBoxes: Array<{
+      name: string;
+      minX: number;
+      maxX: number;
+      minZ: number;
+      maxZ: number;
+    }> = [];
+    const box = new THREE.Box3();
+
+    scene.traverse((obj) => {
+      if (obj.name.startsWith("Intersection_")) {
+        intersectionNames.set(obj.name, (intersectionNames.get(obj.name) ?? 0) + 1);
+      }
+      if (obj.name.startsWith("CurvedTactileWarning_")) {
+        curvedTactileCount += 1;
+      }
+      if (obj.name.startsWith("IntersectionTactileCorner_")) {
+        cornerTactileCount += 1;
+      }
+      if (obj.name.startsWith("IntersectionSidewalkCorner_")) {
+        cornerSidewalkCount += 1;
+      }
+      if (obj instanceof THREE.Mesh && obj.name.startsWith("StraightSidewalk_")) {
+        box.setFromObject(obj);
+        straightSwBoxes.push({
+          name: `${obj.parent?.userData?.roadName ?? obj.parent?.name}:${obj.name}`,
+          minX: box.min.x,
+          maxX: box.max.x,
+          minZ: box.min.z,
+          maxZ: box.max.z,
+        });
+      }
+    });
+
+    // 重複交差点（例: 旧 Intersection_-380_250 x2）ゼロ＆孤立0アーム交差点（旧 Intersection_-180_-150）ゼロ
+    const duplicateIntersections = Array.from(intersectionNames.entries()).filter(([, c]) => c > 1);
+    expect(duplicateIntersections).toEqual([]);
+    expect(scene.getObjectByName("Intersection_-180_-150")).toBeUndefined();
+    expect(curvedTactileCount).toBeGreaterThanOrEqual(20);
+    expect(cornerTactileCount).toBeGreaterThanOrEqual(40);
+    expect(cornerSidewalkCount).toBeGreaterThanOrEqual(80);
+
+    // 直線歩道同士の重なりが 0 件であること
+    const straightSwOverlaps: string[] = [];
+    for (let i = 0; i < straightSwBoxes.length; i++) {
+      const a = straightSwBoxes[i];
+      for (let j = i + 1; j < straightSwBoxes.length; j++) {
+        const b = straightSwBoxes[j];
+        const ox = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+        const oz = Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ);
+        if (ox > 0.05 && oz > 0.05) {
+          straightSwOverlaps.push(`${a.name} x ${b.name} (${ox.toFixed(2)}x${oz.toFixed(2)})`);
+        }
+      }
+    }
+    expect(straightSwOverlaps).toEqual([]);
+
+    // 渋谷消滅歩道3路線の歩道メッシュ復活確認
+    for (const corridorId of [
+      "nav-road-shibuya-inokashira-organ",
+      "nav-road-shibuya-sakurazaka-loop",
+      "nav-road-shibuya-hikarie-access",
+    ]) {
+      const cor = getOpenDataCurvedRoadCorridors().find((c) => c.id === corridorId)!;
+      const seg = scene.getObjectByName(`CurvedRoadSegment_${cor.displayName}`);
+      expect(seg).toBeDefined();
+      const swCount = seg!.children.filter((c) => c.name.startsWith("CurvedSidewalk_")).length;
+      expect(swCount).toBeGreaterThanOrEqual(1);
+    }
+
+    // applyRoadDefinitionOverride ランタイム連動検証
+    const gyokoPreset = assetManager.getRoad("gyoko_dori")!;
+    const overrideRes = cityMap.applyRoadDefinitionOverride({
+      ...gyokoPreset,
+      hasSidewalk: false,
+    });
+    expect(overrideRes.matchedSegments).toBeGreaterThanOrEqual(1);
+    expect(cityMap.getAppliedRoadOverride("gyoko_dori")?.hasSidewalk).toBe(false);
+    cityMap.applyRoadDefinitionOverride(gyokoPreset);
   });
 });

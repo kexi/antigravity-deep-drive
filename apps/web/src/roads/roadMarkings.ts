@@ -42,6 +42,7 @@ export function computeRoadLaneLayout(config: {
   lanesPerDirection: number;
   laneWidth: number;
   length: number;
+  medianWidth?: number;
   crosswalkZPositions?: ReadonlyArray<number>;
   zebraZoneZRanges?: ReadonlyArray<readonly [number, number]>;
   segmentEndExclusionBuffer?: number;
@@ -49,14 +50,15 @@ export function computeRoadLaneLayout(config: {
 }): RoadLaneLayout {
   const lanesPerDirection = Math.max(1, Math.floor(config.lanesPerDirection));
   const laneWidth = Math.max(2.5, config.laneWidth);
-  const carriagewayWidth = lanesPerDirection * 2 * laneWidth;
+  const halfMedian = Math.max(0, config.medianWidth ?? 0) * 0.5;
+  const carriagewayWidth = lanesPerDirection * 2 * laneWidth + halfMedian * 2;
   const halfCarriagewayWidth = carriagewayWidth * 0.5;
   const centerLineWidth = 0.2;
 
   const laneDividerOffsets: number[] = [];
   for (let i = 1; i < lanesPerDirection; i++) {
-    laneDividerOffsets.push(-i * laneWidth);
-    laneDividerOffsets.push(i * laneWidth);
+    laneDividerOffsets.push(-(halfMedian + i * laneWidth));
+    laneDividerOffsets.push(halfMedian + i * laneWidth);
   }
   laneDividerOffsets.sort((a, b) => a - b);
 
@@ -81,8 +83,8 @@ export function computeRoadLaneLayout(config: {
   const lanes: RoadLaneSpec[] = [];
   // 自車方向（inbound: +Z 進行、日本の左側通行では x > 0）
   for (let i = 0; i < lanesPerDirection; i++) {
-    const innerBoundaryX = i * laneWidth;
-    const outerBoundaryX = (i + 1) * laneWidth;
+    const innerBoundaryX = halfMedian + i * laneWidth;
+    const outerBoundaryX = halfMedian + (i + 1) * laneWidth;
     const centerX = (innerBoundaryX + outerBoundaryX) * 0.5;
     lanes.push({
       laneIndex: i,
@@ -98,8 +100,8 @@ export function computeRoadLaneLayout(config: {
 
   // 対向方向（oncoming: -Z 進行、日本の左側通行では x < 0）
   for (let i = 0; i < lanesPerDirection; i++) {
-    const innerBoundaryX = -i * laneWidth;
-    const outerBoundaryX = -(i + 1) * laneWidth;
+    const innerBoundaryX = -(halfMedian + i * laneWidth);
+    const outerBoundaryX = -(halfMedian + (i + 1) * laneWidth);
     const centerX = (innerBoundaryX + outerBoundaryX) * 0.5;
     lanes.push({
       laneIndex: i,
@@ -381,7 +383,7 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
   /**
    * 連続する長手方向区間 [-length / 2, length / 2] から excludeZRanges（横断歩道・停止線区間）を除いた有効区間列を算出する
    */
-  private computeIncludedZSpans(
+  public computeIncludedZSpans(
     length: number,
     excludeZRanges: ReadonlyArray<readonly [number, number]> = [],
   ): Array<[number, number]> {
@@ -1018,6 +1020,10 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
 
   public getWhitePaintMaterial(): THREE.MeshStandardMaterial {
     return this.whitePaintMat;
+  }
+
+  public getBrailleTileMaterial(): THREE.MeshStandardMaterial {
+    return this.brailleTileMat;
   }
 
   /**

@@ -196,7 +196,8 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
             exp(-pow((absX - 4.45) * 1.05, 2.0)) * 0.90 +
             exp(-pow((absX - 5.65) * 1.05, 2.0)) * 0.95;
           float lane3RutX = exp(-pow((absX - 8.20) * 0.85, 2.0)) * 0.82;
-          float gutterPoolX = smoothstep(5.4, 7.6, absX) * 0.88;
+          float halfRoad = max(3.5, uRoadWidth * 0.5);
+          float gutterPoolX = smoothstep(halfRoad - 1.6, halfRoad - 0.15, absX) * 0.88;
           float rutProfileX = clamp(max(max(lane1RutX, lane2RutX), max(lane3RutX, gutterPoolX)), 0.0, 1.0);
 
           float lane1RutZ =
@@ -324,7 +325,8 @@ export class JapaneseRoadMaterial extends THREE.MeshStandardMaterial {
           float padNoise = roadPuddleFbm(worldPos.xz * 0.06);
           float padLampLateral = 0.35 * (0.75 + 0.5 * padNoise);
           float lampLongMask = pow(0.5 + 0.5 * cos(roadLongZ * 0.22), 3.0);
-          float segLampLateral = exp(-abs(abs(roadLatX) - 5.2) * 0.35) * (0.15 + 0.85 * lampLongMask);
+          float lampEdge = max(3.2, uRoadWidth * 0.5 - 2.0);
+          float segLampLateral = exp(-abs(abs(roadLatX) - lampEdge) * 0.35) * (0.15 + 0.85 * lampLongMask);
           float lampLateral = mix(segLampLateral, padLampLateral, uIsIntersectionPad);
 
           float lampReflectDir = smoothstep(0.10, 0.72, max(abs(R.x), abs(R.z) * 0.65));

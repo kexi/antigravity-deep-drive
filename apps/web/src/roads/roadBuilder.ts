@@ -3,9 +3,23 @@ import type RAPIER from "@dimforge/rapier3d-compat";
 import { JapaneseRoadMaterial } from "./japaneseRoadMaterial";
 import { PuddleMaterial } from "../shaders/puddleShader";
 import { Procedural3DTextureGenerator } from "../textures/procedural3DTexture";
-import { RoadMarkings, computeRoadLaneLayout } from "./roadMarkings";
-import { RoadProps } from "./roadProps";
-import type { JapaneseRoadSegmentConfig } from "./types";
+import { RoadMarkings, computeRoadLaneLayout, type RoadLaneLayout } from "./roadMarkings";
+import { applyRoadProp3DTexture, RoadProps } from "./roadProps";
+import {
+  buildIntersectionCornerSidewalks,
+  buildLGutterRibbonGeometry,
+  buildProfiledCurbRibbonGeometry,
+  buildProfiledSidewalkRibbonGeometry,
+  buildStationsWithRamps,
+  buildStraightRoadFrames,
+  computePerSideCorridorIntervals,
+  computeRoadCrossSection,
+  getSideCrossSection,
+  type CrosswalkRampZone,
+  type RoadCrossSectionSpec,
+  type RoadFrame,
+} from "./roadCrossSection";
+import type { JapaneseIntersectionConfig, JapaneseRoadSegmentConfig } from "./types";
 
 /**
  * 日本の道路ジェネレーター＆ビルダー
@@ -70,6 +84,135 @@ export class JapaneseRoadBuilder {
     return this.markings;
   }
 
+  private createLGutterMaterial(): THREE.MeshStandardMaterial {
+    const gutterMat = new THREE.MeshStandardMaterial({
+      color: 0xb4beca,
+      roughness: 0.78,
+      metalness: 0.06,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    this.applyCurb3DTexture(gutterMat);
+    return gutterMat;
+  }
+
+  /**
+   * 統一交差点（フラットアスファルト＋路面標示＋四隅隅切り R カーブ歩道・面取り縁石・L型側溝・点字ブロック＋安全物理コライダー）を構築する
+   */
+  public buildIntersection(
+    config: JapaneseIntersectionConfig,
+    physicsWorld: RAPIER.World,
+    rapier: typeof RAPIER,
+    groundBody: RAPIER.RigidBody,
+    sharedPadMaterial?: JapaneseRoadMaterial,
+  ): {
+    group: THREE.Group;
+    puddleMaterials: PuddleMaterial[];
+    colliders: RAPIER.Collider[];
+    obstacleColliderHandles: number[];
+  } {
+    const baseY = config.baseY ?? 0.0115;
+    const interGroup = new THREE.Group();
+    interGroup.name = config.name ?? `Intersection_${config.x}_${config.z}`;
+    interGroup.userData.isRoadInfrastructure = true;
+    interGroup.position.set(config.x, baseY, config.z);
+
+    const padMat = sharedPadMaterial ?? this.intersectionAsphaltMaterial;
+    const padGeo = new THREE.PlaneGeometry(config.widthX, config.depthZ, 8, 8);
+    padGeo.rotateX(-Math.PI / 2);
+    const padMesh = new THREE.Mesh(padGeo, padMat);
+    padMesh.userData.isRoadInfrastructure = true;
+    padMesh.receiveShadow = true;
+    interGroup.add(padMesh);
+
+    const hasArms = Boolean(config.arms);
+    const resolvedCrosswalkN = config.crosswalkN ?? (hasArms ? Boolean(config.arms?.north) : true);
+    const resolvedCrosswalkS = config.crosswalkS ?? (hasArms ? Boolean(config.arms?.south) : true);
+    const resolvedCrosswalkE = config.crosswalkE ?? (hasArms ? Boolean(config.arms?.east) : true);
+    const resolvedCrosswalkW = config.crosswalkW ?? (hasArms ? Boolean(config.arms?.west) : true);
+
+    const lanesX = config.lanesX ?? 2;
+    const lanesZ = config.lanesZ ?? 2;
+    const hasCrosswalks = config.hasCrosswalks ?? true;
+
+    const interMarkings = this.buildIntersectionMarkingGroup(config.widthX, config.depthZ, {
+      lanesX,
+      lanesZ,
+      hasCrosswalks,
+      hasCenterDiamond: config.hasCenterDiamond ?? (lanesX >= 2 && lanesZ >= 2),
+      hasGuideDots: config.hasGuideDots ?? true,
+      crosswalkN: resolvedCrosswalkN,
+      crosswalkS: resolvedCrosswalkS,
+      crosswalkE: resolvedCrosswalkE,
+      crosswalkW: resolvedCrosswalkW,
+    });
+    interMarkings.userData.isRoadInfrastructure = true;
+    interGroup.add(interMarkings);
+
+    const colliders: RAPIER.Collider[] = [];
+    const obstacleColliderHandles: number[] = [];
+    const puddleMaterials: PuddleMaterial[] = [];
+
+    const groundBodyY =
+      typeof groundBody?.translation === "function" ? groundBody.translation().y : -0.5;
+
+    // 交差点フラット路面コライダー（車道セグメント上面 y = 0.012 と段差なく接続）
+    const padColDesc = rapier.ColliderDesc.cuboid(config.widthX / 2, 0.25, config.depthZ / 2)
+      .setTranslation(config.x, 0.012 - 0.25 - groundBodyY, config.z)
+      .setFriction(0.85)
+      .setRestitution(0.02);
+    colliders.push(physicsWorld.createCollider(padColDesc, groundBody));
+
+    const shouldBuildCorners = (config.hasCornerSidewalks ?? true) && Boolean(config.arms);
+    if (shouldBuildCorners) {
+      const curbHeight = config.curbHeight ?? 0.15;
+      const sidewalkMat = new PuddleMaterial({
+        baseColor: 0x94a3b8,
+        baseRoughness: 0.76,
+        baseMetalness: 0.08,
+        puddleThreshold: 0.46,
+        sidewalkPavingStyle: config.sidewalkPavingStyle ?? "granite_slab",
+      });
+      this.puddleMaterials.push(sidewalkMat);
+      puddleMaterials.push(sidewalkMat);
+
+      const curbMat = new THREE.MeshStandardMaterial({
+        color: 0x94a3b8,
+        roughness: 0.8,
+        metalness: 0.1,
+      });
+      this.applyCurb3DTexture(curbMat);
+      const gutterMat = this.createLGutterMaterial();
+
+      const corners = buildIntersectionCornerSidewalks(
+        config,
+        {
+          sidewalkMaterial: sidewalkMat,
+          curbMaterial: curbMat,
+          gutterMaterial: gutterMat,
+          brailleMaterial: this.markings.getBrailleTileMaterial(),
+        },
+        0,
+      );
+      interGroup.add(corners.group);
+
+      for (const cc of corners.cornerColliders) {
+        const swColDesc = rapier.ColliderDesc.cuboid(cc.halfX, curbHeight * 0.5, cc.halfZ)
+          .setTranslation(
+            config.x + cc.cx,
+            baseY + curbHeight * 0.5 - groundBodyY,
+            config.z + cc.cz,
+          )
+          .setFriction(0.8);
+        const col = physicsWorld.createCollider(swColDesc, groundBody);
+        colliders.push(col);
+      }
+    }
+
+    return { group: interGroup, puddleMaterials, colliders, obstacleColliderHandles };
+  }
+
   public buildSegment(
     config: JapaneseRoadSegmentConfig,
     world: RAPIER.World,
@@ -90,10 +233,28 @@ export class JapaneseRoadBuilder {
     const segmentColliders: RAPIER.Collider[] = [];
     const obstacleColliderHandles: number[] = [];
 
-    // 車道幅の計算 (片側 lanes * laneWidth + shoulder * 2)
-    const roadwayWidth = config.lanesPerDirection * 2 * config.laneWidth;
-    const totalRoadWidth = roadwayWidth + config.shoulderWidth * 2;
-    const halfRoadWidth = totalRoadWidth / 2;
+    // 統一断面計算 (medianWidth・車線・路肩・L型側溝・面取り縁石・歩道)
+    const cross = computeRoadCrossSection(config);
+    const totalRoadWidth = cross.driveableWidth;
+    const halfRoadWidth = cross.halfDriveable;
+
+    const hasCrosswalks = Boolean(config.hasCrosswalks || config.hasCrosswalk);
+    const crossZ = config.length * 0.25;
+    const southCrossZ = -config.length * 0.14;
+    const hasSouthCrosswalk =
+      hasCrosswalks && config.lanesPerDirection >= 2 && config.length >= 120;
+    const crosswalkZPositions: number[] = [];
+    if (hasCrosswalks) {
+      crosswalkZPositions.push(crossZ);
+      if (hasSouthCrosswalk) {
+        crosswalkZPositions.push(southCrossZ);
+      }
+    }
+    const rampZones: CrosswalkRampZone[] = crosswalkZPositions.map((cz) => ({
+      center: cz,
+      halfWidth: 2.2,
+      transitionLength: 1.2,
+    }));
 
     // 1. ビジュアル車道アスファルト（凸凹＆水たまり鏡面シェーダー適用）
     const roadMat = new JapaneseRoadMaterial({
@@ -110,13 +271,11 @@ export class JapaneseRoadBuilder {
     group.add(roadMesh);
 
     // 2. 物理コライダー（★完全な平坦コライダー★）
-    // 視覚的には凹凸があるが、物理面は段差のない滑らかな平坦面を作成
     const roadBodyDesc = rapier.RigidBodyDesc.fixed()
       .setTranslation(position.x, position.y, position.z)
       .setRotation(new rapier.Quaternion(0, Math.sin(rotationY / 2), 0, Math.cos(rotationY / 2)));
     const roadBody = world.createRigidBody(roadBodyDesc);
 
-    // 車道コライダー（厚み 0.5m の直方体を平坦に敷設）
     const roadCollider = rapier.ColliderDesc.cuboid(totalRoadWidth / 2, 0.25, config.length / 2)
       .setTranslation(0, -0.25, 0)
       .setFriction(0.85)
@@ -124,16 +283,42 @@ export class JapaneseRoadBuilder {
     const createdRoadCol = world.createCollider(roadCollider, roadBody);
     segmentColliders.push(createdRoadCol);
 
-    // 3. 縁石（マウントアップコンクリートブロック）
-    this.buildCurbs(group, config, halfRoadWidth);
+    // 3. L型側溝・面取り縁石（横断歩道切下げスロープ付き）
+    this.buildCurbs(group, config, cross, rampZones);
 
-    // 4. 歩道（インターロッキングブロック舗装 + 水たまりシェーダー）
-    this.buildSidewalks(group, config, halfRoadWidth, world, rapier, roadBody, segmentColliders);
+    // 4. 歩道（1.5%排水勾配・舗装目地シェーダー・切下げすりつけスロープ・点字警告ブロック）
+    this.buildSidewalks(
+      group,
+      config,
+      cross,
+      rampZones,
+      crosswalkZPositions,
+      world,
+      rapier,
+      roadBody,
+      segmentColliders,
+    );
 
-    // 5. 道路標示（黄色中央線、白破線、路肩線、横断歩道）
-    this.buildMarkings(group, config, halfRoadWidth);
+    // 5. 道路標示（中央線、白破線、路肩線、横断歩道）
+    const laneLayout = this.buildMarkings(group, config, cross, crosswalkZPositions);
 
-    // 6. プロップ（マンホール、グレーチング、ガードレール、信号機、標識）および物理衝突コライダー
+    // 6. 中央分離帯アイランド（medianWidth > 0 の場合）
+    const hasRaisedMedian = cross.medianWidth > 0;
+    if (hasRaisedMedian) {
+      this.buildRaisedMedian(
+        group,
+        config,
+        cross,
+        laneLayout.centerLineExcludeZRanges,
+        world,
+        rapier,
+        roadBody,
+        segmentColliders,
+        obstacleColliderHandles,
+      );
+    }
+
+    // 7. プロップ（マンホール、グレーチング、ガードレール、信号機、標識）および物理衝突コライダー
     this.buildProps(
       group,
       config,
@@ -157,31 +342,46 @@ export class JapaneseRoadBuilder {
   private buildCurbs(
     group: THREE.Group,
     config: JapaneseRoadSegmentConfig,
-    halfRoadWidth: number,
+    cross: RoadCrossSectionSpec,
+    rampZones: ReadonlyArray<CrosswalkRampZone>,
   ): void {
     const curbMat = new THREE.MeshStandardMaterial({
-      color: 0x94a3b8, // 道路用コンクリートグレー
+      color: 0x94a3b8,
       roughness: 0.8,
       metalness: 0.1,
     });
     this.applyCurb3DTexture(curbMat);
+    const gutterMat = this.createLGutterMaterial();
 
-    const curbWidth = 0.25; // 25cm幅
-    const curbGeo = new THREE.BoxGeometry(curbWidth, config.curbHeight, config.length);
+    const stations = buildStationsWithRamps(
+      -config.length * 0.5,
+      config.length * 0.5,
+      8.0,
+      rampZones,
+    );
+    const frames = buildStraightRoadFrames(stations);
 
-    // 左縁石
-    const leftCurb = new THREE.Mesh(curbGeo, curbMat);
-    leftCurb.position.set(-halfRoadWidth - curbWidth / 2, config.curbHeight / 2, 0);
-    leftCurb.castShadow = true;
-    leftCurb.receiveShadow = true;
-    group.add(leftCurb);
+    for (const sideSign of [-1, 1] as const) {
+      const sideSpec = getSideCrossSection(cross, sideSign);
+      const hasSidewalk = sideSpec.totalWidth > 0.05;
+      if (!hasSidewalk) {
+        continue;
+      }
 
-    // 右縁石
-    const rightCurb = new THREE.Mesh(curbGeo, curbMat);
-    rightCurb.position.set(halfRoadWidth + curbWidth / 2, config.curbHeight / 2, 0);
-    rightCurb.castShadow = true;
-    rightCurb.receiveShadow = true;
-    group.add(rightCurb);
+      const gutterGeom = buildLGutterRibbonGeometry(frames, sideSign, cross, 0);
+      const gutterMesh = new THREE.Mesh(gutterGeom, gutterMat);
+      gutterMesh.name = `StraightLGutter_${sideSign > 0 ? "L" : "R"}`;
+      gutterMesh.receiveShadow = true;
+      group.add(gutterMesh);
+
+      const curbGeom = buildProfiledCurbRibbonGeometry(frames, sideSign, cross, 0, rampZones);
+      const curbMesh = new THREE.Mesh(curbGeom, curbMat);
+      curbMesh.name = `StraightCurb_${sideSign > 0 ? "L" : "R"}`;
+      curbMesh.userData.isSidewalkSurface = true;
+      curbMesh.castShadow = true;
+      curbMesh.receiveShadow = true;
+      group.add(curbMesh);
+    }
   }
 
   /**
@@ -195,7 +395,7 @@ export class JapaneseRoadBuilder {
   private applyCurb3DTexture(material: THREE.MeshStandardMaterial): void {
     const volumeTex = Procedural3DTextureGenerator.getSharedRoadMarkingProp3DTexture(32);
     material.userData.uRoadPropVolumeTex = volumeTex;
-    material.customProgramCacheKey = () => "japanese-road-curb-3d-v2";
+    material.customProgramCacheKey = () => "japanese-road-curb-3d-v3";
 
     material.onBeforeCompile = (shader) => {
       shader.uniforms.uRoadPropVolumeTex = { value: volumeTex };
@@ -204,14 +404,16 @@ export class JapaneseRoadBuilder {
         "#include <common>",
         `#include <common>
 varying vec3 vCurbWorldPos;
-varying vec3 vCurbLocalPos;`,
+varying vec3 vCurbLocalPos;
+varying vec2 vCurbUv;`,
       );
 
       shader.vertexShader = shader.vertexShader.replace(
         "#include <begin_vertex>",
         `#include <begin_vertex>
 vCurbLocalPos = position;
-vCurbWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`,
+vCurbWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+vCurbUv = uv;`,
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -220,7 +422,8 @@ vCurbWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`,
 precision highp sampler3D;
 uniform sampler3D uRoadPropVolumeTex;
 varying vec3 vCurbWorldPos;
-varying vec3 vCurbLocalPos;`,
+varying vec3 vCurbLocalPos;
+varying vec2 vCurbUv;`,
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -235,9 +438,11 @@ if (curbCamDist < 60.0) {
   vec4 curbVoxCoarse = texture(uRoadPropVolumeTex, vCurbWorldPos * vec3(1.8, 2.4, 0.9));
   curbVoxFine = texture(uRoadPropVolumeTex, vCurbWorldPos * 8.5 + vec3(0.19, 0.47, 0.83));
   curbAggregate = mix(curbVoxCoarse.a, curbVoxFine.r, 0.45);
-  // 60cm 間隔のコンクリート縁石ブロック目地溝（スリット）
-  float jointPhase = abs(fract(vCurbWorldPos.z / 0.6 + 0.5) - 0.5);
-  jointGroove = 1.0 - smoothstep(0.0, 0.022, jointPhase);
+  // 60cm 間隔のコンクリート縁石ブロック目地溝（道路方向 UV vCurbUv.y に直交）
+  float curbLongCoord = vCurbUv.y;
+  float jointPhase = abs(fract(curbLongCoord / 0.6 + 0.5) - 0.5);
+  float jointDistFade = 1.0 - smoothstep(32.0, 48.0, curbCamDist);
+  jointGroove = (1.0 - smoothstep(0.0, 0.022, jointPhase)) * jointDistFade;
   // 縁石下部・側面の縦方向雨だれ＆泥跳ねウェザリング
   float verticalStreak = texture(uRoadPropVolumeTex, vec3(vCurbWorldPos.x * 3.2, vCurbWorldPos.y * 0.65, vCurbWorldPos.z * 2.6)).a;
   bottomGrime = smoothstep(0.14, -0.06, vCurbLocalPos.y) * (0.55 + 0.45 * verticalStreak);
@@ -280,135 +485,190 @@ if (curbCamDist < 36.0) {
   private buildSidewalks(
     group: THREE.Group,
     config: JapaneseRoadSegmentConfig,
-    halfRoadWidth: number,
+    cross: RoadCrossSectionSpec,
+    rampZones: ReadonlyArray<CrosswalkRampZone>,
+    crosswalkZPositions: ReadonlyArray<number>,
     world: RAPIER.World,
     rapier: typeof RAPIER,
     roadBody: RAPIER.RigidBody,
     segmentColliders: RAPIER.Collider[],
   ): void {
     const sidewalkMat = new PuddleMaterial({
-      baseColor: 0x94a3b8, // 丸の内御影石・インターロッキングブロック調
+      baseColor: 0x94a3b8,
       baseRoughness: 0.76,
       baseMetalness: 0.08,
       puddleThreshold: 0.46,
+      sidewalkPavingStyle: config.sidewalkPavingStyle ?? "granite_slab",
     });
     this.puddleMaterials.push(sidewalkMat);
 
-    const swGeo = new THREE.BoxGeometry(config.sidewalkWidth, config.curbHeight, config.length);
+    const stations = buildStationsWithRamps(
+      -config.length * 0.5,
+      config.length * 0.5,
+      8.0,
+      rampZones,
+    );
+    const frames = buildStraightRoadFrames(stations);
 
-    // 左歩道
-    const leftX = -halfRoadWidth - 0.25 - config.sidewalkWidth / 2;
-    const leftSidewalk = new THREE.Mesh(swGeo, sidewalkMat);
-    leftSidewalk.position.set(leftX, config.curbHeight / 2, 0);
-    leftSidewalk.receiveShadow = true;
-    group.add(leftSidewalk);
+    for (const sideSign of [-1, 1] as const) {
+      const sideSpec = getSideCrossSection(cross, sideSign);
+      const hasSidewalk = sideSpec.totalWidth > 0.05;
+      if (!hasSidewalk) {
+        continue;
+      }
 
-    // 右歩道
-    const rightX = halfRoadWidth + 0.25 + config.sidewalkWidth / 2;
-    const rightSidewalk = new THREE.Mesh(swGeo, sidewalkMat);
-    rightSidewalk.position.set(rightX, config.curbHeight / 2, 0);
-    rightSidewalk.receiveShadow = true;
-    group.add(rightSidewalk);
+      const swGeom = buildProfiledSidewalkRibbonGeometry(frames, sideSign, cross, 0, rampZones);
+      const swMesh = new THREE.Mesh(swGeom, sidewalkMat);
+      swMesh.name = `StraightSidewalk_${sideSign > 0 ? "L" : "R"}`;
+      swMesh.userData.isSidewalkSurface = true;
+      swMesh.receiveShadow = true;
+      group.add(swMesh);
 
-    // 歩道および縁石の物理コライダー（縁石 0.25m 幅も含めた一段高い歩道面）
-    const totalSidewalkColliderWidth = config.sidewalkWidth + 0.25;
-    const leftColliderX = -halfRoadWidth - totalSidewalkColliderWidth / 2;
-    const rightColliderX = halfRoadWidth + totalSidewalkColliderWidth / 2;
+      // 視覚歩道幅と 1:1 一致する歩道物理コライダー
+      const colCenterX = sideSign * (cross.halfDriveable + sideSpec.totalWidth * 0.5);
+      const swColDesc = rapier.ColliderDesc.cuboid(
+        sideSpec.totalWidth * 0.5,
+        cross.curbHeight * 0.5,
+        config.length * 0.5,
+      )
+        .setTranslation(colCenterX, cross.curbHeight * 0.5, 0)
+        .setFriction(0.8);
+      segmentColliders.push(world.createCollider(swColDesc, roadBody));
 
-    const swColDesc = rapier.ColliderDesc.cuboid(
-      totalSidewalkColliderWidth / 2,
-      config.curbHeight / 2,
-      config.length / 2,
-    ).setFriction(0.8);
+      const hasCrosswalks = crosswalkZPositions.length > 0;
+      if (hasCrosswalks) {
+        const tactileMargin = Math.min(0.42, sideSpec.walkSurfaceWidth * 0.42);
+        const tactileX = sideSign * (sideSpec.curbOuter + tactileMargin);
+        const outerRampRatio =
+          sideSpec.walkSurfaceWidth > 0.01
+            ? Math.min(1, (tactileMargin + 0.3) / sideSpec.walkSurfaceWidth)
+            : 0;
+        const tactileBaseY = 0.02 + (sideSpec.backEdgeHeight - 0.02) * outerRampRatio + 0.002;
+        const braille = this.markings.createBrailleTiles(
+          config.length,
+          tactileX,
+          tactileBaseY,
+          crosswalkZPositions,
+        );
+        braille.userData.lodDetailTier = "high";
+        group.add(braille);
+      }
+    }
+  }
 
-    swColDesc.setTranslation(leftColliderX, config.curbHeight / 2, 0);
-    segmentColliders.push(world.createCollider(swColDesc, roadBody));
+  private buildRaisedMedian(
+    group: THREE.Group,
+    config: JapaneseRoadSegmentConfig,
+    cross: RoadCrossSectionSpec,
+    excludeZRanges: ReadonlyArray<readonly [number, number]>,
+    world: RAPIER.World,
+    rapier: typeof RAPIER,
+    roadBody: RAPIER.RigidBody,
+    segmentColliders: RAPIER.Collider[],
+    obstacleColliderHandles: number[],
+  ): void {
+    const medianHeight = Math.max(0.16, cross.curbHeight + 0.02);
+    const halfMed = cross.halfMedian;
+    const curbBorder = Math.min(0.18, halfMed * 0.35);
 
-    const swColDescRight = rapier.ColliderDesc.cuboid(
-      totalSidewalkColliderWidth / 2,
-      config.curbHeight / 2,
-      config.length / 2,
-    ).setFriction(0.8);
-    swColDescRight.setTranslation(rightColliderX, config.curbHeight / 2, 0);
-    segmentColliders.push(world.createCollider(swColDescRight, roadBody));
+    const curbMat = new THREE.MeshStandardMaterial({
+      color: 0x94a3b8,
+      roughness: 0.8,
+      metalness: 0.1,
+    });
+    this.applyCurb3DTexture(curbMat);
 
-    // 横断歩道接続部（歩道巻き込み部）の点字警告ブロック（JIS T 9251）
-    // Why not 歩道中央（leftX / rightX）に全長連続の黄色帯を敷くか:
-    // 歩道の中央に道路全長（100m〜164m）の黄色ラインを引くと、ドライバー視点で「歩道の上に黄色の車線が引かれている」ように見えるため、
-    // 実際の日本の都市歩道（道路移動等円滑化基準）に則り、横断歩道接続部の歩道縁石際（車道端から 0.65m 歩道側）にのみ警告ブロックを配置する。
-    const hasCrosswalks = Boolean(config.hasCrosswalks || config.hasCrosswalk);
-    if (hasCrosswalks) {
-      const crossZ = config.length * 0.25;
-      const southCrossZ = -config.length * 0.14;
-      const hasSouthCrosswalk = config.lanesPerDirection >= 2 && config.length >= 120;
-      const crosswalkZPositions = hasSouthCrosswalk ? [crossZ, southCrossZ] : [crossZ];
-      const tactileCurbOffset = Math.min(0.65, config.sidewalkWidth * 0.45);
-      const leftTactileX = -halfRoadWidth - 0.25 - tactileCurbOffset;
-      const rightTactileX = halfRoadWidth + 0.25 + tactileCurbOffset;
+    const medianTopMat = new THREE.MeshStandardMaterial({
+      color: 0xb8c2cf,
+      roughness: 0.72,
+      metalness: 0.06,
+    });
+    this.applyCurb3DTexture(medianTopMat);
 
-      const leftBraille = this.markings.createBrailleTiles(
-        config.length,
-        leftTactileX,
-        config.curbHeight,
-        crosswalkZPositions,
-      );
-      leftBraille.userData.lodDetailTier = "high";
-      group.add(leftBraille);
+    const whiteEdgeMat = this.markings.getWhitePaintMaterial();
+    const spans = this.markings.computeIncludedZSpans(config.length, excludeZRanges);
 
-      const rightBraille = this.markings.createBrailleTiles(
-        config.length,
-        rightTactileX,
-        config.curbHeight,
-        crosswalkZPositions,
-      );
-      rightBraille.userData.lodDetailTier = "high";
-      group.add(rightBraille);
+    for (let idx = 0; idx < spans.length; idx++) {
+      const [zStart, zEnd] = spans[idx];
+      const spanLen = zEnd - zStart;
+      const isTooShort = spanLen < 4.0;
+      if (isTooShort) {
+        continue;
+      }
+
+      const midZ = (zStart + zEnd) * 0.5;
+      const curbGeo = new THREE.BoxGeometry(cross.medianWidth, medianHeight, spanLen);
+      const curbMesh = new THREE.Mesh(curbGeo, curbMat);
+      curbMesh.name = `StraightCentralMedian_Curb_${idx}`;
+      curbMesh.position.set(0, medianHeight * 0.5, midZ);
+      curbMesh.castShadow = true;
+      curbMesh.receiveShadow = true;
+      group.add(curbMesh);
+
+      const deckWidth = cross.medianWidth - curbBorder * 2;
+      if (deckWidth > 0.2) {
+        const deckGeo = new THREE.BoxGeometry(deckWidth, 0.022, spanLen - 0.3);
+        const deckMesh = new THREE.Mesh(deckGeo, medianTopMat);
+        deckMesh.name = `StraightCentralMedian_Deck_${idx}`;
+        deckMesh.position.set(0, medianHeight + 0.001, midZ);
+        deckMesh.receiveShadow = true;
+        group.add(deckMesh);
+      }
+
+      for (const sideSign of [-1, 1] as const) {
+        const edgeGeo = new THREE.PlaneGeometry(0.15, spanLen);
+        edgeGeo.rotateX(-Math.PI / 2);
+        const edgeMesh = new THREE.Mesh(edgeGeo, whiteEdgeMat);
+        edgeMesh.name = `StraightMarking_MedianEdge_${sideSign > 0 ? "L" : "R"}_${idx}`;
+        edgeMesh.userData.paintColor = "white";
+        edgeMesh.position.set(sideSign * (halfMed + 0.22), 0.02, midZ);
+        group.add(edgeMesh);
+      }
+
+      const medColDesc = rapier.ColliderDesc.cuboid(
+        Math.max(0.25, halfMed - 0.06),
+        medianHeight * 0.5,
+        spanLen * 0.5,
+      )
+        .setTranslation(0, medianHeight * 0.5, midZ)
+        .setFriction(0.6)
+        .setRestitution(0.15);
+      const medCol = world.createCollider(medColDesc, roadBody);
+      segmentColliders.push(medCol);
+      if (typeof medCol?.handle === "number") {
+        obstacleColliderHandles.push(medCol.handle);
+      }
     }
   }
 
   private buildMarkings(
     group: THREE.Group,
     config: JapaneseRoadSegmentConfig,
-    halfRoadWidth: number,
-  ): void {
-    const hasCrosswalks = Boolean(config.hasCrosswalks || config.hasCrosswalk);
+    cross: RoadCrossSectionSpec,
+    crosswalkZPositions: ReadonlyArray<number>,
+  ): RoadLaneLayout {
+    const halfRoadWidth = cross.halfDriveable;
+    const hasCrosswalks = crosswalkZPositions.length > 0;
     const crossZ = config.length * 0.25;
     const southCrossZ = -config.length * 0.14;
-    // Why 長さ 120m 以上の幹線道路のみ第2横断歩道（southCrosswalk）を設けるか:
-    // 58m〜90m の中短距離セグメントで crossZ と southCrossZ の両方を入れると、
-    // 停止線・予告ダイヤ（◇）・進行方向矢印・速度標示（40/50）が互いに重なって破綻するため。
-    // 一方 138m（行幸通り・丸の内中央口）や 164m（明治通り・渋谷ストリーム前）では
-    // southCrossZ = -0.14 * length の信号機と対になる横断歩道を設置できる十分な縦断長がある。
     const hasSouthCrosswalk =
       hasCrosswalks && config.lanesPerDirection >= 2 && config.length >= 120;
-
-    const crosswalkZPositions: number[] = [];
-    if (hasCrosswalks) {
-      crosswalkZPositions.push(crossZ);
-      if (hasSouthCrosswalk) {
-        crosswalkZPositions.push(southCrossZ);
-      }
-    }
 
     const isMultiLaneRoad = config.lanesPerDirection >= 2;
     const hasZebraZone = isMultiLaneRoad && config.length >= 75 && hasCrosswalks;
     const zebraLen = 8.0;
-    // Why crossZ - 10.5m に導流帯（長さ 8.0m → [crossZ - 14.5, crossZ - 6.5]）を置くか:
-    // 停止線が crossZ - 3.8m（外端 crossZ - 4.025m）にあるため、導流帯北端（crossZ - 6.5m）との間に
-    // 2.475m のクリアランスを確保し、導流帯と停止線・横断歩道が重ならないようにする。
     const zebraCenterZ = crossZ - 10.5;
     const zebraZoneZRanges: Array<[number, number]> = [];
     if (hasZebraZone) {
-      // 導流帯（zebraCenterZ ± 4.0m）から横断歩道北端（crossZ + 5.2m）までを連続して除外し、
-      // 導流帯と横断歩道の間の隙間に黄色中央線の切れ端が残らないようにする
       zebraZoneZRanges.push([zebraCenterZ - zebraLen * 0.5 - 0.6, crossZ + 5.2]);
     }
 
-    // 車線レイアウト計算（各車線の中心X座標・境界X・横断歩道/交差点端部の非重複除外Z区間を一元算出）
+    // 車線レイアウト計算（中央分離帯幅・各車線の中心X座標・境界X・横断歩道/交差点端部の非重複除外Z区間を一元算出）
     const laneLayout = computeRoadLaneLayout({
       lanesPerDirection: config.lanesPerDirection,
       laneWidth: config.laneWidth,
       length: config.length,
+      medianWidth: cross.medianWidth,
       crosswalkZPositions,
       zebraZoneZRanges,
       segmentEndExclusionBuffer: 1.5,
@@ -416,15 +676,18 @@ if (curbCamDist < 36.0) {
     });
     group.userData.laneLayout = laneLayout;
 
-    // 1. 中央線（道路交通法第17条第4項・警察庁交通規制基準に基づき、片側2車線以上は白実線、片側1車線は追越し禁止黄色実線または白破線：横断歩道・停止線・中央導流帯・セグメント端部は除外）
-    const isYellowNoPassing = config.hasYellowCenterLine ?? true;
-    const centerLine = this.markings.createCenterLine(
-      config.length,
-      isYellowNoPassing,
-      laneLayout.centerLineExcludeZRanges,
-      config.lanesPerDirection,
-    );
-    group.add(centerLine);
+    // 1. 中央線（立体中央分離帯がある場合は buildRaisedMedian 側で描画するため抑止）
+    const hasNoMedianIsland = cross.medianWidth <= 0;
+    if (hasNoMedianIsland) {
+      const isYellowNoPassing = config.hasYellowCenterLine ?? true;
+      const centerLine = this.markings.createCenterLine(
+        config.length,
+        isYellowNoPassing,
+        laneLayout.centerLineExcludeZRanges,
+        config.lanesPerDirection,
+      );
+      group.add(centerLine);
+    }
 
     // 2. 車線境界線（複数車線の場合：横断歩道・停止線手前30mは道路交通法第26条の2・第30条の「進路変更禁止（規制標示 102の2）」黄色実線、それ以外は車両通行帯境界線（区画線 102）白破線）
     const shouldDrawLaneDividers =
@@ -598,6 +861,8 @@ if (curbCamDist < 36.0) {
         }
       }
     }
+
+    return laneLayout;
   }
 
   /**
@@ -1161,25 +1426,18 @@ if (curbCamDist < 36.0) {
     const segmentColliders: RAPIER.Collider[] = [];
     const obstacleColliderHandles: number[] = [];
 
-    const medianW = config.medianWidth ?? 0;
-    const driveableWidth =
-      config.lanesPerDirection * 2 * config.laneWidth + config.shoulderWidth * 2 + medianW;
-    const halfDriveable = driveableWidth / 2;
+    const cross = computeRoadCrossSection(config);
+    const medianW = cross.medianWidth;
+    const driveableWidth = cross.driveableWidth;
+    const halfDriveable = cross.halfDriveable;
 
     // 1. Catmull-Rom スプラインで道路中心線を滑らかに補間サンプリング
     const curveControlPoints = points.map((p) => new THREE.Vector3(p.x, 0, p.z));
     const spline = new THREE.CatmullRomCurve3(curveControlPoints, false, "centripetal", 0.5);
     const totalSplineLength = spline.getLength();
-    const subdivisions = Math.max(16, Math.min(72, Math.ceil(totalSplineLength / 7.0)));
+    const subdivisions = Math.max(16, Math.min(360, Math.ceil(totalSplineLength / 4.5)));
 
-    interface SampleFrame {
-      pos: THREE.Vector3;
-      tangent: THREE.Vector3;
-      normal: THREE.Vector3; // 右向き法線 (+X 相当)
-      arcLen: number;
-    }
-
-    const frames: SampleFrame[] = [];
+    const frames: RoadFrame[] = [];
     let cumulativeLen = 0;
     for (let i = 0; i <= subdivisions; i++) {
       const t = i / subdivisions;
@@ -1306,7 +1564,7 @@ if (curbCamDist < 36.0) {
     const endMarkingTrim = config.endTrimMeters ?? defaultTrim;
 
     // フレーム配列から任意の弧長（arcLen）における位置・接線・法線を滑らかに補間するヘルパー
-    const getInterpolatedFrame = (targetArc: number): SampleFrame => {
+    const getInterpolatedFrame = (targetArc: number): RoadFrame => {
       const clampedArc = Math.max(0, Math.min(totalSplineLength, targetArc));
       let low = 0;
       let high = frames.length - 1;
@@ -1334,13 +1592,6 @@ if (curbCamDist < 36.0) {
       return { pos, tangent, normal, arcLen: clampedArc };
     };
 
-    // 曲線道路に沿って滑らかに湾曲する破線レーン境界線リボンメッシュを生成する
-    // Why PlaneGeometry の直線板ではなくスプライン追従リボンメッシュか:
-    // 1. 直線板（PlaneGeometry）だとカーブ区間で接線方向に直線で飛び出し、車線を横切る。
-    // 2. Three.js のオイラー角の評価順（XYZ）により、rotation.x = -PI/2 の後の rotation.z 設定が
-    //    ワールド Z 軸回りのロール回転となり、道路が北から傾くにつれて地面からバンクして立ち上がり、めり込みと浮きが発生していた。
-    // 3. スプライン法線から直接頂点座標を計算するリボンメッシュなら法線が真上（0, 1, 0）で地面と完全に平行となり、
-    //    カーブに沿って完璧に曲がる日本規格（白破線: 長さ5.0m、間隙5.0m、幅0.15m）の整然とした車線境界線を実現できる。
     const buildDashedRibbonGeometry = (
       centerOffset: number,
       lineWidth: number,
@@ -1349,6 +1600,7 @@ if (curbCamDist < 36.0) {
       gapLength = 5.0,
       arcStart = 0,
       arcEnd = totalSplineLength,
+      excludeArcRanges: ReadonlyArray<readonly [number, number]> = [],
     ): THREE.BufferGeometry => {
       const halfW = lineWidth * 0.5;
       const offsetLeft = centerOffset - halfW;
@@ -1368,6 +1620,14 @@ if (curbCamDist < 36.0) {
 
       let vertCount = 0;
       for (let s = minArc; s + dashLength <= maxArc; s += cycle) {
+        const dashEnd = s + dashLength;
+        const overlapsExclusion = excludeArcRanges.some(
+          ([exStart, exEnd]) => dashEnd > exStart && s < exEnd,
+        );
+        if (overlapsExclusion) {
+          continue;
+        }
+
         const segStart = s;
         const segSubdivs = 4;
         const segStartIndex = vertCount / 3;
@@ -1392,7 +1652,6 @@ if (curbCamDist < 36.0) {
             const b = segStartIndex + j * 2 + 1;
             const c = segStartIndex + (j + 1) * 2;
             const d = segStartIndex + (j + 1) * 2 + 1;
-            // 反時計回り（CCW: 上向き法線）で両三角形を構成
             indices.push(a, c, b, b, c, d);
           }
         }
@@ -1442,7 +1701,7 @@ if (curbCamDist < 36.0) {
       vRepeatPerMeter = 0.2,
     ): THREE.BufferGeometry => {
       const spanArc = arcEnd - arcStart;
-      const steps = Math.max(2, Math.min(120, Math.ceil(spanArc / 4.0)));
+      const steps = Math.max(2, Math.min(280, Math.ceil(spanArc / 4.0)));
       const positions = new Float32Array((steps + 1) * 2 * 3);
       const normals = new Float32Array((steps + 1) * 2 * 3);
       const uvs = new Float32Array((steps + 1) * 2 * 2);
@@ -1503,10 +1762,10 @@ if (curbCamDist < 36.0) {
       topY: number,
       arcStart: number,
       arcEnd: number,
-      vRepeatPerMeter = 0.25,
+      vRepeatPerMeter = 1.0,
     ): THREE.BufferGeometry => {
       const spanArc = arcEnd - arcStart;
-      const steps = Math.max(2, Math.min(48, Math.ceil(spanArc / 4.0)));
+      const steps = Math.max(2, Math.min(240, Math.ceil(spanArc / 4.0)));
       const positions: number[] = [];
       const uvs: number[] = [];
       const indices: number[] = [];
@@ -1525,12 +1784,12 @@ if (curbCamDist < 36.0) {
         indices.push(baseIdx, baseIdx + 2, baseIdx + 1, baseIdx + 1, baseIdx + 2, baseIdx + 3);
       };
 
-      const sectionFrames: SampleFrame[] = [];
+      const sectionFrames: RoadFrame[] = [];
       for (let i = 0; i <= steps; i++) {
         sectionFrames.push(getInterpolatedFrame(arcStart + (spanArc * i) / steps));
       }
 
-      const corner = (f: SampleFrame, off: number, y: number): [number, number, number] => [
+      const corner = (f: RoadFrame, off: number, y: number): [number, number, number] => [
         f.pos.x + f.normal.x * off,
         y,
         f.pos.z + f.normal.z * off,
@@ -1825,12 +2084,92 @@ if (curbCamDist < 36.0) {
       }
     }
 
-    // 複数車線時の破線レーン境界線（スプライン追従リボンメッシュ）
+    // 横断歩道・停止線・進路変更禁止黄色実線の配置対象を先に収集し、白破線重複および歩道切下げスロープ・点字ブロック・ガードレール開口と 100% 同期させる
+    const lanesPerDir = config.lanesPerDirection;
+    const shouldAddStopLines = config.hasStopLines ?? true;
+    interface CurvedApproachSpec {
+      ivIdx: number;
+      ivLen: number;
+      name: string;
+      sCross: number;
+      sStop: number;
+      isStart: boolean;
+      hasCrosswalk: boolean;
+      hasStopLine: boolean;
+      ivStart: number;
+      ivEnd: number;
+    }
+    const validCurvedApproaches: CurvedApproachSpec[] = [];
+    const curvedCrosswalkArcs: number[] = [];
+    const yellowNoLaneChangeByLane = new Map<string, Array<[number, number]>>();
+
+    for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
+      const iv = activeRoadIntervals[ivIdx];
+      const ivLen = iv.end - iv.start;
+      const isLongEnough = ivLen >= 28.0;
+      if (!isLongEnough) {
+        continue;
+      }
+
+      const rawApproaches = [
+        { name: "Start", sCross: iv.start + 3.5, sStop: iv.start + 6.3, isStart: true },
+        { name: "End", sCross: iv.end - 3.5, sStop: iv.end - 6.3, isStart: false },
+      ];
+      for (const app of rawApproaches) {
+        const shouldSkipStart = app.isStart && ivIdx === 0 && Boolean(config.skipStartCrosswalk);
+        const shouldSkipEnd =
+          !app.isStart &&
+          ivIdx === activeRoadIntervals.length - 1 &&
+          Boolean(config.skipEndCrosswalk);
+        if (shouldSkipStart || shouldSkipEnd) {
+          continue;
+        }
+
+        const fCross = getInterpolatedFrame(app.sCross);
+        const fStop = getInterpolatedFrame(app.sStop);
+        const hasCrosswalk =
+          shouldAddCrosswalks && !isPointInExclusion(fCross.pos.x, fCross.pos.z, 2.0);
+        const hasStopLine =
+          shouldAddStopLines && !isPointInExclusion(fStop.pos.x, fStop.pos.z, 2.0);
+
+        if (hasCrosswalk) {
+          curvedCrosswalkArcs.push(app.sCross);
+        }
+
+        if (hasStopLine && lanesPerDir >= 2 && ivLen >= 40.0) {
+          const sYellowStart = app.isStart ? app.sStop : Math.max(iv.start, app.sStop - 18.0);
+          const sYellowEnd = app.isStart ? Math.min(iv.end, app.sStop + 18.0) : app.sStop;
+          const yellowDirSign = app.isStart ? -1 : 1;
+          for (let lane = 1; lane < lanesPerDir; lane++) {
+            const key = `${yellowDirSign}_${lane}`;
+            const list = yellowNoLaneChangeByLane.get(key) ?? [];
+            list.push([sYellowStart - 0.6, sYellowEnd + 0.6]);
+            yellowNoLaneChangeByLane.set(key, list);
+          }
+        }
+
+        validCurvedApproaches.push({
+          ivIdx,
+          ivLen,
+          name: app.name,
+          sCross: app.sCross,
+          sStop: app.sStop,
+          isStart: app.isStart,
+          hasCrosswalk,
+          hasStopLine,
+          ivStart: iv.start,
+          ivEnd: iv.end,
+        });
+      }
+    }
+
+    // 複数車線時の破線レーン境界線（スプライン追従リボンメッシュ：進路変更禁止黄色実線区間を除外）
     const hasMultiLaneDashed = config.hasWhiteDashedLines && config.lanesPerDirection > 1;
     if (hasMultiLaneDashed) {
       for (const dirSign of [-1, 1]) {
         for (let lane = 1; lane < config.lanesPerDirection; lane++) {
           const laneOffset = dirSign * (medianW / 2 + lane * config.laneWidth);
+          const yellowExclusions = yellowNoLaneChangeByLane.get(`${dirSign}_${lane}`) ?? [];
           for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
             const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
             const dashedGeom = buildDashedRibbonGeometry(
@@ -1841,6 +2180,7 @@ if (curbCamDist < 36.0) {
               5.0,
               iv.start,
               iv.end,
+              yellowExclusions,
             );
             if (dashedGeom.attributes.position && dashedGeom.attributes.position.count > 0) {
               const dashMesh = new THREE.Mesh(dashedGeom, whiteLineMat);
@@ -1853,84 +2193,224 @@ if (curbCamDist < 36.0) {
       }
     }
 
-    // 4. 両側歩道・縁石立体ボックスリボンメッシュ（途中交差点開口済み区間のみ）
-    const hasSidewalks = config.sidewalkWidth > 0;
-    if (hasSidewalks) {
-      const curbW = 0.22;
+    // 4. 片側別の高精度歩道・面取り縁石・L型側溝・切下げスロープ・点字警告ブロック
+    const hasLeftSidewalk = cross.left.totalWidth > 0.05;
+    const hasRightSidewalk = cross.right.totalWidth > 0.05;
+    const hasSidewalks = hasLeftSidewalk || hasRightSidewalk;
 
+    const leftSidewalkIntervals = hasLeftSidewalk
+      ? computePerSideCorridorIntervals({
+          frames,
+          totalSplineLength,
+          sideSign: 1,
+          innerOffset: halfDriveable,
+          outerOffset: cross.left.walkOuter,
+          exclusionCorridors: config.sidewalkExclusionCorridors,
+          exclusionBoxes: config.sidewalkExclusionBoxes,
+          exclusionZones: config.sidewalkExclusionZones,
+          fallbackStartTrim: startMarkingTrim,
+          fallbackEndTrim: endMarkingTrim,
+          minSpanLength: 3.5,
+        })
+      : [];
+
+    const rightSidewalkIntervals = hasRightSidewalk
+      ? computePerSideCorridorIntervals({
+          frames,
+          totalSplineLength,
+          sideSign: -1,
+          innerOffset: halfDriveable,
+          outerOffset: cross.right.walkOuter,
+          exclusionCorridors: config.sidewalkExclusionCorridors,
+          exclusionBoxes: config.sidewalkExclusionBoxes,
+          exclusionZones: config.sidewalkExclusionZones,
+          fallbackStartTrim: startMarkingTrim,
+          fallbackEndTrim: endMarkingTrim,
+          minSpanLength: 3.5,
+        })
+      : [];
+
+    const rampZones: CrosswalkRampZone[] = curvedCrosswalkArcs.map((c) => ({
+      center: c,
+      halfWidth: 2.2,
+      transitionLength: 1.2,
+    }));
+
+    if (hasSidewalks) {
       const sidewalkMat = new PuddleMaterial({
         baseColor: 0x94a3b8,
         baseRoughness: 0.76,
         baseMetalness: 0.08,
         puddleThreshold: 0.46,
+        sidewalkPavingStyle: config.sidewalkPavingStyle ?? "interlocking_brick",
       });
       this.puddleMaterials.push(sidewalkMat);
       segmentPuddleMaterials.push(sidewalkMat);
 
-      for (const sideSign of [-1, 1]) {
-        const innerOff = sideSign * halfDriveable;
-        const curbOuterOff = sideSign * (halfDriveable + curbW);
-        const walkOuterOff = sideSign * (halfDriveable + config.sidewalkWidth);
+      const gutterMat = this.createLGutterMaterial();
+      const brailleMat = this.markings.getBrailleTileMaterial();
 
-        const minCurb = Math.min(innerOff, curbOuterOff);
-        const maxCurb = Math.max(innerOff, curbOuterOff);
-        const minWalk = Math.min(curbOuterOff, walkOuterOff);
-        const maxWalk = Math.max(curbOuterOff, walkOuterOff);
+      const sideConfigs: ReadonlyArray<{
+        sideSign: -1 | 1;
+        intervals: ReadonlyArray<{ start: number; end: number }>;
+      }> = [
+        { sideSign: -1, intervals: rightSidewalkIntervals },
+        { sideSign: 1, intervals: leftSidewalkIntervals },
+      ];
 
-        for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
-          const iv = activeRoadIntervals[ivIdx];
-          // 立体縁石ブロック (天面: config.curbHeight, 側面壁立ち上がり付き)
-          const curbGeom = buildCurvedSolidBoxRibbonGeometry(
-            minCurb,
-            maxCurb,
-            baseY + 0.011,
-            baseY + config.curbHeight,
-            iv.start,
-            iv.end,
-            0.25,
+      for (const sc of sideConfigs) {
+        const sideSpec = getSideCrossSection(cross, sc.sideSign);
+        const sideTag = sc.sideSign > 0 ? "L" : "R";
+
+        for (let ivIdx = 0; ivIdx < sc.intervals.length; ivIdx++) {
+          const iv = sc.intervals[ivIdx];
+          const stations = buildStationsWithRamps(iv.start, iv.end, 4.5, rampZones);
+          const ivFrames = stations.map((arc) => getInterpolatedFrame(arc));
+          if (ivFrames.length < 2) {
+            continue;
+          }
+
+          // L型側溝コンクリート帯
+          const gutterGeom = buildLGutterRibbonGeometry(ivFrames, sc.sideSign, cross, baseY);
+          const gutterMesh = new THREE.Mesh(gutterGeom, gutterMat);
+          gutterMesh.name = `CurvedLGutter_${sideTag}_${ivIdx}`;
+          gutterMesh.receiveShadow = true;
+          group.add(gutterMesh);
+
+          // 面取り＆切下げスロープ付き 3D 縁石（路面 baseY に密着）
+          const curbGeom = buildProfiledCurbRibbonGeometry(
+            ivFrames,
+            sc.sideSign,
+            cross,
+            baseY,
+            rampZones,
           );
           const curbMesh = new THREE.Mesh(curbGeom, curbMat);
-          curbMesh.name = `CurvedCurb_${sideSign > 0 ? "L" : "R"}_${ivIdx}`;
+          curbMesh.name = `CurvedCurb_${sideTag}_${ivIdx}`;
+          curbMesh.userData.isSidewalkSurface = true;
+          curbMesh.castShadow = true;
           curbMesh.receiveShadow = true;
           group.add(curbMesh);
 
-          // 立体歩道スラブ (天面: curbHeight とほぼツライチ, 側面壁付き)
-          const walkGeom = buildCurvedSolidBoxRibbonGeometry(
-            minWalk,
-            maxWalk,
-            baseY + 0.011,
-            baseY + Math.max(0.02, config.curbHeight - 0.014),
-            iv.start,
-            iv.end,
-            0.12,
+          // 1.5%排水勾配＆切下げスロープ付き舗装歩道（路面 baseY に密着）
+          const walkGeom = buildProfiledSidewalkRibbonGeometry(
+            ivFrames,
+            sc.sideSign,
+            cross,
+            baseY,
+            rampZones,
           );
           const walkMesh = new THREE.Mesh(walkGeom, sidewalkMat);
-          walkMesh.name = `CurvedSidewalk_${sideSign > 0 ? "L" : "R"}_${ivIdx}`;
+          walkMesh.name = `CurvedSidewalk_${sideTag}_${ivIdx}`;
+          walkMesh.userData.isSidewalkSurface = true;
           walkMesh.receiveShadow = true;
           group.add(walkMesh);
+
+          // 横断歩道接続部の点字警告ブロック（JIS T 9251）
+          const tactileMargin = Math.min(0.42, sideSpec.walkSurfaceWidth * 0.42);
+          const tactileOff = sc.sideSign * (sideSpec.curbOuter + tactileMargin);
+          const outerRampRatio =
+            sideSpec.walkSurfaceWidth > 0.01
+              ? Math.min(1, (tactileMargin + 0.3) / sideSpec.walkSurfaceWidth)
+              : 0;
+          const tactileY = baseY + 0.02 + (sideSpec.backEdgeHeight - 0.02) * outerRampRatio + 0.005;
+
+          for (let cwIdx = 0; cwIdx < curvedCrosswalkArcs.length; cwIdx++) {
+            const cwArc = curvedCrosswalkArcs[cwIdx];
+            const isInsideSidewalk = cwArc >= iv.start + 1.4 && cwArc <= iv.end - 1.4;
+            if (!isInsideSidewalk) {
+              continue;
+            }
+            const fCw = getInterpolatedFrame(cwArc);
+            const tileGeo = new THREE.PlaneGeometry(0.6, 2.4);
+            tileGeo.rotateX(-Math.PI / 2);
+            const tileMesh = new THREE.Mesh(tileGeo, brailleMat);
+            tileMesh.name = `CurvedTactileWarning_${sideTag}_${ivIdx}_${cwIdx}`;
+            tileMesh.userData.markingType = "TactilePaving";
+            tileMesh.userData.lodDetailTier = "high";
+            tileMesh.position.set(
+              fCw.pos.x + fCw.normal.x * tactileOff,
+              tactileY,
+              fCw.pos.z + fCw.normal.z * tactileOff,
+            );
+            tileMesh.rotation.y = Math.atan2(fCw.tangent.x, fCw.tangent.z);
+            group.add(tileMesh);
+          }
         }
       }
     }
 
-    // 5. 曲線3D都市型防護柵（ガードレール・東京都型防護パイプ）立体ビーム＆支柱
+    // 5. 曲線3D都市型防護柵（ガードレール・東京都型防護パイプ）立体ビーム＆支柱・横断歩道開口・再帰反射材
+    const subtractGuardrailOpenings = (
+      baseIntervals: ReadonlyArray<{ start: number; end: number }>,
+    ): Array<{ start: number; end: number }> => {
+      const result: Array<{ start: number; end: number }> = [];
+      const sortedCuts = [...curvedCrosswalkArcs]
+        .map((c) => [c - 3.6, c + 3.6] as [number, number])
+        .sort((a, b) => a[0] - b[0]);
+
+      for (const iv of baseIntervals) {
+        let cursor = iv.start + 1.5;
+        const limitEnd = iv.end - 1.5;
+        for (const [cutStart, cutEnd] of sortedCuts) {
+          if (cutEnd <= cursor || cutStart >= limitEnd) {
+            continue;
+          }
+          const clippedEnd = Math.min(limitEnd, cutStart);
+          if (clippedEnd - cursor >= 3.5) {
+            result.push({ start: cursor, end: clippedEnd });
+          }
+          cursor = Math.max(cursor, cutEnd);
+        }
+        if (limitEnd - cursor >= 3.5) {
+          result.push({ start: cursor, end: limitEnd });
+        }
+      }
+      return result;
+    };
+
+    const leftGuardrailIntervals = subtractGuardrailOpenings(
+      hasLeftSidewalk ? leftSidewalkIntervals : activeRoadIntervals,
+    );
+    const rightGuardrailIntervals = subtractGuardrailOpenings(
+      hasRightSidewalk ? rightSidewalkIntervals : activeRoadIntervals,
+    );
+
     const hasGuardrails = Boolean(config.hasGuardrails);
     if (hasGuardrails) {
       const railBeamMat = new THREE.MeshStandardMaterial({
-        color: 0xe2e8f0,
-        roughness: 0.34,
-        metalness: 0.72,
+        color: 0xf4f7fb,
+        roughness: 0.28,
+        metalness: 0.25,
       });
-      this.applyCurb3DTexture(railBeamMat);
+      applyRoadProp3DTexture(railBeamMat, "guardrail");
+
+      const railRetroMat = new THREE.MeshStandardMaterial({
+        color: 0xfacc15,
+        emissive: 0xf59e0b,
+        emissiveIntensity: 0.75,
+        roughness: 0.14,
+        metalness: 0.35,
+      });
+      applyRoadProp3DTexture(railRetroMat, "retroreflector");
+
       const postGeo = new THREE.BoxGeometry(0.06, 0.78, 0.06);
+      const retroBadgeGeo = new THREE.BoxGeometry(0.075, 0.06, 0.06);
 
-      for (const sideSign of [-1, 1]) {
-        // 外側歩道端（offset = side * (halfDriveable + 0.38)）: 必ず車道クリアランス外
-        const railCenterOff = sideSign * (halfDriveable + 0.38);
+      const railSideSpecs: ReadonlyArray<{
+        sideSign: -1 | 1;
+        intervals: ReadonlyArray<{ start: number; end: number }>;
+      }> = [
+        { sideSign: -1, intervals: rightGuardrailIntervals },
+        { sideSign: 1, intervals: leftGuardrailIntervals },
+      ];
+
+      for (const rs of railSideSpecs) {
+        const railCenterOff = rs.sideSign * (halfDriveable + 0.36);
         const railGroup = new THREE.Group();
-        railGroup.name = `CurvedGuardrail_${sideSign > 0 ? "L" : "R"}`;
+        railGroup.name = `CurvedGuardrail_${rs.sideSign > 0 ? "L" : "R"}`;
 
-        for (const iv of activeRoadIntervals) {
-          // 上段立体ビーム (高さ: baseY + 0.72 .. 0.79, 幅: 0.06m)
+        for (const iv of rs.intervals) {
           const topGeom = buildCurvedSolidBoxRibbonGeometry(
             railCenterOff - 0.03,
             railCenterOff + 0.03,
@@ -1945,7 +2425,6 @@ if (curbCamDist < 36.0) {
           topMesh.receiveShadow = true;
           railGroup.add(topMesh);
 
-          // 中段立体ビーム (高さ: baseY + 0.44 .. 0.49, 幅: 0.05m)
           const midGeom = buildCurvedSolidBoxRibbonGeometry(
             railCenterOff - 0.025,
             railCenterOff + 0.025,
@@ -1960,19 +2439,27 @@ if (curbCamDist < 36.0) {
           midMesh.receiveShadow = true;
           railGroup.add(midMesh);
 
-          // アーク長 2.5m 間隔の垂直支柱
+          let postCounter = 0;
           for (let s = iv.start + 1.25; s <= iv.end - 1.25; s += 2.5) {
             const f = getInterpolatedFrame(s);
+            const postX = f.pos.x + f.normal.x * railCenterOff;
+            const postZ = f.pos.z + f.normal.z * railCenterOff;
+            const postYaw = Math.atan2(f.tangent.x, f.tangent.z);
+
             const postMesh = new THREE.Mesh(postGeo, railBeamMat);
-            postMesh.position.set(
-              f.pos.x + f.normal.x * railCenterOff,
-              baseY + 0.39,
-              f.pos.z + f.normal.z * railCenterOff,
-            );
-            postMesh.rotation.y = Math.atan2(f.tangent.x, f.tangent.z);
+            postMesh.position.set(postX, baseY + 0.39, postZ);
+            postMesh.rotation.y = postYaw;
             postMesh.castShadow = true;
             postMesh.receiveShadow = true;
             railGroup.add(postMesh);
+
+            if (postCounter % 2 === 0) {
+              const badgeMesh = new THREE.Mesh(retroBadgeGeo, railRetroMat);
+              badgeMesh.position.set(postX, baseY + 0.62, postZ);
+              badgeMesh.rotation.y = postYaw;
+              railGroup.add(badgeMesh);
+            }
+            postCounter += 1;
           }
         }
         group.add(railGroup);
@@ -1996,7 +2483,116 @@ if (curbCamDist < 36.0) {
       return yellowMat;
     })();
 
-    const lanesPerDir = config.lanesPerDirection;
+    for (const app of validCurvedApproaches) {
+      const fCross = getInterpolatedFrame(app.sCross);
+      if (app.hasCrosswalk) {
+        const zebraGeo = new THREE.PlaneGeometry(0.45, 3.6);
+        zebraGeo.rotateX(-Math.PI / 2);
+        const crossYaw = Math.atan2(fCross.tangent.x, fCross.tangent.z);
+
+        const zebraStartOff = -halfDriveable + 1.0;
+        const zebraEndOff = halfDriveable - 1.0;
+        let stripeIdx = 0;
+        for (let off = zebraStartOff; off <= zebraEndOff; off += 0.9) {
+          const zebraMesh = new THREE.Mesh(zebraGeo, whiteLineMat);
+          zebraMesh.name = `CurvedCrosswalk_${app.name}_${app.ivIdx}_${stripeIdx++}`;
+          zebraMesh.userData.markingType = "CrosswalkStripe";
+          zebraMesh.position.set(
+            fCross.pos.x + fCross.normal.x * off,
+            baseY + 0.024,
+            fCross.pos.z + fCross.normal.z * off,
+          );
+          zebraMesh.rotation.y = crossYaw;
+          zebraMesh.receiveShadow = true;
+          group.add(zebraMesh);
+        }
+      }
+
+      if (app.hasStopLine) {
+        const isStartApproach = app.isStart;
+        const stopOffLeft = isStartApproach ? -halfDriveable + 0.5 : Math.max(0.1, medianW * 0.5);
+        const stopOffRight = isStartApproach ? -Math.max(0.1, medianW * 0.5) : halfDriveable - 0.5;
+
+        const stopGeom = buildArcRibbonGeometry(
+          stopOffLeft,
+          stopOffRight,
+          baseY + 0.024,
+          app.sStop - 0.2,
+          app.sStop + 0.2,
+          1,
+          0.2,
+        );
+        const stopMesh = new THREE.Mesh(stopGeom, whiteLineMat);
+        stopMesh.name = `CurvedStopLine_${app.name}_${app.ivIdx}`;
+        stopMesh.userData.markingType = "StopLine";
+        stopMesh.receiveShadow = true;
+        group.add(stopMesh);
+
+        const canAddArrows = lanesPerDir >= 2 && app.ivLen >= 42.0;
+        if (canAddArrows) {
+          const arrowOffsets = [8.0, 20.0];
+          for (const arrDist of arrowOffsets) {
+            const sArrow = isStartApproach ? app.sStop + arrDist : app.sStop - arrDist;
+            const isArrowInSpan = sArrow >= app.ivStart && sArrow <= app.ivEnd;
+            if (!isArrowInSpan) {
+              continue;
+            }
+            const fArrow = getInterpolatedFrame(sArrow);
+            const isArrowBlocked = isPointInExclusion(fArrow.pos.x, fArrow.pos.z, 2.0);
+            if (isArrowBlocked) {
+              continue;
+            }
+            const arrowYaw = isStartApproach
+              ? Math.atan2(fArrow.tangent.x, fArrow.tangent.z)
+              : Math.atan2(-fArrow.tangent.x, -fArrow.tangent.z);
+
+            for (let lane = 1; lane <= lanesPerDir; lane++) {
+              const laneCenterOffset = isStartApproach
+                ? -(medianW * 0.5 + (lane - 0.5) * config.laneWidth)
+                : +(medianW * 0.5 + (lane - 0.5) * config.laneWidth);
+
+              const arrowType: "straight" | "straight-left" | "right" =
+                lane === 1 ? "right" : lane === lanesPerDir ? "straight-left" : "straight";
+
+              const arrowMesh = this.markings.createLaneArrowMarking(
+                fArrow.pos.x + fArrow.normal.x * laneCenterOffset,
+                fArrow.pos.z + fArrow.normal.z * laneCenterOffset,
+                arrowType,
+                arrowYaw,
+              );
+              arrowMesh.position.y = baseY + 0.024;
+              group.add(arrowMesh);
+            }
+          }
+        }
+
+        const canAddYellowSolid = lanesPerDir >= 2 && app.ivLen >= 40.0;
+        if (canAddYellowSolid) {
+          const sYellowStart = isStartApproach
+            ? app.sStop
+            : Math.max(app.ivStart, app.sStop - 18.0);
+          const sYellowEnd = isStartApproach ? Math.min(app.ivEnd, app.sStop + 18.0) : app.sStop;
+          for (let lane = 1; lane < lanesPerDir; lane++) {
+            const laneDivOff = isStartApproach
+              ? -(medianW * 0.5 + lane * config.laneWidth)
+              : +(medianW * 0.5 + lane * config.laneWidth);
+            const yellowDivGeom = buildArcRibbonGeometry(
+              laneDivOff - 0.075,
+              laneDivOff + 0.075,
+              baseY + 0.024,
+              sYellowStart,
+              sYellowEnd,
+              1,
+              0.2,
+            );
+            const yellowDivMesh = new THREE.Mesh(yellowDivGeom, yellowPaintMat);
+            yellowDivMesh.name = `CurvedMarking_YellowNoLaneChange_${app.name}_${lane}_${app.ivIdx}`;
+            yellowDivMesh.receiveShadow = true;
+            group.add(yellowDivMesh);
+          }
+        }
+      }
+    }
 
     for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
       const iv = activeRoadIntervals[ivIdx];
@@ -2004,143 +2600,6 @@ if (curbCamDist < 36.0) {
       const isLongEnough = ivLen >= 28.0;
       if (!isLongEnough) {
         continue;
-      }
-
-      // 横断歩道 & 停止線アプローチ
-      const rawApproaches = [
-        { name: "Start", sCross: iv.start + 3.5, sStop: iv.start + 6.3, isStart: true },
-        { name: "End", sCross: iv.end - 3.5, sStop: iv.end - 6.3, isStart: false },
-      ];
-      const approaches = rawApproaches.filter((app) => {
-        const shouldSkipStart = app.isStart && ivIdx === 0 && Boolean(config.skipStartCrosswalk);
-        const shouldSkipEnd =
-          !app.isStart &&
-          ivIdx === activeRoadIntervals.length - 1 &&
-          Boolean(config.skipEndCrosswalk);
-        return !shouldSkipStart && !shouldSkipEnd;
-      });
-
-      for (const app of approaches) {
-        const fCross = getInterpolatedFrame(app.sCross);
-        const isCrossBlocked = isPointInExclusion(fCross.pos.x, fCross.pos.z, 2.0);
-
-        if (shouldAddCrosswalks && !isCrossBlocked) {
-          // 横断歩道ゼブラ縞 (進行方向 3.6m × 横断 0.45m、ピッチ 0.9m)
-          const zebraGeo = new THREE.PlaneGeometry(0.45, 3.6);
-          zebraGeo.rotateX(-Math.PI / 2);
-          const crossYaw = Math.atan2(fCross.tangent.x, fCross.tangent.z);
-
-          const zebraStartOff = -halfDriveable + 1.0;
-          const zebraEndOff = halfDriveable - 1.0;
-          let stripeIdx = 0;
-          for (let off = zebraStartOff; off <= zebraEndOff; off += 0.9) {
-            const zebraMesh = new THREE.Mesh(zebraGeo, whiteLineMat);
-            zebraMesh.name = `CurvedCrosswalk_${app.name}_${ivIdx}_${stripeIdx++}`;
-            zebraMesh.userData.markingType = "CrosswalkStripe";
-            zebraMesh.position.set(
-              fCross.pos.x + fCross.normal.x * off,
-              baseY + 0.024,
-              fCross.pos.z + fCross.normal.z * off,
-            );
-            zebraMesh.rotation.y = crossYaw;
-            zebraMesh.receiveShadow = true;
-            group.add(zebraMesh);
-          }
-        }
-
-        // 停止線 (各進入車線半幅に幅 0.40m の白実線。歩行者専用道路等では抑制)
-        const shouldAddStopLines = config.hasStopLines ?? true;
-        const isStartApproach = app.isStart;
-        const fStop = getInterpolatedFrame(app.sStop);
-        const isStopBlocked =
-          !shouldAddStopLines || isPointInExclusion(fStop.pos.x, fStop.pos.z, 2.0);
-
-        if (!isStopBlocked) {
-          const stopOffLeft = isStartApproach ? -halfDriveable + 0.5 : Math.max(0.1, medianW * 0.5);
-          const stopOffRight = isStartApproach
-            ? -Math.max(0.1, medianW * 0.5)
-            : halfDriveable - 0.5;
-
-          const stopGeom = buildArcRibbonGeometry(
-            stopOffLeft,
-            stopOffRight,
-            baseY + 0.024,
-            app.sStop - 0.2,
-            app.sStop + 0.2,
-            1,
-            0.2,
-          );
-          const stopMesh = new THREE.Mesh(stopGeom, whiteLineMat);
-          stopMesh.name = `CurvedStopLine_${app.name}_${ivIdx}`;
-          stopMesh.userData.markingType = "StopLine";
-          stopMesh.receiveShadow = true;
-          group.add(stopMesh);
-
-          // 進行方向矢印 (停止線手前 8m および 20m)
-          const canAddArrows = lanesPerDir >= 2 && ivLen >= 42.0;
-          if (canAddArrows) {
-            const arrowOffsets = [8.0, 20.0];
-            for (const arrDist of arrowOffsets) {
-              const sArrow = isStartApproach ? app.sStop + arrDist : app.sStop - arrDist;
-              const isArrowInSpan = sArrow >= iv.start && sArrow <= iv.end;
-              if (!isArrowInSpan) {
-                continue;
-              }
-              const fArrow = getInterpolatedFrame(sArrow);
-              const isArrowBlocked = isPointInExclusion(fArrow.pos.x, fArrow.pos.z, 2.0);
-              if (isArrowBlocked) {
-                continue;
-              }
-              const arrowYaw = isStartApproach
-                ? Math.atan2(fArrow.tangent.x, fArrow.tangent.z)
-                : Math.atan2(-fArrow.tangent.x, -fArrow.tangent.z);
-
-              for (let lane = 1; lane <= lanesPerDir; lane++) {
-                const laneCenterOffset = isStartApproach
-                  ? -(medianW * 0.5 + (lane - 0.5) * config.laneWidth)
-                  : +(medianW * 0.5 + (lane - 0.5) * config.laneWidth);
-
-                // 日本の左側通行（lane=1: 中央線・分離帯側 = 最右車線, lane=lanesPerDir: 歩道側 = 最左車線）に準拠
-                const arrowType: "straight" | "straight-left" | "right" =
-                  lane === 1 ? "right" : lane === lanesPerDir ? "straight-left" : "straight";
-
-                const arrowMesh = this.markings.createLaneArrowMarking(
-                  fArrow.pos.x + fArrow.normal.x * laneCenterOffset,
-                  fArrow.pos.z + fArrow.normal.z * laneCenterOffset,
-                  arrowType,
-                  arrowYaw,
-                );
-                arrowMesh.position.y = baseY + 0.024;
-                group.add(arrowMesh);
-              }
-            }
-          }
-
-          // 進路変更禁止黄色実線 (交差点手前 18m)
-          const canAddYellowSolid = lanesPerDir >= 2 && ivLen >= 40.0;
-          if (canAddYellowSolid) {
-            const sYellowStart = isStartApproach ? app.sStop : Math.max(iv.start, app.sStop - 18.0);
-            const sYellowEnd = isStartApproach ? Math.min(iv.end, app.sStop + 18.0) : app.sStop;
-            for (let lane = 1; lane < lanesPerDir; lane++) {
-              const laneDivOff = isStartApproach
-                ? -(medianW * 0.5 + lane * config.laneWidth)
-                : +(medianW * 0.5 + lane * config.laneWidth);
-              const yellowDivGeom = buildArcRibbonGeometry(
-                laneDivOff - 0.075,
-                laneDivOff + 0.075,
-                baseY + 0.024,
-                sYellowStart,
-                sYellowEnd,
-                1,
-                0.2,
-              );
-              const yellowDivMesh = new THREE.Mesh(yellowDivGeom, yellowPaintMat);
-              yellowDivMesh.name = `CurvedMarking_YellowNoLaneChange_${app.name}_${lane}_${ivIdx}`;
-              yellowDivMesh.receiveShadow = true;
-              group.add(yellowDivMesh);
-            }
-          }
-        }
       }
 
       // 制限速度ペイント (区間中央付近)
@@ -2204,7 +2663,6 @@ if (curbCamDist < 36.0) {
         ];
         for (const la of lightApps) {
           const fLight = getInterpolatedFrame(la.s);
-          // 外側歩道上 (halfDriveable + 1.25): テスト制約 absOffset >= roadHalfW + 0.35 を完全遵守
           const lightOff = la.sideSign * (halfDriveable + 1.25);
           const lightPosX = fLight.pos.x + fLight.normal.x * lightOff;
           const lightPosZ = fLight.pos.z + fLight.normal.z * lightOff;
@@ -2229,16 +2687,7 @@ if (curbCamDist < 36.0) {
       }
     }
 
-    // Why outer-shoulder 12m ゼブラ標示板を撤去したか:
-    // 都市部ガードレール本体（Guardrail_Delineators）がすでに視線誘導機能を果たしており、
-    // 路肩外縁へ 12m 間隔で高さ 1.22m のゼブラ板を立てると歩道縁付近で宙浮き看板群に見えてしまうため。
-
-    // 6. 物理エンジンのフラット路面コライダー＆交差点開口同期済み立体コライダー（歩道・縁石・ガードレール・中央分離帯）
-    // Why 路面コードと立体障害物コードを分離するか:
-    // 1. 平坦路面コライダーは交差点・合流点を含め全線 0..totalSplineLength を隙間なくカバーする必要がある。
-    // 2. 一方、中央分離帯・歩道縁石・ガードレールの立体コライダーを長大コードや全線ループで作ると、
-    //    急カーブで車道内にはみ出したり、交差点開口部（trim / medianExclusionZones）を貫通して「見えない壁」を生むため、
-    //    視覚メッシュと完全に同じ activeRoadIntervals / medianIntervals に沿って 8m 刻みで精密生成する。
+    // 7. 物理エンジンのフラット路面コライダー＆片側歩道・ガードレール開口同期済み立体コライダー
     const createFixedChordBody = (p0: THREE.Vector3, p1: THREE.Vector3) => {
       const segDx = p1.x - p0.x;
       const segDz = p1.z - p0.z;
@@ -2295,46 +2744,54 @@ if (curbCamDist < 36.0) {
       }
     };
 
-    const hasIntervalObstacles = hasSidewalks || Boolean(config.hasGuardrails);
-    if (hasIntervalObstacles) {
-      addObstacleIntervalChords(activeRoadIntervals, (body, segLen) => {
-        if (hasSidewalks) {
-          const swWidth = config.sidewalkWidth + 0.22;
-          for (const sideSign of [-1, 1]) {
-            const swCenterX = sideSign * (halfDriveable + swWidth / 2);
-            const swColDesc = rapier.ColliderDesc.cuboid(
-              swWidth / 2,
-              config.curbHeight / 2,
-              segLen / 2,
-            )
-              .setTranslation(swCenterX, config.curbHeight / 2, 0)
-              .setFriction(0.8);
-            const swCol = physicsWorld.createCollider(swColDesc, body);
-            segmentColliders.push(swCol);
-            obstacleColliderHandles.push(swCol.handle);
-          }
-        }
-
-        if (config.hasGuardrails) {
-          const railHeight = 0.85;
-          const railThickness = 0.28;
-          const railCenterY = config.curbHeight + railHeight / 2;
-          for (const sideSign of [-1, 1]) {
-            const railX = sideSign * (halfDriveable + 0.32);
-            const railColDesc = rapier.ColliderDesc.cuboid(
-              railThickness / 2,
-              railHeight / 2,
-              segLen / 2,
-            )
-              .setTranslation(railX, railCenterY, 0)
-              .setFriction(0.4)
-              .setRestitution(0.25);
-            const railCol = physicsWorld.createCollider(railColDesc, body);
-            segmentColliders.push(railCol);
-            obstacleColliderHandles.push(railCol.handle);
-          }
-        }
+    // 左右それぞれの歩道区間と視覚幅に 1:1 一致する歩道物理コライダー
+    for (const sc of [
+      { sideSign: -1 as const, intervals: rightSidewalkIntervals },
+      { sideSign: 1 as const, intervals: leftSidewalkIntervals },
+    ]) {
+      const sideSpec = getSideCrossSection(cross, sc.sideSign);
+      if (sideSpec.totalWidth <= 0.05 || sc.intervals.length === 0) {
+        continue;
+      }
+      const swCenterX = sc.sideSign * (halfDriveable + sideSpec.totalWidth * 0.5);
+      addObstacleIntervalChords(sc.intervals, (body, segLen) => {
+        const swColDesc = rapier.ColliderDesc.cuboid(
+          sideSpec.totalWidth * 0.5,
+          cross.curbHeight * 0.5,
+          segLen * 0.5,
+        )
+          .setTranslation(swCenterX, cross.curbHeight * 0.5, 0)
+          .setFriction(0.8);
+        const swCol = physicsWorld.createCollider(swColDesc, body);
+        segmentColliders.push(swCol);
+        obstacleColliderHandles.push(swCol.handle);
       });
+    }
+
+    // 横断歩道開口部と 100% 同期したガードレール物理コライダー
+    if (hasGuardrails) {
+      const railHeight = 0.85;
+      const railThickness = 0.24;
+      const railCenterY = cross.curbHeight + railHeight * 0.5;
+      for (const rs of [
+        { sideSign: -1 as const, intervals: rightGuardrailIntervals },
+        { sideSign: 1 as const, intervals: leftGuardrailIntervals },
+      ]) {
+        const railX = rs.sideSign * (halfDriveable + 0.36);
+        addObstacleIntervalChords(rs.intervals, (body, segLen) => {
+          const railColDesc = rapier.ColliderDesc.cuboid(
+            railThickness * 0.5,
+            railHeight * 0.5,
+            segLen * 0.5,
+          )
+            .setTranslation(railX, railCenterY, 0)
+            .setFriction(0.4)
+            .setRestitution(0.25);
+          const railCol = physicsWorld.createCollider(railColDesc, body);
+          segmentColliders.push(railCol);
+          obstacleColliderHandles.push(railCol.handle);
+        });
+      }
     }
 
     if (hasRaisedMedian) {
