@@ -73,11 +73,56 @@ export class JapaneseRoadBuilder {
     return this.markings.createIntersectionMarkings(widthX, depthZ, options);
   }
 
+  private drapeObjectOverElevation(
+    root: THREE.Object3D,
+    originX: number,
+    originZ: number,
+    sampleY: (x: number, z: number) => number,
+    refGroundY: number,
+  ): void {
+    root.updateMatrixWorld(true);
+    const vWorld = new THREE.Vector3();
+    const invMat = new THREE.Matrix4();
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      const isMeshWithGeom = Boolean(mesh.isMesh && mesh.geometry);
+      if (!isMeshWithGeom) {
+        return;
+      }
+      mesh.geometry = mesh.geometry.clone();
+      const posAttr = mesh.geometry.getAttribute("position");
+      if (!posAttr) {
+        return;
+      }
+      mesh.updateMatrixWorld(true);
+      invMat.copy(mesh.matrixWorld).invert();
+      for (let i = 0; i < posAttr.count; i++) {
+        vWorld.fromBufferAttribute(posAttr, i).applyMatrix4(mesh.matrixWorld);
+        const targetGroundY = sampleY(originX + vWorld.x, originZ + vWorld.z);
+        vWorld.y += targetGroundY - refGroundY;
+        vWorld.applyMatrix4(invMat);
+        posAttr.setXYZ(i, vWorld.x, vWorld.y, vWorld.z);
+      }
+      posAttr.needsUpdate = true;
+      mesh.geometry.computeVertexNormals();
+    });
+  }
+
   /**
    * 渋谷スクランブル交差点の対角線X字型スクランブル横断歩道（斜め横断歩道）を構築する
    */
-  public buildScrambleDiagonalCrosswalks(padSize = 44): THREE.Group {
-    return this.markings.createScrambleDiagonalCrosswalks(padSize);
+  public buildScrambleDiagonalCrosswalks(
+    padSize = 44,
+    elevationSampler?: (x: number, z: number) => number,
+    centerX = 0,
+    centerZ = 0,
+    baseGroundY = 0,
+  ): THREE.Group {
+    const group = this.markings.createScrambleDiagonalCrosswalks(padSize);
+    if (elevationSampler) {
+      this.drapeObjectOverElevation(group, centerX, centerZ, elevationSampler, baseGroundY);
+    }
+    return group;
   }
 
   public getMarkings(): RoadMarkings {
@@ -86,7 +131,7 @@ export class JapaneseRoadBuilder {
 
   private createLGutterMaterial(): THREE.MeshStandardMaterial {
     const gutterMat = new THREE.MeshStandardMaterial({
-      color: 0xb4beca,
+      color: 0xb2b0a8,
       roughness: 0.78,
       metalness: 0.06,
       polygonOffset: true,
@@ -98,7 +143,7 @@ export class JapaneseRoadBuilder {
   }
 
   /**
-   * 統一交差点（フラットアスファルト＋路面標示＋四隅隅切り R カーブ歩道・面取り縁石・L型側溝・点字ブロック＋安全物理コライダー）を構築する
+   * 統一交差点（アスファルト路面＋路面標示＋四隅隅切り R カーブ歩道・面取り縁石・L型側溝・点字ブロック＋安全物理コライダー）を構築する
    */
   public buildIntersection(
     config: JapaneseIntersectionConfig,
@@ -113,14 +158,27 @@ export class JapaneseRoadBuilder {
     obstacleColliderHandles: number[];
   } {
     const baseY = config.baseY ?? 0.0115;
+    const sampleY = config.elevationSampler;
+    const centerTerrainY = sampleY ? sampleY(config.x, config.z) : 0;
     const interGroup = new THREE.Group();
     interGroup.name = config.name ?? `Intersection_${config.x}_${config.z}`;
     interGroup.userData.isRoadInfrastructure = true;
-    interGroup.position.set(config.x, baseY, config.z);
+    interGroup.position.set(config.x, centerTerrainY + baseY, config.z);
 
     const padMat = sharedPadMaterial ?? this.intersectionAsphaltMaterial;
     const padGeo = new THREE.PlaneGeometry(config.widthX, config.depthZ, 8, 8);
     padGeo.rotateX(-Math.PI / 2);
+    if (sampleY) {
+      const posAttr = padGeo.getAttribute("position");
+      for (let i = 0; i < posAttr.count; i++) {
+        const vx = posAttr.getX(i);
+        const vz = posAttr.getZ(i);
+        const deltaY = sampleY(config.x + vx, config.z + vz) - centerTerrainY;
+        posAttr.setY(i, posAttr.getY(i) + deltaY);
+      }
+      posAttr.needsUpdate = true;
+      padGeo.computeVertexNormals();
+    }
     const padMesh = new THREE.Mesh(padGeo, padMat);
     padMesh.userData.isRoadInfrastructure = true;
     padMesh.receiveShadow = true;
@@ -147,6 +205,9 @@ export class JapaneseRoadBuilder {
       crosswalkE: resolvedCrosswalkE,
       crosswalkW: resolvedCrosswalkW,
     });
+    if (sampleY) {
+      this.drapeObjectOverElevation(interMarkings, config.x, config.z, sampleY, centerTerrainY);
+    }
     interMarkings.userData.isRoadInfrastructure = true;
     interGroup.add(interMarkings);
 
@@ -157,18 +218,20 @@ export class JapaneseRoadBuilder {
     const groundBodyY =
       typeof groundBody?.translation === "function" ? groundBody.translation().y : -0.5;
 
-    // 交差点フラット路面コライダー（車道セグメント上面 y = 0.012 と段差なく接続）
-    const padColDesc = rapier.ColliderDesc.cuboid(config.widthX / 2, 0.25, config.depthZ / 2)
-      .setTranslation(config.x, 0.012 - 0.25 - groundBodyY, config.z)
-      .setFriction(0.85)
-      .setRestitution(0.02);
-    colliders.push(physicsWorld.createCollider(padColDesc, groundBody));
+    // 交差点フラット路面コライダー（連続Terrain Trimesh側で担う場合は抑止）
+    if (!config.skipRoadCollider) {
+      const padColDesc = rapier.ColliderDesc.cuboid(config.widthX / 2, 0.25, config.depthZ / 2)
+        .setTranslation(config.x, centerTerrainY + 0.012 - 0.25 - groundBodyY, config.z)
+        .setFriction(0.85)
+        .setRestitution(0.02);
+      colliders.push(physicsWorld.createCollider(padColDesc, groundBody));
+    }
 
     const shouldBuildCorners = (config.hasCornerSidewalks ?? true) && Boolean(config.arms);
     if (shouldBuildCorners) {
       const curbHeight = config.curbHeight ?? 0.15;
       const sidewalkMat = new PuddleMaterial({
-        baseColor: 0x94a3b8,
+        baseColor: 0xa8a6a0,
         baseRoughness: 0.76,
         baseMetalness: 0.08,
         puddleThreshold: 0.46,
@@ -178,13 +241,16 @@ export class JapaneseRoadBuilder {
       puddleMaterials.push(sidewalkMat);
 
       const curbMat = new THREE.MeshStandardMaterial({
-        color: 0x94a3b8,
+        color: 0x989690,
         roughness: 0.8,
         metalness: 0.1,
       });
       this.applyCurb3DTexture(curbMat);
       const gutterMat = this.createLGutterMaterial();
 
+      const localDeltaSampler = sampleY
+        ? (lx: number, lz: number) => sampleY(config.x + lx, config.z + lz) - centerTerrainY
+        : undefined;
       const corners = buildIntersectionCornerSidewalks(
         config,
         {
@@ -194,14 +260,16 @@ export class JapaneseRoadBuilder {
           brailleMaterial: this.markings.getBrailleTileMaterial(),
         },
         0,
+        localDeltaSampler,
       );
       interGroup.add(corners.group);
 
       for (const cc of corners.cornerColliders) {
+        const colGroundY = sampleY ? sampleY(config.x + cc.cx, config.z + cc.cz) : 0;
         const swColDesc = rapier.ColliderDesc.cuboid(cc.halfX, curbHeight * 0.5, cc.halfZ)
           .setTranslation(
             config.x + cc.cx,
-            baseY + curbHeight * 0.5 - groundBodyY,
+            colGroundY + baseY + curbHeight * 0.5 - groundBodyY,
             config.z + cc.cz,
           )
           .setFriction(0.8);
@@ -346,7 +414,7 @@ export class JapaneseRoadBuilder {
     rampZones: ReadonlyArray<CrosswalkRampZone>,
   ): void {
     const curbMat = new THREE.MeshStandardMaterial({
-      color: 0x94a3b8,
+      color: 0x989690,
       roughness: 0.8,
       metalness: 0.1,
     });
@@ -494,7 +562,7 @@ if (curbCamDist < 36.0) {
     segmentColliders: RAPIER.Collider[],
   ): void {
     const sidewalkMat = new PuddleMaterial({
-      baseColor: 0x94a3b8,
+      baseColor: 0xa8a6a0,
       baseRoughness: 0.76,
       baseMetalness: 0.08,
       puddleThreshold: 0.46,
@@ -572,14 +640,14 @@ if (curbCamDist < 36.0) {
     const curbBorder = Math.min(0.18, halfMed * 0.35);
 
     const curbMat = new THREE.MeshStandardMaterial({
-      color: 0x94a3b8,
+      color: 0x989690,
       roughness: 0.8,
       metalness: 0.1,
     });
     this.applyCurb3DTexture(curbMat);
 
     const medianTopMat = new THREE.MeshStandardMaterial({
-      color: 0xb8c2cf,
+      color: 0xa4a29c,
       roughness: 0.72,
       metalness: 0.06,
     });
@@ -1430,6 +1498,9 @@ if (curbCamDist < 36.0) {
     const medianW = cross.medianWidth;
     const driveableWidth = cross.driveableWidth;
     const halfDriveable = cross.halfDriveable;
+    const sampleY = config.elevationSampler;
+    const evalY = (x: number, z: number, offsetY: number): number =>
+      (sampleY ? sampleY(x, z) : 0) + offsetY;
 
     // 1. Catmull-Rom スプラインで道路中心線を滑らかに補間サンプリング
     const curveControlPoints = points.map((p) => new THREE.Vector3(p.x, 0, p.z));
@@ -1466,57 +1537,54 @@ if (curbCamDist < 36.0) {
       );
       const activeFrames = trimmedFrames.length >= 2 ? trimmedFrames : frames;
       const n = activeFrames.length;
-      const positions = new Float32Array(n * 2 * 3);
-      const normals = new Float32Array(n * 2 * 3);
-      const uvs = new Float32Array(n * 2 * 2);
+      const transverseSteps = sampleY && Math.abs(offsetRight - offsetLeft) > 2.5 ? 4 : 1;
+      const cols = transverseSteps + 1;
+      const positions = new Float32Array(n * cols * 3);
+      const normals = new Float32Array(n * cols * 3);
+      const uvs = new Float32Array(n * cols * 2);
       const indices: number[] = [];
 
       for (let i = 0; i < n; i++) {
         const f = activeFrames[i];
-        const leftX = f.pos.x + f.normal.x * offsetLeft;
-        const leftZ = f.pos.z + f.normal.z * offsetLeft;
-        const rightX = f.pos.x + f.normal.x * offsetRight;
-        const rightZ = f.pos.z + f.normal.z * offsetRight;
-
-        const vIdx = i * 6;
-        positions[vIdx] = leftX;
-        positions[vIdx + 1] = yHeight;
-        positions[vIdx + 2] = leftZ;
-        positions[vIdx + 3] = rightX;
-        positions[vIdx + 4] = yHeight;
-        positions[vIdx + 5] = rightZ;
-
-        normals[vIdx] = 0;
-        normals[vIdx + 1] = 1;
-        normals[vIdx + 2] = 0;
-        normals[vIdx + 3] = 0;
-        normals[vIdx + 4] = 1;
-        normals[vIdx + 5] = 0;
-
-        const uvIdx = i * 4;
         const vCoord = f.arcLen * 0.2;
-        const isMetric = encodeMetricUv;
-        if (isMetric) {
-          // 道路中心からの横オフセット(m) + 50.0 を格納し、シェーダーで正確な roadLatX = uv.x - 50.0 を復元
-          uvs[uvIdx] = 50.0 + offsetLeft;
-          uvs[uvIdx + 1] = vCoord;
-          uvs[uvIdx + 2] = 50.0 + offsetRight;
-          uvs[uvIdx + 3] = vCoord;
-        } else {
-          uvs[uvIdx] = 0;
-          uvs[uvIdx + 1] = f.arcLen * vRepeatPerMeter;
-          uvs[uvIdx + 2] = uScale;
-          uvs[uvIdx + 3] = f.arcLen * vRepeatPerMeter;
+        const vArcCoord = f.arcLen * vRepeatPerMeter;
+
+        for (let j = 0; j <= transverseSteps; j++) {
+          const uFrac = j / transverseSteps;
+          const latOff = offsetLeft + (offsetRight - offsetLeft) * uFrac;
+          const vx = f.pos.x + f.normal.x * latOff;
+          const vz = f.pos.z + f.normal.z * latOff;
+          const vy = evalY(vx, vz, yHeight);
+
+          const vIdx = (i * cols + j) * 3;
+          positions[vIdx] = vx;
+          positions[vIdx + 1] = vy;
+          positions[vIdx + 2] = vz;
+
+          normals[vIdx] = 0;
+          normals[vIdx + 1] = 1;
+          normals[vIdx + 2] = 0;
+
+          const uvIdx = (i * cols + j) * 2;
+          if (encodeMetricUv) {
+            uvs[uvIdx] = 50.0 + latOff;
+            uvs[uvIdx + 1] = vCoord;
+          } else {
+            uvs[uvIdx] = uFrac * uScale;
+            uvs[uvIdx + 1] = vArcCoord;
+          }
         }
 
         const hasNextRow = i < n - 1;
         if (hasNextRow) {
-          const a = i * 2;
-          const b = i * 2 + 1;
-          const c = (i + 1) * 2;
-          const d = (i + 1) * 2 + 1;
-          // 反時計回り（CCW: 上向き法線）
-          indices.push(a, c, b, b, c, d);
+          for (let j = 0; j < transverseSteps; j++) {
+            const a = i * cols + j;
+            const b = a + 1;
+            const c = (i + 1) * cols + j;
+            const d = c + 1;
+            // 反時計回り（CCW: 上向き法線）
+            indices.push(a, c, b, b, c, d);
+          }
         }
       }
 
@@ -1525,6 +1593,9 @@ if (curbCamDist < 36.0) {
       geom.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
       geom.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
       geom.setIndex(indices);
+      if (sampleY) {
+        geom.computeVertexNormals();
+      }
       geom.computeBoundingSphere();
       return geom;
     };
@@ -1642,7 +1713,7 @@ if (curbCamDist < 36.0) {
           const rx = frame.pos.x + frame.normal.x * offsetRight;
           const rz = frame.pos.z + frame.normal.z * offsetRight;
 
-          positions.push(lx, yHeight, lz, rx, yHeight, rz);
+          positions.push(lx, evalY(lx, lz, yHeight), lz, rx, evalY(rx, rz, yHeight), rz);
           normals.push(0, 1, 0, 0, 1, 0);
           uvs.push(0, tSeg, 1, tSeg);
           vertCount += 6;
@@ -1662,6 +1733,9 @@ if (curbCamDist < 36.0) {
       geom.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
       geom.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
       geom.setIndex(indices);
+      if (sampleY) {
+        geom.computeVertexNormals();
+      }
       geom.computeBoundingSphere();
       return geom;
     };
@@ -1683,9 +1757,9 @@ if (curbCamDist < 36.0) {
     });
     this.markings.applyRoadMarking3DTexture(whiteLineMat, "white-paint");
 
-    // 中央分離帯・縁石・歩道共通コンクリートマテリアル
+    // 中央分離帯・縁石・歩道共通コンクリートマテリアル（ニュートラルコンクリートグレー）
     const curbMat = new THREE.MeshStandardMaterial({
-      color: 0x94a3b8,
+      color: 0x989690,
       roughness: 0.72,
       metalness: 0.08,
     });
@@ -1702,47 +1776,47 @@ if (curbCamDist < 36.0) {
     ): THREE.BufferGeometry => {
       const spanArc = arcEnd - arcStart;
       const steps = Math.max(2, Math.min(280, Math.ceil(spanArc / 4.0)));
-      const positions = new Float32Array((steps + 1) * 2 * 3);
-      const normals = new Float32Array((steps + 1) * 2 * 3);
-      const uvs = new Float32Array((steps + 1) * 2 * 2);
+      const transverseSteps = sampleY && Math.abs(offsetRight - offsetLeft) > 2.5 ? 4 : 1;
+      const cols = transverseSteps + 1;
+      const positions = new Float32Array((steps + 1) * cols * 3);
+      const normals = new Float32Array((steps + 1) * cols * 3);
+      const uvs = new Float32Array((steps + 1) * cols * 2);
       const indices: number[] = [];
 
       for (let i = 0; i <= steps; i++) {
         const arc = arcStart + (spanArc * i) / steps;
         const f = getInterpolatedFrame(arc);
-        const lx = f.pos.x + f.normal.x * offsetLeft;
-        const lz = f.pos.z + f.normal.z * offsetLeft;
-        const rx = f.pos.x + f.normal.x * offsetRight;
-        const rz = f.pos.z + f.normal.z * offsetRight;
-
-        const vIdx = i * 6;
-        positions[vIdx] = lx;
-        positions[vIdx + 1] = yHeight;
-        positions[vIdx + 2] = lz;
-        positions[vIdx + 3] = rx;
-        positions[vIdx + 4] = yHeight;
-        positions[vIdx + 5] = rz;
-
-        normals[vIdx] = 0;
-        normals[vIdx + 1] = 1;
-        normals[vIdx + 2] = 0;
-        normals[vIdx + 3] = 0;
-        normals[vIdx + 4] = 1;
-        normals[vIdx + 5] = 0;
-
-        const uvIdx = i * 4;
         const vCoord = arc * vRepeatPerMeter;
-        uvs[uvIdx] = 0;
-        uvs[uvIdx + 1] = vCoord;
-        uvs[uvIdx + 2] = uScale;
-        uvs[uvIdx + 3] = vCoord;
+
+        for (let j = 0; j <= transverseSteps; j++) {
+          const uFrac = j / transverseSteps;
+          const latOff = offsetLeft + (offsetRight - offsetLeft) * uFrac;
+          const vx = f.pos.x + f.normal.x * latOff;
+          const vz = f.pos.z + f.normal.z * latOff;
+          const vy = evalY(vx, vz, yHeight);
+
+          const vIdx = (i * cols + j) * 3;
+          positions[vIdx] = vx;
+          positions[vIdx + 1] = vy;
+          positions[vIdx + 2] = vz;
+
+          normals[vIdx] = 0;
+          normals[vIdx + 1] = 1;
+          normals[vIdx + 2] = 0;
+
+          const uvIdx = (i * cols + j) * 2;
+          uvs[uvIdx] = uFrac * uScale;
+          uvs[uvIdx + 1] = vCoord;
+        }
 
         if (i < steps) {
-          const a = i * 2;
-          const b = i * 2 + 1;
-          const c = (i + 1) * 2;
-          const d = (i + 1) * 2 + 1;
-          indices.push(a, c, b, b, c, d);
+          for (let j = 0; j < transverseSteps; j++) {
+            const a = i * cols + j;
+            const b = a + 1;
+            const c = (i + 1) * cols + j;
+            const d = c + 1;
+            indices.push(a, c, b, b, c, d);
+          }
         }
       }
 
@@ -1751,6 +1825,9 @@ if (curbCamDist < 36.0) {
       geom.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
       geom.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
       geom.setIndex(indices);
+      if (sampleY) {
+        geom.computeVertexNormals();
+      }
       geom.computeBoundingSphere();
       return geom;
     };
@@ -1789,11 +1866,11 @@ if (curbCamDist < 36.0) {
         sectionFrames.push(getInterpolatedFrame(arcStart + (spanArc * i) / steps));
       }
 
-      const corner = (f: RoadFrame, off: number, y: number): [number, number, number] => [
-        f.pos.x + f.normal.x * off,
-        y,
-        f.pos.z + f.normal.z * off,
-      ];
+      const corner = (f: RoadFrame, off: number, y: number): [number, number, number] => {
+        const px = f.pos.x + f.normal.x * off;
+        const pz = f.pos.z + f.normal.z * off;
+        return [px, evalY(px, pz, y), pz];
+      };
 
       for (let i = 0; i < steps; i++) {
         const f0 = sectionFrames[i];
@@ -1925,7 +2002,7 @@ if (curbCamDist < 36.0) {
       const curbBorder = Math.min(0.18, halfMed * 0.35);
       // Why brighter concrete grey (0xb8c2cf): 0x475569 blended into asphalt and made raised medians look like dark voids.
       const medianTopMat = new THREE.MeshStandardMaterial({
-        color: 0xb8c2cf,
+        color: 0xa4a29c,
         roughness: 0.72,
         metalness: 0.06,
       });
@@ -1986,18 +2063,19 @@ if (curbCamDist < 36.0) {
         for (let postArc = iv.start + 2.0; postArc <= iv.end - 2.0; postArc += 28.0) {
           const postFrame = getInterpolatedFrame(postArc);
           const delin = this.props.signs.createMedianGuidePost(postFrame.pos.x, postFrame.pos.z);
-          delin.position.y = baseY + medianHeight;
+          delin.position.y = evalY(postFrame.pos.x, postFrame.pos.z, baseY + medianHeight);
           delin.rotation.y = Math.atan2(postFrame.tangent.x, postFrame.tangent.z);
           delin.userData.lodDetailTier = "medium";
           group.add(delin);
         }
       }
     } else {
-      // 中央線（立体分離帯なしの道路: 片側2車線以上は白実線、片側1車線かつ追越し禁止は黄色実線、片側1車線一般道は白破線）
+      // 中央線（立体分離帯なしの道路: hasDoubleYellowCenterLine 指定時は片側2車線以上でも橙黄色二本線、それ以外は片側2車線以上=白実線・1車線追越禁止=黄実線・1車線一般道=白破線）
       const hasCenterLine = config.hasCenterLine ?? true;
+      const isDoubleYellow = Boolean(config.hasDoubleYellowCenterLine);
       const isMultiLaneCurved = config.lanesPerDirection >= 2;
       const isSingleLaneYellow = !isMultiLaneCurved && Boolean(config.hasYellowCenterLine);
-      const isSingleLaneDashed = !isMultiLaneCurved && !isSingleLaneYellow;
+      const isSingleLaneDashed = !isDoubleYellow && !isMultiLaneCurved && !isSingleLaneYellow;
       if (hasCenterLine && isSingleLaneDashed) {
         for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
           const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
@@ -2017,44 +2095,69 @@ if (curbCamDist < 36.0) {
           group.add(centerDashMesh);
         }
       }
-      const shouldDrawCenterLine = hasCenterLine && (isMultiLaneCurved || isSingleLaneYellow);
-      if (shouldDrawCenterLine) {
-        const centerMat = isMultiLaneCurved
-          ? whiteLineMat
-          : (() => {
-              const yellowMat = new THREE.MeshStandardMaterial({
-                color: 0xf59e0b,
-                emissive: 0xf59e0b,
-                emissiveIntensity: 0.45,
-                roughness: 0.45,
-                metalness: 0.05,
-                side: THREE.DoubleSide,
-                polygonOffset: true,
-                polygonOffsetFactor: -3,
-                polygonOffsetUnits: -3,
-              });
-              this.markings.applyRoadMarking3DTexture(yellowMat, "yellow-paint");
-              return yellowMat;
-            })();
-
+      const createYellowCenterMat = (): THREE.MeshStandardMaterial => {
+        const yellowMat = new THREE.MeshStandardMaterial({
+          color: 0xf59e0b,
+          emissive: 0xf59e0b,
+          emissiveIntensity: 0.45,
+          roughness: 0.45,
+          metalness: 0.05,
+          side: THREE.DoubleSide,
+          polygonOffset: true,
+          polygonOffsetFactor: -3,
+          polygonOffsetUnits: -3,
+        });
+        this.markings.applyRoadMarking3DTexture(yellowMat, "yellow-paint");
+        return yellowMat;
+      };
+      if (hasCenterLine && isDoubleYellow) {
+        const yellowMat = createYellowCenterMat();
         for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
           const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
-          const centerGeom = buildArcRibbonGeometry(
-            -0.09,
-            0.09,
-            baseY + 0.02,
-            iv.start,
-            iv.end,
-            1,
-            0.2,
-          );
-          const centerLineMesh = new THREE.Mesh(centerGeom, centerMat);
-          centerLineMesh.name = isMultiLaneCurved
-            ? `CurvedMarking_WhiteCenter_${ivIdx}`
-            : `CurvedMarking_YellowCenter_${ivIdx}`;
-          centerLineMesh.userData.paintColor = isMultiLaneCurved ? "white" : "yellow";
-          centerLineMesh.receiveShadow = true;
-          group.add(centerLineMesh);
+          for (const [tag, offL, offR] of [
+            ["L", -0.22, -0.07],
+            ["R", 0.07, 0.22],
+          ] as const) {
+            const yellowGeom = buildArcRibbonGeometry(
+              offL,
+              offR,
+              baseY + 0.02,
+              iv.start,
+              iv.end,
+              1,
+              0.2,
+            );
+            const yellowMesh = new THREE.Mesh(yellowGeom, yellowMat);
+            yellowMesh.name = `CurvedMarking_DoubleYellowCenter_${tag}_${ivIdx}`;
+            yellowMesh.userData.paintColor = "yellow";
+            yellowMesh.receiveShadow = true;
+            group.add(yellowMesh);
+          }
+        }
+      } else {
+        const shouldDrawCenterLine = hasCenterLine && (isMultiLaneCurved || isSingleLaneYellow);
+        if (shouldDrawCenterLine) {
+          const centerMat = isMultiLaneCurved ? whiteLineMat : createYellowCenterMat();
+
+          for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
+            const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
+            const centerGeom = buildArcRibbonGeometry(
+              -0.09,
+              0.09,
+              baseY + 0.02,
+              iv.start,
+              iv.end,
+              1,
+              0.2,
+            );
+            const centerLineMesh = new THREE.Mesh(centerGeom, centerMat);
+            centerLineMesh.name = isMultiLaneCurved
+              ? `CurvedMarking_WhiteCenter_${ivIdx}`
+              : `CurvedMarking_YellowCenter_${ivIdx}`;
+            centerLineMesh.userData.paintColor = isMultiLaneCurved ? "white" : "yellow";
+            centerLineMesh.receiveShadow = true;
+            group.add(centerLineMesh);
+          }
         }
       }
     }
@@ -2238,7 +2341,7 @@ if (curbCamDist < 36.0) {
 
     if (hasSidewalks) {
       const sidewalkMat = new PuddleMaterial({
-        baseColor: 0x94a3b8,
+        baseColor: 0xa8a6a0,
         baseRoughness: 0.76,
         baseMetalness: 0.08,
         puddleThreshold: 0.46,
@@ -2271,7 +2374,13 @@ if (curbCamDist < 36.0) {
           }
 
           // L型側溝コンクリート帯
-          const gutterGeom = buildLGutterRibbonGeometry(ivFrames, sc.sideSign, cross, baseY);
+          const gutterGeom = buildLGutterRibbonGeometry(
+            ivFrames,
+            sc.sideSign,
+            cross,
+            baseY,
+            sampleY,
+          );
           const gutterMesh = new THREE.Mesh(gutterGeom, gutterMat);
           gutterMesh.name = `CurvedLGutter_${sideTag}_${ivIdx}`;
           gutterMesh.receiveShadow = true;
@@ -2284,6 +2393,7 @@ if (curbCamDist < 36.0) {
             cross,
             baseY,
             rampZones,
+            sampleY,
           );
           const curbMesh = new THREE.Mesh(curbGeom, curbMat);
           curbMesh.name = `CurvedCurb_${sideTag}_${ivIdx}`;
@@ -2299,6 +2409,7 @@ if (curbCamDist < 36.0) {
             cross,
             baseY,
             rampZones,
+            sampleY,
           );
           const walkMesh = new THREE.Mesh(walkGeom, sidewalkMat);
           walkMesh.name = `CurvedSidewalk_${sideTag}_${ivIdx}`;
@@ -2313,7 +2424,8 @@ if (curbCamDist < 36.0) {
             sideSpec.walkSurfaceWidth > 0.01
               ? Math.min(1, (tactileMargin + 0.3) / sideSpec.walkSurfaceWidth)
               : 0;
-          const tactileY = baseY + 0.02 + (sideSpec.backEdgeHeight - 0.02) * outerRampRatio + 0.005;
+          const tactileYOffset =
+            baseY + 0.02 + (sideSpec.backEdgeHeight - 0.02) * outerRampRatio + 0.006;
 
           for (let cwIdx = 0; cwIdx < curvedCrosswalkArcs.length; cwIdx++) {
             const cwArc = curvedCrosswalkArcs[cwIdx];
@@ -2322,18 +2434,20 @@ if (curbCamDist < 36.0) {
               continue;
             }
             const fCw = getInterpolatedFrame(cwArc);
-            const tileGeo = new THREE.PlaneGeometry(0.6, 2.4);
+            const tileX = fCw.pos.x + fCw.normal.x * tactileOff;
+            const tileZ = fCw.pos.z + fCw.normal.z * tactileOff;
+            const tileGeo = new THREE.PlaneGeometry(0.6, 2.4, 1, 2);
             tileGeo.rotateX(-Math.PI / 2);
             const tileMesh = new THREE.Mesh(tileGeo, brailleMat);
             tileMesh.name = `CurvedTactileWarning_${sideTag}_${ivIdx}_${cwIdx}`;
             tileMesh.userData.markingType = "TactilePaving";
             tileMesh.userData.lodDetailTier = "high";
-            tileMesh.position.set(
-              fCw.pos.x + fCw.normal.x * tactileOff,
-              tactileY,
-              fCw.pos.z + fCw.normal.z * tactileOff,
-            );
+            const tileGroundY = sampleY ? sampleY(tileX, tileZ) : 0;
+            tileMesh.position.set(tileX, tileGroundY + tactileYOffset, tileZ);
             tileMesh.rotation.y = Math.atan2(fCw.tangent.x, fCw.tangent.z);
+            if (sampleY) {
+              this.drapeObjectOverElevation(tileMesh, 0, 0, sampleY, tileGroundY);
+            }
             group.add(tileMesh);
           }
         }
@@ -2447,7 +2561,7 @@ if (curbCamDist < 36.0) {
             const postYaw = Math.atan2(f.tangent.x, f.tangent.z);
 
             const postMesh = new THREE.Mesh(postGeo, railBeamMat);
-            postMesh.position.set(postX, baseY + 0.39, postZ);
+            postMesh.position.set(postX, evalY(postX, postZ, baseY + 0.39), postZ);
             postMesh.rotation.y = postYaw;
             postMesh.castShadow = true;
             postMesh.receiveShadow = true;
@@ -2455,7 +2569,7 @@ if (curbCamDist < 36.0) {
 
             if (postCounter % 2 === 0) {
               const badgeMesh = new THREE.Mesh(retroBadgeGeo, railRetroMat);
-              badgeMesh.position.set(postX, baseY + 0.62, postZ);
+              badgeMesh.position.set(postX, evalY(postX, postZ, baseY + 0.62), postZ);
               badgeMesh.rotation.y = postYaw;
               railGroup.add(badgeMesh);
             }
@@ -2486,7 +2600,7 @@ if (curbCamDist < 36.0) {
     for (const app of validCurvedApproaches) {
       const fCross = getInterpolatedFrame(app.sCross);
       if (app.hasCrosswalk) {
-        const zebraGeo = new THREE.PlaneGeometry(0.45, 3.6);
+        const zebraGeo = new THREE.PlaneGeometry(0.45, 3.6, 1, sampleY ? 4 : 1);
         zebraGeo.rotateX(-Math.PI / 2);
         const crossYaw = Math.atan2(fCross.tangent.x, fCross.tangent.z);
 
@@ -2494,15 +2608,17 @@ if (curbCamDist < 36.0) {
         const zebraEndOff = halfDriveable - 1.0;
         let stripeIdx = 0;
         for (let off = zebraStartOff; off <= zebraEndOff; off += 0.9) {
+          const zx = fCross.pos.x + fCross.normal.x * off;
+          const zz = fCross.pos.z + fCross.normal.z * off;
+          const zGroundY = sampleY ? sampleY(zx, zz) : 0;
           const zebraMesh = new THREE.Mesh(zebraGeo, whiteLineMat);
           zebraMesh.name = `CurvedCrosswalk_${app.name}_${app.ivIdx}_${stripeIdx++}`;
           zebraMesh.userData.markingType = "CrosswalkStripe";
-          zebraMesh.position.set(
-            fCross.pos.x + fCross.normal.x * off,
-            baseY + 0.024,
-            fCross.pos.z + fCross.normal.z * off,
-          );
+          zebraMesh.position.set(zx, zGroundY + baseY + 0.024, zz);
           zebraMesh.rotation.y = crossYaw;
+          if (sampleY) {
+            this.drapeObjectOverElevation(zebraMesh, 0, 0, sampleY, zGroundY);
+          }
           zebraMesh.receiveShadow = true;
           group.add(zebraMesh);
         }
@@ -2554,13 +2670,14 @@ if (curbCamDist < 36.0) {
               const arrowType: "straight" | "straight-left" | "right" =
                 lane === 1 ? "right" : lane === lanesPerDir ? "straight-left" : "straight";
 
-              const arrowMesh = this.markings.createLaneArrowMarking(
-                fArrow.pos.x + fArrow.normal.x * laneCenterOffset,
-                fArrow.pos.z + fArrow.normal.z * laneCenterOffset,
-                arrowType,
-                arrowYaw,
-              );
-              arrowMesh.position.y = baseY + 0.024;
+              const ax = fArrow.pos.x + fArrow.normal.x * laneCenterOffset;
+              const az = fArrow.pos.z + fArrow.normal.z * laneCenterOffset;
+              const arrowMesh = this.markings.createLaneArrowMarking(ax, az, arrowType, arrowYaw);
+              const arrowGroundY = sampleY ? sampleY(ax, az) : 0;
+              arrowMesh.position.y = arrowGroundY + baseY + 0.024;
+              if (sampleY) {
+                this.drapeObjectOverElevation(arrowMesh, 0, 0, sampleY, arrowGroundY);
+              }
               group.add(arrowMesh);
             }
           }
@@ -2615,13 +2732,19 @@ if (curbCamDist < 36.0) {
             ? Math.atan2(fMid.tangent.x, fMid.tangent.z)
             : Math.atan2(-fMid.tangent.x, -fMid.tangent.z);
           const speedLaneOff = dirSign * (medianW * 0.5 + 0.5 * config.laneWidth);
+          const sx = fMid.pos.x + fMid.normal.x * speedLaneOff;
+          const sz = fMid.pos.z + fMid.normal.z * speedLaneOff;
           const speedMarking = this.markings.createSpeedLimitRoadMarking(
-            fMid.pos.x + fMid.normal.x * speedLaneOff,
-            fMid.pos.z + fMid.normal.z * speedLaneOff,
+            sx,
+            sz,
             speedVal,
             speedYaw,
           );
-          speedMarking.position.y = baseY + 0.025;
+          const speedGroundY = sampleY ? sampleY(sx, sz) : 0;
+          speedMarking.position.y = speedGroundY + baseY + 0.025;
+          if (sampleY) {
+            this.drapeObjectOverElevation(speedMarking, 0, 0, sampleY, speedGroundY);
+          }
           group.add(speedMarking);
         }
       }
@@ -2634,20 +2757,18 @@ if (curbCamDist < 36.0) {
           const mhStep = Math.floor(s / 28.0);
           const isEvenStep = mhStep % 2 === 0;
           const mhOff = (isEvenStep ? 1 : -1) * (halfDriveable * 0.5);
-          const mh = this.props.createManhole(
-            fProp.pos.x + fProp.normal.x * mhOff,
-            fProp.pos.z + fProp.normal.z * mhOff,
-          );
-          mh.position.y = baseY + 0.005;
+          const mhX = fProp.pos.x + fProp.normal.x * mhOff;
+          const mhZ = fProp.pos.z + fProp.normal.z * mhOff;
+          const mh = this.props.createManhole(mhX, mhZ);
+          mh.position.y = evalY(mhX, mhZ, baseY + 0.005);
           group.add(mh);
 
           for (const side of [-1, 1]) {
             const gutterOff = side * (halfDriveable - 0.35);
-            const grating = this.props.createGrating(
-              fProp.pos.x + fProp.normal.x * gutterOff,
-              fProp.pos.z + fProp.normal.z * gutterOff,
-            );
-            grating.position.y = baseY + 0.005;
+            const gX = fProp.pos.x + fProp.normal.x * gutterOff;
+            const gZ = fProp.pos.z + fProp.normal.z * gutterOff;
+            const grating = this.props.createGrating(gX, gZ);
+            grating.position.y = evalY(gX, gZ, baseY + 0.005);
             grating.rotation.y = Math.atan2(fProp.tangent.x, fProp.tangent.z);
             group.add(grating);
           }
@@ -2681,13 +2802,13 @@ if (curbCamDist < 36.0) {
             showArrowSignal: lanesPerDir >= 2,
             intersectionNameJa: config.name,
           });
-          tl.position.y = baseY;
+          tl.position.y = evalY(lightPosX, lightPosZ, baseY);
           group.add(tl);
         }
       }
     }
 
-    // 7. 物理エンジンのフラット路面コライダー＆片側歩道・ガードレール開口同期済み立体コライダー
+    // 7. 物理エンジンの路面コライダー（連続Terrain Trimesh時は抑止）＆片側歩道・ガードレール開口同期済み立体コライダー
     const createFixedChordBody = (p0: THREE.Vector3, p1: THREE.Vector3) => {
       const segDx = p1.x - p0.x;
       const segDz = p1.z - p0.z;
@@ -2696,33 +2817,41 @@ if (curbCamDist < 36.0) {
       if (isTooShort) {
         return null;
       }
+      const p0y = evalY(p0.x, p0.z, baseY);
+      const p1y = evalY(p1.x, p1.z, baseY);
       const midX = (p0.x + p1.x) * 0.5;
+      const midY = (p0y + p1y) * 0.5;
       const midZ = (p0.z + p1.z) * 0.5;
       const yaw = Math.atan2(segDx, segDz);
-      const halfYaw = yaw * 0.5;
+      const slopePitch = sampleY ? -Math.atan2(p1y - p0y, segLen) : 0;
+      const chordQuat = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(slopePitch, yaw, 0, "YXZ"),
+      );
       const bodyDesc = rapier.RigidBodyDesc.fixed()
-        .setTranslation(midX, baseY, midZ)
-        .setRotation(new rapier.Quaternion(0, Math.sin(halfYaw), 0, Math.cos(halfYaw)));
+        .setTranslation(midX, midY, midZ)
+        .setRotation(new rapier.Quaternion(chordQuat.x, chordQuat.y, chordQuat.z, chordQuat.w));
       return { body: physicsWorld.createRigidBody(bodyDesc), segLen };
     };
 
-    const roadChordCount = Math.max(6, Math.min(120, Math.ceil(totalSplineLength / 12.0)));
-    for (let i = 0; i < roadChordCount; i++) {
-      const p0 = spline.getPointAt(i / roadChordCount);
-      const p1 = spline.getPointAt((i + 1) / roadChordCount);
-      const chord = createFixedChordBody(p0, p1);
-      if (!chord) {
-        continue;
+    if (!config.skipRoadCollider) {
+      const roadChordCount = Math.max(6, Math.min(120, Math.ceil(totalSplineLength / 12.0)));
+      for (let i = 0; i < roadChordCount; i++) {
+        const p0 = spline.getPointAt(i / roadChordCount);
+        const p1 = spline.getPointAt((i + 1) / roadChordCount);
+        const chord = createFixedChordBody(p0, p1);
+        if (!chord) {
+          continue;
+        }
+        const roadColliderDesc = rapier.ColliderDesc.cuboid(
+          driveableWidth / 2,
+          0.25,
+          chord.segLen / 2 + 1.2,
+        )
+          .setTranslation(0, -0.25, 0)
+          .setFriction(0.85)
+          .setRestitution(0.02);
+        segmentColliders.push(physicsWorld.createCollider(roadColliderDesc, chord.body));
       }
-      const roadColliderDesc = rapier.ColliderDesc.cuboid(
-        driveableWidth / 2,
-        0.25,
-        chord.segLen / 2 + 1.2,
-      )
-        .setTranslation(0, -0.25, 0)
-        .setFriction(0.85)
-        .setRestitution(0.02);
-      segmentColliders.push(physicsWorld.createCollider(roadColliderDesc, chord.body));
     }
 
     const addObstacleIntervalChords = (

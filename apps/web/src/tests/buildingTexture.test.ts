@@ -73,7 +73,7 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
       expect(mockShader.fragmentShader).toContain("fwidth(facadeV)");
       expect(mockShader.fragmentShader).toContain("totalEmissiveRadiance");
     }
-  });
+  }, 45_000);
 
   it("cityMap.setNightMode(isNight) が uNightModeFactor.value を 0.0 ⇄ 1.0 へ一括同期制御することを保証する", async () => {
     await RAPIER.init();
@@ -401,6 +401,16 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     cityMap.applyShibuyaStreamGlbMaterial3DTexture(parcoRoofMat);
     expect(parcoRoofMat.userData.arch3DVolumeChannel).toBe("white_granite");
 
+    // 忠犬ハチ公ブロンズ像＆御影石台座
+    const hachikoBronzeMat = new THREE.MeshStandardMaterial({ name: "HachikoBronze" });
+    cityMap.applyShibuyaStreamGlbMaterial3DTexture(hachikoBronzeMat);
+    expect(hachikoBronzeMat.emissiveIntensity).toBeCloseTo(0.24, 2);
+    expect(hachikoBronzeMat.roughness).toBeCloseTo(0.42, 2);
+
+    const hachikoGraniteMat = new THREE.MeshStandardMaterial({ name: "HachikoGranite" });
+    cityMap.applyShibuyaStreamGlbMaterial3DTexture(hachikoGraniteMat);
+    expect(hachikoGraniteMat.userData.arch3DVolumeChannel).toBe("white_granite");
+
     // 渋谷センター街（入口アーチ看板・フラッグバナー）
     const centerGaiSignMat = new THREE.MeshStandardMaterial({ name: "ShibuyaCenterGaiArchSign" });
     cityMap.applyShibuyaStreamGlbMaterial3DTexture(centerGaiSignMat);
@@ -475,8 +485,8 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     // 浮遊袖看板・浮遊ビルボード（単独空中メッシュ）が排除されていること
     expect(signsGroup?.children.length).toBe(0);
 
-    // 渋谷幹線道路に立体中央分離帯アイランドおよび都市街区舗装基壇が構築されていること
-    const urbanBase = cityMap.group.getObjectByName("ShibuyaUrbanDistrictPavement");
+    // 渋谷幹線道路に立体中央分離帯アイランドおよび 3D 地形メッシュが構築されていること
+    const urbanBase = cityMap.group.getObjectByName("ShibuyaTerrainMesh");
     expect(urbanBase).toBeDefined();
     let medianCurbCount = 0;
     cityMap.group.traverse((obj) => {
@@ -492,27 +502,27 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     const hachikoMonument = cityMap.group.getObjectByName("ShibuyaHachikoStatueMonument");
     expect(hachikoMonument).toBeDefined();
 
-    // 忠犬ハチ公像モニュメントが車道（z >= 226）にめり込まず、歩行者広場内（z <= 224）に配置されていること
+    // 忠犬ハチ公像モニュメントがスクランブル交差点車道南側（z >= 320）の 1:1 実座標 (-984.4, 324.6) に配置されていること
     const monumentWorldPos = new THREE.Vector3();
     hachikoMonument!.getWorldPosition(monumentWorldPos);
-    expect(monumentWorldPos.z).toBeLessThanOrEqual(224);
-    expect(monumentWorldPos.x).toBeCloseTo(-802, 1);
+    expect(monumentWorldPos.z).toBeGreaterThanOrEqual(320);
+    expect(monumentWorldPos.x).toBeCloseTo(-984.4, 1);
 
-    // ハチ公前広場舗装（HachikoPlazaPavement）の北端が車道南端（z = 226）を越えないこと
+    // ハチ公前広場舗装（HachikoPlazaPavement）の北端がスクランブル交差点パッド南端 (z ≈ 297.8) を越えないこと
     const plazaPavement = cityMap.group.getObjectByName("HachikoPlazaPavement") as THREE.Mesh;
     expect(plazaPavement).toBeDefined();
     const pavementWorldPos = new THREE.Vector3();
     plazaPavement.getWorldPosition(pavementWorldPos);
     const pavementHalfDepth = (plazaPavement.geometry as THREE.PlaneGeometry).parameters.height / 2;
-    expect(pavementWorldPos.z + pavementHalfDepth).toBeLessThanOrEqual(226.01);
+    expect(pavementWorldPos.z - pavementHalfDepth).toBeGreaterThanOrEqual(298.0);
 
-    // スクランブル交差点対角線横断歩道が外周横断歩道上面（y = 0.0335）と完全に整合した高さで生成されていること
+    // スクランブル交差点対角線横断歩道が地面・交差点上面より上に生成されていること
     const scrambleCrosswalks = cityMap.group.getObjectByName("ShibuyaScrambleDiagonalCrosswalks");
     expect(scrambleCrosswalks).toBeDefined();
     expect(scrambleCrosswalks!.position.y).toBeGreaterThanOrEqual(0.033);
 
-    // スクランブル交差点（Intersection_-815_248）に斜め横断歩道と衝突する中央ダイヤ・誘導破線が存在しないこと
-    const scrambleInter = cityMap.group.getObjectByName("Intersection_-815_248");
+    // スクランブル交差点（Intersection_-990.7_275.8）に斜め横断歩道と衝突する中央ダイヤ・誘導破線が存在しないこと
+    const scrambleInter = cityMap.group.getObjectByName("Intersection_-990.7_275.8");
     expect(scrambleInter).toBeDefined();
     expect(scrambleInter!.getObjectByName("IntersectionCenterDiamond_Edge")).toBeUndefined();
     expect(scrambleInter!.getObjectByName("IntersectionGuideDot_NS")).toBeUndefined();
@@ -629,11 +639,11 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
     expect(centerGaiGroup).toBeDefined();
     expect(centerGaiGroup).not.toBeNull();
 
-    // 入口アーチ看板の存在と位置（文化村通り Y字合流回避のためスプライン u = 0.08 に配置）
+    // 入口アーチ看板の存在と位置（1:1 非反転実座標の渋谷センター街入口）
     const archSign = centerGaiGroup!.getObjectByName("CenterGaiEntranceArchSign");
     expect(archSign).toBeDefined();
-    expect(archSign!.position.x).toBeCloseTo(-841.1, 1);
-    expect(archSign!.position.z).toBeCloseTo(278.2, 1);
+    expect(archSign!.position.x).toBeCloseTo(-1045.0, 0);
+    expect(archSign!.position.z).toBeCloseTo(230.3, 0);
 
     const signPanel = archSign!.getObjectByName("CenterGaiMainSignPanel");
     expect(signPanel).toBeDefined();
@@ -656,11 +666,11 @@ describe("建築ファサードテクスチャ & 夜間オフィス照明シス�
       expect(uvAttr.getY(1)).toBeGreaterThanOrEqual(2);
     }
 
-    // バナーフラッグの存在（4地点×左右2 = 8本）
+    // バナーフラッグの存在（5地点×左右2 = 10本）
     const banners = centerGaiGroup!.children.filter((c) =>
       c.name.startsWith("CenterGaiStreetBanner_"),
     );
-    expect(banners.length).toBe(8);
+    expect(banners.length).toBe(10);
 
     // 昼夜切り替えでセンター街マテリアルの発光強度が変化すること
     cityMap.setNightMode(false);

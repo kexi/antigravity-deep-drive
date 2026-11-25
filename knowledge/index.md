@@ -68,3 +68,4 @@ trust_signals:
 - [053-shibuya-ibl-dem-r246-plateau-360-audit.md](./053-shibuya-ibl-dem-r246-plateau-360-audit.md): 渋谷エリア実写乖離の包括的監査と IBL・DEM5A・JSON同期・R246/PLATEAU・3Dランドマーク再統合
 - [054-shibuya-swarm-photorealistic-convergence-and-ux.md](./054-shibuya-swarm-photorealistic-convergence-and-ux.md): 渋谷エリア並列 /swarm 収束改修：3Dランドマーク・PLATEAU/GIS境界・道路街区連続性・URL/ギアUX・E2E検証
 - [055-road-and-sidewalk-architecture-overhaul.md](./055-road-and-sidewalk-architecture-overhaul.md): 道路作成システム・歩道断面幾何学・交差点隅切りの統合刷新
+- [056-shibuya-true-1to1-gis-non-mirrored-sloped-overhaul.md](./056-shibuya-true-1to1-gis-non-mirrored-sloped-overhaul.md): 渋谷エリア非鏡像 1:1 GIS 座標系・DEM5A 谷地形・構造物リアル化オーバーホール

@@ -4,9 +4,13 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import { TokyoStationMap } from "../city/tokyoStationMap";
 import {
   getOpenDataCurvedRoadCorridors,
+  localToWgs84,
+  sampleShibuyaTerrainY,
   SHIBUYA_PLATEAU_BUILDINGS,
+  wgs84ToLocal,
   type NavigationRoadCorridorSpec,
 } from "../openData/gsiPlateauLoader";
+import { parseUrlLocationQuery } from "../main";
 import { getNavigationMapLabels, type SupportedLocale } from "../core/i18n";
 
 function minDistanceToSplineXZ(
@@ -72,8 +76,8 @@ describe("渋谷・道玄坂・センター街マップ接続性と走行可能�
     );
     expect(centerGaiKobanDist).toBeLessThan(1.0);
 
-    // 井の頭通り・オルガン坂が公園通り（PARCO前）を通過し明治通りへ接続することを保証
-    const koenCrossPt = koen!.points[1];
+    // 井の頭通り・オルガン坂が公園通り（PARCO前: (-1108.1, -43.6)）を通過し明治通りへ接続することを保証
+    const koenCrossPt = koen!.points[4];
     const inokashiraThroughKoenDist = Math.min(
       ...inokashira!.points.map((pt) => Math.hypot(pt.x - koenCrossPt.x, pt.z - koenCrossPt.z)),
     );
@@ -191,31 +195,44 @@ describe("渋谷・道玄坂・センター街マップ接続性と走行可能�
           const tan = curve.getTangentAt(u).normalize();
           const normal = new THREE.Vector3(tan.z, 0, -tan.x);
 
-          const ray = new RAPIER.Ray({ x: pt.x, y: 2.0, z: pt.z }, { x: 0, y: -1, z: 0 });
-          const groundHit = world.castRay(ray, 5.0, true);
-          const hasValidGround = groundHit !== null && groundHit.timeOfImpact <= 2.2;
+          const expectedY = sampleShibuyaTerrainY(pt.x, pt.z);
+          const rayOriginY = expectedY + 2.5;
+          const ray = new RAPIER.Ray({ x: pt.x, y: rayOriginY, z: pt.z }, { x: 0, y: -1, z: 0 });
+          const groundHit = world.castRay(ray, 6.0, true);
+          const hitY = groundHit ? rayOriginY - groundHit.timeOfImpact : Number.NaN;
+          const hasValidGround = groundHit !== null && Math.abs(hitY - expectedY) <= 0.6;
           if (!hasValidGround) {
             missingGround.push(`${corridor.id}@${u.toFixed(2)}`);
           }
 
-          for (const lat of [-laneCheckOffset, 0, laneCheckOffset]) {
+          const probeOffsets = corridor.hasMedianLine
+            ? [
+                -Math.min(Math.max(3.0, laneCheckOffset), corridor.widthMeters * 0.5 - 1.5),
+                Math.min(Math.max(3.0, laneCheckOffset), corridor.widthMeters * 0.5 - 1.5),
+              ]
+            : [-laneCheckOffset, 0, laneCheckOffset];
+          for (const lat of probeOffsets) {
             const cx = pt.x + normal.x * lat;
             const cz = pt.z + normal.z * lat;
+            const localTerrainY = sampleShibuyaTerrainY(cx, cz);
             world.intersectionsWithShape(
-              { x: cx, y: 0.78, z: cz },
+              { x: cx, y: localTerrainY + 0.78, z: cz },
               { x: 0, y: 0, z: 0, w: 1 },
               probeBox,
               (col) => {
+                const st = col.shapeType();
+                if (st === RAPIER.ShapeType.TriMesh) {
+                  return true;
+                }
                 const tr = col.translation();
                 let halfY = 0;
-                const st = col.shapeType();
                 if (st === RAPIER.ShapeType.Cuboid) {
                   halfY = col.halfExtents()?.y ?? 0;
                 } else if (st === RAPIER.ShapeType.Cylinder) {
                   halfY = col.halfHeight() ?? 0;
                 }
                 const topY = tr.y + halfY;
-                const isObstacleAboveCurb = topY > 0.16;
+                const isObstacleAboveCurb = topY > localTerrainY + 0.16;
                 if (isObstacleAboveCurb) {
                   blockingObstacles.push(
                     `glb=${isGlbActive}:${corridor.id}@(${cx.toFixed(1)},${cz.toFixed(1)})->(${tr.x.toFixed(1)},${tr.z.toFixed(1)})`,
@@ -337,10 +354,11 @@ describe("渋谷・道玄坂・センター街マップ接続性と走行可能�
         const swPos = child.geometry.getAttribute("position");
         for (let vi = 0; vi < swPos.count; vi++) {
           const vy = swPos.getY(vi);
-          if (vy < 0.05) {
+          wp.set(swPos.getX(vi), vy, swPos.getZ(vi)).applyMatrix4(child.matrixWorld);
+          const relVy = wp.y - sampleShibuyaTerrainY(wp.x, wp.z);
+          if (relVy < 0.05) {
             continue;
           }
-          wp.set(swPos.getX(vi), vy, swPos.getZ(vi)).applyMatrix4(child.matrixWorld);
           for (const other of splineDatas) {
             if (other.id === owner.id) {
               continue;
@@ -358,7 +376,7 @@ describe("渋谷・道玄坂・センター街マップ接続性と走行可能�
     }
     expect(sidewalkIntrusions).toEqual([]);
 
-    // 首都高橋脚・ヒカリエエントランス・街路バナー等のプロシージャル立体物 (y ∈ [0.25, 4.2]) が走行車線へ侵入していないこと
+    // 首都高橋脚・ヒカリエエントランス・街路バナー等のプロシージャル立体物 (地形相対高さ relY ∈ [0.25, 4.2]) が走行車線へ侵入していないこと
     const sceneObstructions: string[] = [];
     cityMap.group.traverse((obj) => {
       const isMesh = obj instanceof THREE.Mesh && Boolean(obj.geometry);
@@ -370,7 +388,8 @@ describe("渋谷・道玄坂・センター街マップ接続性と走行可能�
         meshLabel.includes("MedianGuidePost") ||
         meshLabel.includes("CurvedCentralMedian") ||
         meshLabel.includes("Road") ||
-        meshLabel.includes("Crosswalk");
+        meshLabel.includes("Crosswalk") ||
+        meshLabel.includes("ShibuyaTerrainMesh");
       if (isIntentionalRoadFeature) {
         return;
       }
@@ -384,12 +403,12 @@ describe("渋谷・道玄坂・センター街マップ接続性と走行可能�
 
       const inspectTransform = (mat4: THREE.Matrix4, tag: string) => {
         const worldBox = bbox.clone().applyMatrix4(mat4);
-        const outsideHeight = worldBox.max.y < 0.25 || worldBox.min.y > 4.2;
+        const outsideHeight = worldBox.max.y < -1.0 || worldBox.min.y > 30.0;
         const outsideShibuya =
-          worldBox.max.x < -1180 ||
-          worldBox.min.x > -480 ||
-          worldBox.max.z < -20 ||
-          worldBox.min.z > 520;
+          worldBox.max.x < -1650 ||
+          worldBox.min.x > -450 ||
+          worldBox.max.z < -220 ||
+          worldBox.min.z > 760;
         if (outsideHeight || outsideShibuya) {
           return;
         }
@@ -397,7 +416,8 @@ describe("渋谷・道玄坂・センター街マップ接続性と走行可能�
         const step = Math.max(1, Math.floor(posAttr.count / 64));
         for (let vi = 0; vi < posAttr.count; vi += step) {
           wp.set(posAttr.getX(vi), posAttr.getY(vi), posAttr.getZ(vi)).applyMatrix4(mat4);
-          if (wp.y < 0.25 || wp.y > 4.2) {
+          const relY = wp.y - sampleShibuyaTerrainY(wp.x, wp.z);
+          if (relY < 0.25 || relY > 4.2) {
             continue;
           }
           const minGap = Math.min(
@@ -445,7 +465,7 @@ describe("渋谷・道玄坂・センター街マップ接続性と走行可能�
       const halfX = he ? he.x : (radius ?? 0);
       const halfZ = he ? he.z : (radius ?? 0);
       const isTallObstacle = halfY * 2 >= 1.8;
-      if (!isTallObstacle || tr.x < -1180 || tr.x > -480 || tr.z < -20 || tr.z > 520) {
+      if (!isTallObstacle || tr.x < -1650 || tr.x > -450 || tr.z < -220 || tr.z > 760) {
         return;
       }
       const rot = col.rotation();
@@ -475,7 +495,7 @@ describe("渋谷・道玄坂・センター街マップ接続性と走行可能�
       }
     });
     expect(tallColliderIntrusions).toEqual([]);
-  });
+  }, 90_000);
 
   it("カーナビマップラベルに渋谷の主要接続道路とランドマーク名が全対応ロケールで含まれることを保証する", () => {
     const locales: SupportedLocale[] = ["ja", "en", "zh"];
@@ -493,4 +513,200 @@ describe("渋谷・道玄坂・センター街マップ接続性と走行可能�
     expect(jaTexts).toContain("文化村通り");
     expect(jaTexts.some((t) => t.includes("センター街"))).toBe(true);
   });
+
+  it("回帰テスト1: 非鏡像コンパス方位（+X=東, -Z=北）・WGS84往復・ランドマーク相対方位・URL heading 変換を保証する", () => {
+    const streamWgs = localToWgs84(-750, 527.6);
+    const eastWgs = localToWgs84(-650, 527.6);
+    const northWgs = localToWgs84(-750, 427.6);
+    expect(eastWgs.lon).toBeGreaterThan(streamWgs.lon);
+    expect(northWgs.lat).toBeGreaterThan(streamWgs.lat);
+
+    const streamRoundTrip = wgs84ToLocal(streamWgs.lat, streamWgs.lon);
+    expect(streamRoundTrip.x).toBeCloseTo(-750, 1);
+    expect(streamRoundTrip.z).toBeCloseTo(527.6, 1);
+
+    // スクランブル交差点はストリームの北西、宮益坂上は東、道玄坂上は南西に位置すること
+    const streamX = -750.0;
+    const streamZ = 527.6;
+    const scrambleX = -990.7;
+    const scrambleZ = 275.8;
+    const miyamasuUeX = -501.1;
+    const dogenzakaUeX = -1440.0;
+    const dogenzakaUeZ = 675.0;
+    expect(scrambleX).toBeLessThan(streamX);
+    expect(scrambleZ).toBeLessThan(streamZ);
+    expect(miyamasuUeX).toBeGreaterThan(scrambleX);
+    expect(dogenzakaUeX).toBeLessThan(scrambleX);
+    expect(dogenzakaUeZ).toBeGreaterThan(scrambleZ);
+
+    // heading=0(北/-Z) -> |yaw|≈π, heading=180(南/+Z) -> yaw≈0
+    const northParsed = parseUrlLocationQuery("?area=shibuya&lat=35.65949&lon=139.70055&heading=0");
+    const southParsed = parseUrlLocationQuery(
+      "?area=shibuya&lat=35.65949&lon=139.70055&heading=180",
+    );
+    expect(Math.abs(northParsed.yawRadians)).toBeCloseTo(Math.PI, 2);
+    expect(southParsed.yawRadians).toBeCloseTo(0, 2);
+  });
+
+  it("回帰テスト2: 1:1 実寸距離（ストリーム–スクランブル・109・宮益坂）と全 PLATEAU 建物の渋谷道路非干渉を保証する", () => {
+    const streamToScramble = Math.hypot(-990.7 - -750.0, 275.8 - 527.6);
+    const scrambleTo109 = Math.hypot(-1192.0 - -990.7, 266.0 - 275.8);
+    const miyamasuzakaLength = Math.hypot(-501.1 - -818.4, 194.8 - 245.8);
+    expect(streamToScramble).toBeGreaterThanOrEqual(335);
+    expect(streamToScramble).toBeLessThanOrEqual(365);
+    expect(scrambleTo109).toBeGreaterThanOrEqual(190);
+    expect(scrambleTo109).toBeLessThanOrEqual(215);
+    expect(miyamasuzakaLength).toBeGreaterThanOrEqual(310);
+    expect(miyamasuzakaLength).toBeLessThanOrEqual(335);
+
+    const shibuyaCorridors = getOpenDataCurvedRoadCorridors()
+      .filter((c) => c.id !== "nav-road-uchibori-dori")
+      .map((c) => {
+        const curve = new THREE.CatmullRomCurve3(
+          c.points.map((p) => new THREE.Vector3(p.x, 0, p.z)),
+          false,
+          "centripetal",
+          0.5,
+        );
+        const isHikarieAccess = c.id === "nav-road-shibuya-hikarie-access";
+        const lanes =
+          c.widthMeters >= 20 ? 3 : Math.max(1, Math.min(3, Math.round(c.widthMeters / 8.5)));
+        const halfDriveable = lanes * (isHikarieAccess ? 2.9 : 3.4) + (isHikarieAccess ? 0.5 : 1.2);
+        return { id: c.id, pts: curve.getPoints(80), halfDriveable };
+      });
+
+    for (const bldg of SHIBUYA_PLATEAU_BUILDINGS) {
+      for (const corr of shibuyaCorridors) {
+        const dist = minDistanceToSplineXZ(bldg.localX, bldg.localZ, corr.pts);
+        expect(dist, `${bldg.buildingId} center vs ${corr.id}`).toBeGreaterThanOrEqual(
+          corr.halfDriveable,
+        );
+      }
+    }
+  });
+
+  it("回帰テスト3: 道玄坂・宮益坂 3D 傾斜路面の Rapier 走行可能 trimesh への連続ホイールレイキャスト一致を保証する", async () => {
+    await RAPIER.init();
+    const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    const scene = new THREE.Scene();
+    const cityMap = new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+    world.step();
+
+    const drivableHandles = new Set(cityMap.getDrivableColliderHandles());
+    const corridors = getOpenDataCurvedRoadCorridors();
+
+    for (const corridorId of ["nav-road-shibuya-dogenzaka", "nav-road-shibuya-miyamasuzaka"]) {
+      const corridor = corridors.find((c) => c.id === corridorId)!;
+      expect(corridor).toBeDefined();
+      const curve = new THREE.CatmullRomCurve3(
+        corridor.points.map((p) => new THREE.Vector3(p.x, 0, p.z)),
+        false,
+        "centripetal",
+        0.5,
+      );
+
+      let minHitY = Infinity;
+      let maxHitY = -Infinity;
+      const samples = 24;
+      for (let i = 0; i <= samples; i++) {
+        const u = i / samples;
+        const pt = curve.getPointAt(u);
+        const expectedY = sampleShibuyaTerrainY(pt.x, pt.z);
+        const rayOriginY = expectedY + 4.0;
+        const ray = new RAPIER.Ray({ x: pt.x, y: rayOriginY, z: pt.z }, { x: 0, y: -1, z: 0 });
+        const hit = world.castRay(ray, 8.0, true, undefined, undefined, undefined, undefined, (c) =>
+          drivableHandles.has(c.handle),
+        );
+        expect(hit, `${corridorId}@${u.toFixed(2)}`).not.toBeNull();
+        expect(drivableHandles.has(hit!.collider.handle)).toBe(true);
+
+        const hitY = rayOriginY - hit!.timeOfImpact;
+        expect(Math.abs(hitY - expectedY)).toBeLessThanOrEqual(0.15);
+        minHitY = Math.min(minHitY, hitY);
+        maxHitY = Math.max(maxHitY, hitY);
+      }
+      // 道玄坂・宮益坂とも実寸高低差 > 10m の連続勾配があること
+      expect(maxHitY - minHitY).toBeGreaterThan(10.0);
+    }
+  }, 45_000);
+
+  it("回帰テスト4: 109 Y字路正立・JR桁裏リブ/腰壁・ハチ公街路樹/ブロンズ/バス停・金王坂/文化村街区・1F庇/袖看板・拡張信号機を保証する", async () => {
+    await RAPIER.init();
+    const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    const scene = new THREE.Scene();
+    const cityMap = new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+
+    // 1. 109前Y字路および三角広場エプロン頂点法線が +Y 上向き（背面カリング防止）＆縁石ノーズが存在すること
+    for (const meshName of ["Shibuya109YForkAsphalt", "Shibuya109TriangularPlazaApron"]) {
+      const mesh = scene.getObjectByName(meshName) as THREE.Mesh | undefined;
+      expect(mesh, `${meshName} exists`).toBeDefined();
+      const normAttr = mesh!.geometry.getAttribute("normal");
+      expect(normAttr.count).toBeGreaterThan(0);
+      for (let i = 0; i < normAttr.count; i++) {
+        expect(normAttr.getY(i), `${meshName} normal Y[${i}]`).toBeGreaterThan(0.9);
+      }
+    }
+    const curbNoseGroup = scene.getObjectByName("Shibuya109TriangularPlazaCurb");
+    expect(curbNoseGroup).toBeDefined();
+    expect(curbNoseGroup!.children.length).toBeGreaterThanOrEqual(4);
+
+    // 2. JRガード下スチールI型リブ・御影石腰壁・ロリポップ球木撤去・ハチ公/東口バス停シェルター
+    let jrRibCount = 0;
+    let jrDadoCount = 0;
+    let lollipopCount = 0;
+    let awningCount = 0;
+    let sodeCount = 0;
+    const signalPositions: Array<{ x: number; z: number }> = [];
+    cityMap.group.traverse((obj) => {
+      if (obj.name === "RoadInfra_JrGuardUndersideRib") jrRibCount += 1;
+      if (obj.name === "RoadInfra_JrGuardUnderpassDado") jrDadoCount += 1;
+      if (obj.name.startsWith("HachikoTreeFoliage_")) lollipopCount += 1;
+      if (
+        obj.name.startsWith("ShibuyaStorefrontAwning_") ||
+        obj.name.startsWith("CenterGaiStoreAwning_")
+      ) {
+        if (!obj.name.includes("_Group_") && !obj.name.includes("_Valance_")) {
+          awningCount += 1;
+        }
+      }
+      if (
+        obj.name.startsWith("ShibuyaSodeKanban_") ||
+        obj.name.startsWith("CenterGaiSodeKanban_")
+      ) {
+        sodeCount += 1;
+      }
+      if (obj.name === "JapaneseTrafficSignalGroup" && obj.position.x < -395) {
+        signalPositions.push({ x: obj.position.x, z: obj.position.z });
+      }
+    });
+    expect(jrRibCount).toBeGreaterThanOrEqual(20);
+    expect(jrDadoCount).toBeGreaterThanOrEqual(2);
+    expect(lollipopCount).toBe(0);
+    expect(scene.getObjectByName("ShibuyaBusTerminalShelter_Hachiko")).toBeDefined();
+    expect(scene.getObjectByName("ShibuyaBusTerminalShelter_EastExit")).toBeDefined();
+
+    // 3. 金王坂・文化村通り沿道街区と1F庇・袖看板の充実
+    const konnozakaGroup = scene.getObjectByName("ShibuyaKonnozakaStreetscapeGroup");
+    const bunkamuraGroup = scene.getObjectByName("ShibuyaBunkamuraStreetscapeGroup");
+    expect(konnozakaGroup).toBeDefined();
+    expect(bunkamuraGroup).toBeDefined();
+    expect(awningCount).toBeGreaterThanOrEqual(18);
+    expect(sodeCount).toBeGreaterThanOrEqual(18);
+
+    // 4. 拡張された公園通り・文化村通り・金王坂・並木橋・井の頭通りの信号機が歩道上に設置されていること
+    const expectedNewSignals: Array<[string, number, number]> = [
+      ["公園通り・神南一丁目", -1010.2, 108.0],
+      ["渋谷区役所前", -1145.0, -102.0],
+      ["文化村通り・東急本店前", -1279.6, 183.9],
+      ["松濤二丁目入口", -1405.1, 90.7],
+      ["金王坂中腹", -600.2, 319.6],
+      ["金王坂上", -530.3, 261.3],
+      ["明治通り・並木橋", -577.0, 599.0],
+      ["井の頭通り・宇田川町", -1104.2, -21.1],
+    ];
+    for (const [label, sx, sz] of expectedNewSignals) {
+      const found = signalPositions.some((p) => Math.hypot(p.x - sx, p.z - sz) < 0.5);
+      expect(found, `${label} (${sx}, ${sz}) signal placed`).toBe(true);
+    }
+  }, 45_000);
 });

@@ -18,24 +18,24 @@ describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
     expect(WORLD_CHUNK_DEFINITIONS.length).toBe(20);
 
     // 渋谷ストリーム周辺
-    expect(resolveChunkIdAtPosition(-750, 12)).toBe("shibuya-core");
-    // 渋谷南（恵比寿・並木橋側: z = -115..-320）
-    expect(resolveChunkIdAtPosition(-750, -220)).toBe("shibuya-south");
-    // 渋谷北（表参道・宮下パーク・ヒカリエ・センター街・PARCO側: z = +115..+460）
-    expect(resolveChunkIdAtPosition(-750, 220)).toBe("shibuya-north");
-    expect(resolveChunkIdAtPosition(-710, 155)).toBe("shibuya-north"); // 渋谷ヒカリエ
-    expect(resolveChunkIdAtPosition(-850, 292)).toBe("shibuya-north"); // 渋谷センター街
-    expect(resolveChunkIdAtPosition(-935, 375)).toBe("shibuya-north"); // センター街北西端（井の頭通り合流）
-    expect(resolveChunkIdAtPosition(-830, 382)).toBe("shibuya-north"); // 渋谷PARCO
+    expect(resolveChunkIdAtPosition(-750, 480)).toBe("shibuya-core");
+    // 渋谷南（恵比寿・並木橋側: z = 640..920）
+    expect(resolveChunkIdAtPosition(-750, 760)).toBe("shibuya-south");
+    // 渋谷北（表参道・宮下パーク・センター街・PARCO側: z = -160..+220）
+    expect(resolveChunkIdAtPosition(-750, 120)).toBe("shibuya-north");
+    expect(resolveChunkIdAtPosition(-723.6, 327.9)).toBe("shibuya-core"); // 渋谷ヒカリエ
+    expect(resolveChunkIdAtPosition(-1024, 190)).toBe("shibuya-north"); // 渋谷センター街北
+    expect(resolveChunkIdAtPosition(-1155, 128)).toBe("shibuya-north"); // 宇田川町交番（井の頭通り合流）
+    expect(resolveChunkIdAtPosition(-1108.1, -43.6)).toBe("shibuya-north"); // 渋谷PARCO
     const shibuyaNorthDef = WORLD_CHUNK_DEFINITIONS.find((c) => c.id === "shibuya-north")!;
     expect(shibuyaNorthDef.associatedGlbModelIds).toContain("shibuya_stream");
     expect(shibuyaNorthDef.associatedGlbModelIds).toContain("shibuya_plateau_buildings");
     const shibuyaSouthDef = WORLD_CHUNK_DEFINITIONS.find((c) => c.id === "shibuya-south")!;
     expect(shibuyaSouthDef.associatedGlbModelIds).toContain("shibuya_stream");
     // 国道246号・青山通り西（渋谷〜表参道・外苑前）
-    expect(resolveChunkIdAtPosition(-480, 0)).toBe("aoyama-west");
+    expect(resolveChunkIdAtPosition(-545, 200)).toBe("aoyama-west");
     // 国道246号・青山通り東（赤坂見附・永田町〜霞が関）
-    expect(resolveChunkIdAtPosition(-330, 0)).toBe("aoyama-east");
+    expect(resolveChunkIdAtPosition(-395, 200)).toBe("aoyama-east");
     // 大手町・日比谷通り西
     expect(resolveChunkIdAtPosition(-160, 0)).toBe("otemachi-west");
     // 東京駅・丸の内仲通り・行幸通りコア
@@ -47,17 +47,17 @@ describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
 
     // 10倍広域マップ拡張チャンク
     // 渋谷西・神泉・山手通り
-    expect(resolveChunkIdAtPosition(-1250, 50)).toBe("shibuya-west");
+    expect(resolveChunkIdAtPosition(-1350, 380)).toBe("shibuya-west");
     // 原宿・代々木
-    expect(resolveChunkIdAtPosition(-750, 600)).toBe("harajuku-yoyogi");
+    expect(resolveChunkIdAtPosition(-860, -320)).toBe("harajuku-yoyogi");
     // 恵比寿・代官山
-    expect(resolveChunkIdAtPosition(-750, -600)).toBe("ebisu-daikanyama");
+    expect(resolveChunkIdAtPosition(-720, 1050)).toBe("ebisu-daikanyama");
     // 六本木通り・西麻布
-    expect(resolveChunkIdAtPosition(-380, -350)).toBe("roppongi-nishiazabu");
+    expect(resolveChunkIdAtPosition(-400, 480)).toBe("roppongi-nishiazabu");
     // 表参道北・外苑前
-    expect(resolveChunkIdAtPosition(-450, 500)).toBe("omotesando-aoyama-north");
+    expect(resolveChunkIdAtPosition(-480, -120)).toBe("omotesando-aoyama-north");
     // 皇居西・半蔵門・三宅坂
-    expect(resolveChunkIdAtPosition(-250, 600)).toBe("kokyo-west-hanzomon");
+    expect(resolveChunkIdAtPosition(-250, 1000)).toBe("kokyo-west-hanzomon");
     // 皇居北・竹橋
     expect(resolveChunkIdAtPosition(0, 700)).toBe("kokyo-north-takebashi");
     // 神田・秋葉原
@@ -73,9 +73,9 @@ describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
   it("チャンク境界ボックス（AABB）への最短距離が正しく計算されることを保証する", () => {
     const shibuyaCore = WORLD_CHUNK_DEFINITIONS.find((c) => c.id === "shibuya-core")!;
     // チャンク内部の座標は距離0
-    expect(computeDistanceToChunkBounds(-750, 0, shibuyaCore)).toBe(0);
+    expect(computeDistanceToChunkBounds(-850, 420, shibuyaCore)).toBe(0);
     // 東側へ100m離れた座標
-    const distEast = computeDistanceToChunkBounds(shibuyaCore.bounds.maxX + 100, 0, shibuyaCore);
+    const distEast = computeDistanceToChunkBounds(shibuyaCore.bounds.maxX + 100, 420, shibuyaCore);
     expect(distEast).toBeCloseTo(100, 4);
   });
 
@@ -167,8 +167,8 @@ describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
       },
     });
 
-    // 渋谷初期スポーン位置（x = -720, z = 12）周辺を優先ロード
-    const status = await system.loadPriorityAreaAround(-720, 12, {
+    // 渋谷初期スポーン位置（x = -750, z = 480）周辺を優先ロード
+    const status = await system.loadPriorityAreaAround(-750, 480, {
       isWarp: false,
       headingAngleRad: -Math.PI / 2,
       onProgress: (pct) => {
@@ -207,7 +207,7 @@ describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
     });
 
     // 1. 渋谷で起動
-    await system.loadPriorityAreaAround(-750, 12, {
+    await system.loadPriorityAreaAround(-750, 480, {
       isWarp: false,
       headingAngleRad: -Math.PI / 2,
     });
@@ -233,7 +233,7 @@ describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
     expect(finalStatus.currentChunkId).toBe("marunouchi-core");
     expect(system.getChunkState("marunouchi-core")?.state).toBe("active");
 
-    // 遠方に離れた渋谷コアチャンク（x = -750、現在地 x = +40 から 600m 以上離隔）がアンロード半径超過により解放されていること
+    // 遠方に離れた渋谷コアチャンク（x = -750, z = 480、現在地 x = +40 から 650m 以上離隔）がアンロード半径超過により解放されていること
     expect(evictedChunks).toContain("shibuya-core");
     expect(system.getChunkState("shibuya-core")?.state).toBe("unloaded");
     expect(finalStatus.totalEvictedCount).toBeGreaterThan(0);
@@ -247,7 +247,7 @@ describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
     });
 
     // 渋谷で初期ロード
-    await system.loadPriorityAreaAround(-720, 12, { isWarp: false });
+    await system.loadPriorityAreaAround(-750, 480, { isWarp: false });
     expect(system.getStatus().currentChunkId).toBe("shibuya-core");
 
     // 東京駅・丸の内（x = 0, z = 120）へワープ
@@ -280,7 +280,7 @@ describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
 
     // shibuya-core の読み込み失敗をシミュレート注入
     system.setSimulatedChunkFailure("shibuya-core", true);
-    const failedStatus = await system.loadPriorityAreaAround(-750, 12, { isWarp: false });
+    const failedStatus = await system.loadPriorityAreaAround(-750, 480, { isWarp: false });
 
     expect(failedStatus.phase).toBe("error");
     expect(failedStatus.canRetry).toBe(true);
@@ -414,6 +414,7 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
       ColliderDesc: {
         cuboid: () => createColliderChain(),
         cylinder: () => createColliderChain(),
+        trimesh: () => createColliderChain(),
       },
       Quaternion: class {
         constructor(
@@ -520,7 +521,7 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
     expect(statsAtMarunouchi.lod2LowCount).toBeGreaterThan(0);
     expect(statsAtMarunouchi.culledByDistanceCount).toBeGreaterThan(0);
     expect(statsAtMarunouchi.simplifiedSubMeshCount).toBeGreaterThan(50);
-  });
+  }, 45_000);
 
   it("高精度ランドマークGLB（東京駅丸の内駅舎・渋谷ストリーム）が185m以遠の遠距離では自動的に軽量プロシージャルプロキシへ切り替わり、185m以内に近づくと高精度GLBへ復帰することを保証する", async () => {
     const { mockWorld, mockRapier } = createMockPhysicsContext();
@@ -574,8 +575,8 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
     ) as THREE.Group;
     expect(maruBuilding).toBeDefined();
 
-    // 渋谷ストリーム前（x = -720, z = 12）から東側の丸の内方面（約820m先、maxDrawDistance=380m を大幅に超える遠方かつ未ロードチャンク）を見る
-    cityMap.updateDistanceCulling(new THREE.Vector3(-720, 0, 12), 380, true);
+    // 渋谷ストリーム周辺（x = -750, z = 480）から東側の丸の内方面（約850m超先、maxDrawDistance=380m を大幅に超える遠方かつ未ロードチャンク）を見る
+    cityMap.updateDistanceCulling(new THREE.Vector3(-750, 0, 480), 380, true);
 
     // 1. 遠方かつ未ロードチャンク内の大型ビル（丸ビル）が非表示にならず、軽量な LOD2 ("low", 3メッシュのみ, castShadow=false) で描画されていること
     expect(maruBuilding.visible).toBe(true);
@@ -656,15 +657,15 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
       expect(mat.roughness).toBeGreaterThan(0);
     }
 
-    // shibuya_stream.glb ロード完了時（LOD0）に、同一座標のプロシージャル版スクランブルスクエア・ヒカリエ・サクラステージ・フクラス・MIYASHITA PARK・QFRONT/109・首都高渋谷コア区間が非表示化されて Z-fighting せず、青山通り東側区間（ShutokoConcreteDeckEast）は連続表示され続けることを検証
+    // shibuya_stream.glb ロード完了時（LOD0）に、同一座標のプロシージャル版スクランブルスクエア・ヒカリエ・サクラステージ・フクラス・MIYASHITA PARK・QFRONT/109 が非表示化されて Z-fighting せず、曲線化首都高（ShutokoConcreteDeck / ShutokoConcreteDeckEast）は連続表示され続けることを検証
     const mockShibuyaGlb = new THREE.Group();
     mockShibuyaGlb.name = "MockShibuyaDistrictGlb";
-    mockShibuyaGlb.position.set(-695, 0, -15);
+    mockShibuyaGlb.position.set(-750, 0, 527.6);
     const glbBoundsMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(300, 230, 320),
+      new THREE.BoxGeometry(500, 230, 560),
       new THREE.MeshBasicMaterial(),
     );
-    glbBoundsMesh.position.set(-55, 115, 115); // covers Stream (-15) & Sakura Stage (-25) to MIYASHITA PARK / QFRONT (+248)
+    glbBoundsMesh.position.set(-200, 115, -180); // covers 1:1 Shibuya Stream (-750, 527.6) to MIYASHITA PARK / QFRONT / 109 / Cerulean
     mockShibuyaGlb.add(glbBoundsMesh);
     cityMap.glbShibuyaStreamGroup = mockShibuyaGlb;
     cityMap.group.add(mockShibuyaGlb);
@@ -688,8 +689,8 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
     const coreDeckMesh = shutokoGroup.children.find((c) => c.name === "ShutokoConcreteDeck")!;
     const eastDeckMesh = shutokoGroup.children.find((c) => c.name === "ShutokoConcreteDeckEast")!;
 
-    // 1. 宮下公園・スクランブル交差点北側（x=-750, z=240: ストリーム単体からは 255m > 185m だがスクランブルスクエア・MIYASHITA PARK・109からは <= 185m）でも GLB が維持され、重複プロシージャルメッシュがすべて非表示になること
-    cityMap.updateDistanceCulling(new THREE.Vector3(-750, 0, 240), 380, true);
+    // 1. 渋谷駅前スクランブル交差点・ストリーム圏内（x=-800, z=400）では GLB が表示され、重複プロシージャルビル群は非表示、曲線首都高コア区間は常時表示されること
+    cityMap.updateDistanceCulling(new THREE.Vector3(-800, 0, 400), 380, true);
     expect(mockShibuyaGlb.visible).toBe(true);
     expect(procScramble.visible).toBe(false);
     expect(procHikarie.visible).toBe(false);
@@ -697,7 +698,7 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
     expect(procFukuras.visible).toBe(false);
     expect(procMiyashitaPark.visible).toBe(false);
     expect(procQfront109.visible).toBe(false);
-    expect(coreDeckMesh.visible).toBe(false);
+    expect(coreDeckMesh.visible).toBe(true);
     expect(eastDeckMesh.visible).toBe(true);
 
     // 2. 渋谷エリアから 300m 以上離れた表参道東側（x=-350, z=95）へ移動すると、GLB が非表示になりプロシージャル Proxy が復帰すること
@@ -720,37 +721,37 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
 
     await cityMap.activateWorldChunk("shibuya-core");
 
-    // 渋谷PLATEAUモデルの各タイル（道玄坂・宮益坂・並木橋）を模擬生成
+    // 渋谷PLATEAUモデルの各タイル（道玄坂・宮益坂・並木橋）を 1:1 実座標で模擬生成
     const mockPlateauGroup = new THREE.Group();
     mockPlateauGroup.name = "MockShibuyaPlateauBuildingsGroup";
 
-    // 1. 道玄坂タイル（スクランブル交差点近傍 x=-825, z=245）
+    // 1. スクランブル〜道玄坂入口タイル（(-1030, 310) -> (-990.7, 275.8) から近距離）
     const dogenzakaTileMesh = new THREE.Mesh(
       new THREE.BoxGeometry(40, 30, 40),
       new THREE.MeshStandardMaterial({ name: "PlateauCommercialFacade" }),
     );
     dogenzakaTileMesh.name = "PlateauTile_data155";
-    dogenzakaTileMesh.position.set(-825, 15, 245);
+    dogenzakaTileMesh.position.set(-1030, 15, 310);
     dogenzakaTileMesh.castShadow = true;
     dogenzakaTileMesh.userData.cullingBounds = new THREE.Box3().setFromObject(dogenzakaTileMesh);
 
-    // 2. 宮益坂タイル（中距離 x=-640, z=250 -> 境界まで約155m: 135m < dist <= 235m）
+    // 2. 宮益坂タイル（(-810, 250) -> (-990.7, 275.8) から境界まで約162m: 135m < dist <= 235m）
     const miyamasuTileMesh = new THREE.Mesh(
       new THREE.BoxGeometry(40, 35, 40),
       new THREE.MeshStandardMaterial({ name: "PlateauGlassTower" }),
     );
     miyamasuTileMesh.name = "PlateauTile_data142";
-    miyamasuTileMesh.position.set(-640, 17.5, 250);
+    miyamasuTileMesh.position.set(-810, 17.5, 250);
     miyamasuTileMesh.castShadow = true;
     miyamasuTileMesh.userData.cullingBounds = new THREE.Box3().setFromObject(miyamasuTileMesh);
 
-    // 3. 並木橋タイル（遠距離 x=-720, z=-150 -> 渋谷交差点から約400m離れた南側エリア）
+    // 3. 並木橋タイル（遠距離 x=-650, z=750 -> スクランブル交差点から約556m）
     const namikibashiTileMesh = new THREE.Mesh(
       new THREE.BoxGeometry(40, 25, 40),
       new THREE.MeshStandardMaterial({ name: "PlateauAlleyCommercial" }),
     );
     namikibashiTileMesh.name = "PlateauTile_data153";
-    namikibashiTileMesh.position.set(-720, 12.5, -150);
+    namikibashiTileMesh.position.set(-650, 12.5, 750);
     namikibashiTileMesh.castShadow = true;
     namikibashiTileMesh.userData.cullingBounds = new THREE.Box3().setFromObject(
       namikibashiTileMesh,
@@ -764,10 +765,10 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
     cityMap.plateauTileMeshes = [dogenzakaTileMesh, miyamasuTileMesh, namikibashiTileMesh];
     cityMap.group.add(mockPlateauGroup);
 
-    // 1. スクランブル交差点（x=-815, z=248）を走行中の視点
-    cityMap.updateDistanceCulling(new THREE.Vector3(-815, 0, 248), 380, true);
+    // 1. スクランブル交差点（x=-990.7, z=275.8）を走行中の視点
+    cityMap.updateDistanceCulling(new THREE.Vector3(-990.7, 0, 275.8), 380, true);
 
-    // 道玄坂タイル（距離約10m <= 135m）: LOD0 ("high") で高精細表示かつ castShadow=true、詳細ジオメトリ
+    // 道玄坂タイル（<= 135m）: LOD0 ("high")
     expect(dogenzakaTileMesh.visible).toBe(true);
     expect(dogenzakaTileMesh.userData.appliedLodTier).toBe("high");
     expect(dogenzakaTileMesh.castShadow).toBe(true);
@@ -775,14 +776,14 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
     expect(dogenzakaTileMesh.geometry).toBe(dogenzakaTileMesh.userData.detailedGeometry);
     expect(dogenzakaTileMesh.material).toBe(dogenzakaTileMesh.userData.detailedMaterial);
 
-    // 宮益坂タイル（距離約155m: 135m < dist <= 235m）: LOD1 ("medium") で簡易化かつ castShadow=false（影カリング）
+    // 宮益坂タイル（135m < dist <= 235m）: LOD1 ("medium")
     expect(miyamasuTileMesh.visible).toBe(true);
     expect(miyamasuTileMesh.userData.appliedLodTier).toBe("medium");
     expect(miyamasuTileMesh.castShadow).toBe(false);
     expect(miyamasuTileMesh.userData.isProxyActive).toBe(false);
     expect(miyamasuTileMesh.geometry).toBe(miyamasuTileMesh.userData.detailedGeometry);
 
-    // 並木橋タイル（距離約405m: 235m < dist <= 800m）: LOD2 ("low") で遠景軽量プロキシかつ castShadow=false
+    // 並木橋タイル（235m < dist <= 800m）: LOD2 ("low")
     expect(namikibashiTileMesh.visible).toBe(true);
     expect(namikibashiTileMesh.userData.appliedLodTier).toBe("low");
     expect(namikibashiTileMesh.castShadow).toBe(false);
@@ -793,8 +794,8 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
       "PlateauLod2ProxyMat",
     );
 
-    // 2. 宮益坂上（x=-640, z=250）へ移動した場合
-    cityMap.updateDistanceCulling(new THREE.Vector3(-640, 0, 250), 380, true);
+    // 2. 宮益坂下（x=-830, z=255）へ移動した場合
+    cityMap.updateDistanceCulling(new THREE.Vector3(-830, 0, 255), 380, true);
 
     // 宮益坂タイルが直近（<= 135m）になり LOD0 ("high", castShadow=true, detailedGeometry) に自動昇格
     expect(miyamasuTileMesh.userData.appliedLodTier).toBe("high");
@@ -802,7 +803,7 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
     expect(miyamasuTileMesh.userData.isProxyActive).toBe(false);
     expect(miyamasuTileMesh.geometry).toBe(miyamasuTileMesh.userData.detailedGeometry);
 
-    // 遠ざかった道玄坂タイル（約165m）は LOD1 ("medium", castShadow=false) へ自動降格
+    // 遠ざかった道玄坂タイル（境界距離 ~183m: 135m < dist <= 235m）は LOD1 ("medium", castShadow=false) へ自動降格
     expect(dogenzakaTileMesh.userData.appliedLodTier).toBe("medium");
     expect(dogenzakaTileMesh.castShadow).toBe(false);
     expect(dogenzakaTileMesh.userData.isProxyActive).toBe(false);

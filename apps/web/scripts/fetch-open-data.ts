@@ -22,14 +22,14 @@ const ORIGIN_LON = 139.76525;
 // 行幸通り中心軸（東京駅丸の内中央口から皇居・和田倉門方面への方位角: 東から反時計回り 165.1°）
 const GYOKO_AXIS_RAD = (165.1 * Math.PI) / 180;
 
-// 渋谷ストリーム（渋谷三丁目21-3）の渋谷ゾーンアンカー原点（JGD2011 / WGS84）
+// 渋谷ストリーム（渋谷三丁目21-3）の渋谷ゾーンアンカー原点（JGD2011 / WGS84, 非鏡像 1:1 投影 +X=東, -Z=北）
 const SHIBUYA_ORIGIN_LAT = 35.65722;
 const SHIBUYA_ORIGIN_LON = 139.70319;
-const SHIBUYA_LOCAL_ANCHOR_X = -695.0;
-const SHIBUYA_LOCAL_ANCHOR_Z = -15.0;
+const SHIBUYA_LOCAL_ANCHOR_X = -750.0;
+const SHIBUYA_LOCAL_ANCHOR_Z = 527.6;
 
-const METERS_PER_DEG_LAT = 110946.25;
-const METERS_PER_DEG_LON = 111319.49 * Math.cos((ORIGIN_LAT * Math.PI) / 180);
+const METERS_PER_DEG_LAT = 110946.0;
+const METERS_PER_DEG_LON = 91188.0;
 
 // 単位ベクトル (+z: 行幸通り皇居方向 WNW, +x: 丸ビル・有楽町方向 SSW, -x: 新丸ビル・大手町方向 NNE)
 const UZ_EAST = Math.cos(GYOKO_AXIS_RAD);
@@ -41,7 +41,7 @@ function localToWgs84(x: number, z: number): { lat: number; lon: number } {
   const isShibuyaZone = x < -345;
   if (isShibuyaZone) {
     const eastM = x - SHIBUYA_LOCAL_ANCHOR_X;
-    const northM = z - SHIBUYA_LOCAL_ANCHOR_Z;
+    const northM = SHIBUYA_LOCAL_ANCHOR_Z - z;
     const lon = SHIBUYA_ORIGIN_LON + eastM / METERS_PER_DEG_LON;
     const lat = SHIBUYA_ORIGIN_LAT + northM / METERS_PER_DEG_LAT;
     return { lat, lon };
@@ -60,7 +60,7 @@ function wgs84ToLocal(lat: number, lon: number): { x: number; z: number } {
     const eastM = (lon - SHIBUYA_ORIGIN_LON) * METERS_PER_DEG_LON;
     const northM = (lat - SHIBUYA_ORIGIN_LAT) * METERS_PER_DEG_LAT;
     const x = SHIBUYA_LOCAL_ANCHOR_X + eastM;
-    const z = SHIBUYA_LOCAL_ANCHOR_Z + northM;
+    const z = SHIBUYA_LOCAL_ANCHOR_Z - northM;
     return {
       x: Number(x.toFixed(2)),
       z: Number(z.toFixed(2)),
@@ -96,10 +96,10 @@ function latLonToTilePixel(lat: number, lon: number, zoom: number) {
  * オフライン・サンドボックス環境では渋谷川谷底と両岸台地の実測標高プロファイルからグリッドを構築する。
  */
 async function buildShibuyaDem5aGrid() {
-  const xMin = -920;
-  const xMax = -480;
+  const xMin = -1680;
+  const xMax = -380;
   const zMin = -240;
-  const zMax = 280;
+  const zMax = 920;
   const gridStep = 20;
 
   // グリッド全体をカバーする地理院タイル (zoom=15) をすべて取得・キャッシュする
@@ -169,10 +169,10 @@ async function buildShibuyaDem5aGrid() {
         row.push(Number((neighborSum / neighborCount).toFixed(2)));
         continue;
       }
-      const valleyOffset = Math.abs(x - -720.0);
-      const slopeGain = Math.max(0, valleyOffset - 35.0) * 0.065;
-      const northSouthSlope = Math.max(0, z + 50.0) * 0.008;
-      row.push(Number((15.2 + slopeGain + northSouthSlope).toFixed(2)));
+      const valleyOffset = Math.abs(x - -770.0);
+      const slopeGain = Math.max(0, valleyOffset - 35.0) * 0.055;
+      const westHillGain = Math.max(0, -820.0 - x) * 0.02;
+      row.push(Number((15.0 + slopeGain + westHillGain).toFixed(2)));
     }
     elevationGrid.push(row);
   }
@@ -322,10 +322,10 @@ async function fetchShibuyaGsiRoadSegments() {
       const segLen = Math.hypot(pEnd.x - pStart.x, pEnd.z - pStart.z);
       const isWithinShibuyaBounds =
         segLen >= 18.0 &&
-        pStart.x >= -960 &&
-        pStart.x <= -520 &&
-        pStart.z >= -280 &&
-        pStart.z <= 320;
+        pStart.x >= -1660 &&
+        pStart.x <= -380 &&
+        pStart.z >= -240 &&
+        pStart.z <= 920;
       if (!isWithinShibuyaBounds) {
         continue;
       }
@@ -437,7 +437,7 @@ async function main() {
         lon: SHIBUYA_ORIGIN_LON,
         localX: SHIBUYA_LOCAL_ANCHOR_X,
         localZ: SHIBUYA_LOCAL_ANCHOR_Z,
-        baseElevationTpM: 15.2,
+        baseElevationTpM: 15.0,
       },
       generatedAt: TOKYO_MARUNOUCHI_OPEN_DATA.metadata.generatedAt,
     },

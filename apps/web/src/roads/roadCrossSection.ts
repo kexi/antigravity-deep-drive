@@ -307,8 +307,16 @@ function appendFaceStripQuad(
   indices.push(baseIdx, baseIdx + 2, baseIdx + 1, baseIdx + 1, baseIdx + 2, baseIdx + 3);
 }
 
-function framePoint(f: RoadFrame, lateralOffset: number, y: number): [number, number, number] {
-  return [f.pos.x + f.normal.x * lateralOffset, y, f.pos.z + f.normal.z * lateralOffset];
+function framePoint(
+  f: RoadFrame,
+  lateralOffset: number,
+  y: number,
+  elevationSampler?: (x: number, z: number) => number,
+): [number, number, number] {
+  const px = f.pos.x + f.normal.x * lateralOffset;
+  const pz = f.pos.z + f.normal.z * lateralOffset;
+  const groundY = elevationSampler ? elevationSampler(px, pz) : f.pos.y;
+  return [px, groundY + y, pz];
 }
 
 /**
@@ -320,6 +328,7 @@ export function buildLGutterRibbonGeometry(
   sideSign: -1 | 1,
   crossSection: RoadCrossSectionSpec,
   baseY: number,
+  elevationSampler?: (x: number, z: number) => number,
 ): THREE.BufferGeometry {
   const hasTooFewFrames = frames.length < 2 || crossSection.gutterWidth <= 0.01;
   if (hasTooFewFrames) {
@@ -341,12 +350,18 @@ export function buildLGutterRibbonGeometry(
   for (let i = 0; i < n; i++) {
     const f = frames[i];
     const vIdx = i * 6;
-    positions[vIdx] = f.pos.x + f.normal.x * offMin;
-    positions[vIdx + 1] = gutterY;
-    positions[vIdx + 2] = f.pos.z + f.normal.z * offMin;
-    positions[vIdx + 3] = f.pos.x + f.normal.x * offMax;
-    positions[vIdx + 4] = gutterY;
-    positions[vIdx + 5] = f.pos.z + f.normal.z * offMax;
+    const minX = f.pos.x + f.normal.x * offMin;
+    const minZ = f.pos.z + f.normal.z * offMin;
+    const maxX = f.pos.x + f.normal.x * offMax;
+    const maxZ = f.pos.z + f.normal.z * offMax;
+    const minY = (elevationSampler ? elevationSampler(minX, minZ) : f.pos.y) + gutterY;
+    const maxY = (elevationSampler ? elevationSampler(maxX, maxZ) : f.pos.y) + gutterY;
+    positions[vIdx] = minX;
+    positions[vIdx + 1] = minY;
+    positions[vIdx + 2] = minZ;
+    positions[vIdx + 3] = maxX;
+    positions[vIdx + 4] = maxY;
+    positions[vIdx + 5] = maxZ;
 
     normals[vIdx] = 0;
     normals[vIdx + 1] = 1;
@@ -376,6 +391,9 @@ export function buildLGutterRibbonGeometry(
   geom.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
   geom.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   geom.setIndex(indices);
+  if (elevationSampler) {
+    geom.computeVertexNormals();
+  }
   geom.computeBoundingSphere();
   return geom;
 }
@@ -391,6 +409,7 @@ export function buildProfiledCurbRibbonGeometry(
   crossSection: RoadCrossSectionSpec,
   baseY: number,
   rampZones: ReadonlyArray<CrosswalkRampZone> = [],
+  elevationSampler?: (x: number, z: number) => number,
 ): THREE.BufferGeometry {
   const sideSpec = getSideCrossSection(crossSection, sideSign);
   const hasInvalidInput = frames.length < 2 || sideSpec.curbWidth <= 0.01;
@@ -439,10 +458,10 @@ export function buildProfiledCurbRibbonGeometry(
     const v1 = f1.arcLen;
 
     for (let edge = 0; edge < pts0.length - 1; edge++) {
-      const p0 = framePoint(f0, pts0[edge][0], pts0[edge][1]);
-      const p1 = framePoint(f0, pts0[edge + 1][0], pts0[edge + 1][1]);
-      const p2 = framePoint(f1, pts1[edge][0], pts1[edge][1]);
-      const p3 = framePoint(f1, pts1[edge + 1][0], pts1[edge + 1][1]);
+      const p0 = framePoint(f0, pts0[edge][0], pts0[edge][1], elevationSampler);
+      const p1 = framePoint(f0, pts0[edge + 1][0], pts0[edge + 1][1], elevationSampler);
+      const p2 = framePoint(f1, pts1[edge][0], pts1[edge][1], elevationSampler);
+      const p3 = framePoint(f1, pts1[edge + 1][0], pts1[edge + 1][1], elevationSampler);
       const u0 = edge / (pts0.length - 1);
       const u1 = (edge + 1) / (pts0.length - 1);
       appendFaceStripQuad(positions, uvs, indices, p0, p1, p2, p3, u0, u1, v0, v1);
@@ -453,7 +472,7 @@ export function buildProfiledCurbRibbonGeometry(
   const appendCap = (f: RoadFrame, isStartCap: boolean): void => {
     const pts = getProfilePoints(f.arcLen);
     // pts は時計回り: [0]=(nMin, baseY), [1]=(nMin, hL), [2]=(nMid, hM), [3]=(nMax, hR), [4]=(nMax, baseY)
-    const v = pts.map(([off, y]) => framePoint(f, off, y));
+    const v = pts.map(([off, y]) => framePoint(f, off, y, elevationSampler));
     const baseIdx = positions.length / 3;
     for (const pt of v) {
       positions.push(...pt);
@@ -508,6 +527,7 @@ export function buildProfiledSidewalkRibbonGeometry(
   crossSection: RoadCrossSectionSpec,
   baseY: number,
   rampZones: ReadonlyArray<CrosswalkRampZone> = [],
+  elevationSampler?: (x: number, z: number) => number,
 ): THREE.BufferGeometry {
   const sideSpec = getSideCrossSection(crossSection, sideSign);
   const hasInvalidInput = frames.length < 2 || sideSpec.walkSurfaceWidth <= 0.05;
@@ -540,14 +560,14 @@ export function buildProfiledSidewalkRibbonGeometry(
     const v0 = f0.arcLen;
     const v1 = f1.arcLen;
 
-    const tl0 = framePoint(f0, nMin, h0.hMin);
-    const tr0 = framePoint(f0, nMax, h0.hMax);
-    const bl0 = framePoint(f0, nMin, baseY);
-    const br0 = framePoint(f0, nMax, baseY);
-    const tl1 = framePoint(f1, nMin, h1.hMin);
-    const tr1 = framePoint(f1, nMax, h1.hMax);
-    const bl1 = framePoint(f1, nMin, baseY);
-    const br1 = framePoint(f1, nMax, baseY);
+    const tl0 = framePoint(f0, nMin, h0.hMin, elevationSampler);
+    const tr0 = framePoint(f0, nMax, h0.hMax, elevationSampler);
+    const bl0 = framePoint(f0, nMin, baseY, elevationSampler);
+    const br0 = framePoint(f0, nMax, baseY, elevationSampler);
+    const tl1 = framePoint(f1, nMin, h1.hMin, elevationSampler);
+    const tr1 = framePoint(f1, nMax, h1.hMax, elevationSampler);
+    const bl1 = framePoint(f1, nMin, baseY, elevationSampler);
+    const br1 = framePoint(f1, nMax, baseY, elevationSampler);
 
     // 縁石側 (uCurb = 0) -> 建物側 (uCurb = surfW) のメートル UV
     const uMin = isPositiveNormalSide ? 0 : surfW;
@@ -564,10 +584,10 @@ export function buildProfiledSidewalkRibbonGeometry(
   // 始端・終端木口蓋
   const appendCap = (f: RoadFrame, isStartCap: boolean): void => {
     const h = getHeights(f.arcLen);
-    const bl = framePoint(f, nMin, baseY);
-    const tl = framePoint(f, nMin, h.hMin);
-    const tr = framePoint(f, nMax, h.hMax);
-    const br = framePoint(f, nMax, baseY);
+    const bl = framePoint(f, nMin, baseY, elevationSampler);
+    const tl = framePoint(f, nMin, h.hMin, elevationSampler);
+    const tr = framePoint(f, nMax, h.hMax, elevationSampler);
+    const br = framePoint(f, nMax, baseY, elevationSampler);
     const baseIdx = positions.length / 3;
     positions.push(...bl, ...tl, ...tr, ...br);
     uvs.push(0, 0, 0, 1, 1, 1, 1, 0);
@@ -874,6 +894,7 @@ function buildCornerSlabGeometry(
   filletR: number,
   baseY: number,
   curbHeight: number,
+  elevationSampler?: (x: number, z: number) => number,
 ): THREE.BufferGeometry {
   const xEdge = sx * halfW;
   const zEdge = sz * halfD;
@@ -901,17 +922,19 @@ function buildCornerSlabGeometry(
   }
 
   const topY = baseY + curbHeight;
+  const evalGroundY = (px: number, pz: number): number =>
+    elevationSampler ? elevationSampler(px, pz) : 0;
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
 
   // 天面ファン（外角 (xEdge, zEdge) から内側円弧境界へ）
   const apexIdx = 0;
-  positions.push(xEdge, topY, zEdge);
+  positions.push(xEdge, evalGroundY(xEdge, zEdge) + topY, zEdge);
   uvs.push(xEdge, zEdge);
 
   for (const [bx, bz] of boundaryPts) {
-    positions.push(bx, topY, bz);
+    positions.push(bx, evalGroundY(bx, bz) + topY, bz);
     uvs.push(bx, bz);
   }
 
@@ -930,7 +953,9 @@ function buildCornerSlabGeometry(
   // 外周スカート壁（交差点端 x=xEdge および z=zEdge の垂直面）
   const appendWall = (ax: number, az: number, bx: number, bz: number, flip: boolean): void => {
     const base = positions.length / 3;
-    positions.push(ax, baseY, az, ax, topY, az, bx, topY, bz, bx, baseY, bz);
+    const ay = evalGroundY(ax, az);
+    const by = evalGroundY(bx, bz);
+    positions.push(ax, ay + baseY, az, ax, ay + topY, az, bx, by + topY, bz, bx, by + baseY, bz);
     uvs.push(0, 0, 0, 1, 1, 1, 1, 0);
     if (flip) {
       indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
@@ -961,10 +986,17 @@ export function buildIntersectionCornerSidewalks(
   config: JapaneseIntersectionConfig,
   materials: IntersectionSidewalkMaterials,
   baseY = 0.0115,
+  localElevationSampler?: (localX: number, localZ: number) => number,
 ): IntersectionSidewalkOutput {
   const group = new THREE.Group();
   group.name = "IntersectionCornerSidewalks";
   const cornerColliders: CornerColliderSpec[] = [];
+
+  const resolvedSampler =
+    localElevationSampler ??
+    (config.elevationSampler
+      ? (lx: number, lz: number) => config.elevationSampler!(config.x + lx, config.z + lz)
+      : undefined);
 
   const arms = config.arms;
   if (!arms) {
@@ -1011,13 +1043,26 @@ export function buildIntersectionCornerSidewalks(
       right: buildSideSpec(totalEdgeWidth, innerOff, curbWidth, curbHeight, 0.015),
     };
 
-    const gutterGeom = buildLGutterRibbonGeometry(frames, sideSign, bridgeCrossSpec, baseY);
+    const gutterGeom = buildLGutterRibbonGeometry(
+      frames,
+      sideSign,
+      bridgeCrossSpec,
+      baseY,
+      resolvedSampler,
+    );
     const gutterMesh = new THREE.Mesh(gutterGeom, materials.gutterMaterial);
     gutterMesh.name = `IntersectionLGutterEdge_${edgeName}`;
     gutterMesh.receiveShadow = true;
     group.add(gutterMesh);
 
-    const curbGeom = buildProfiledCurbRibbonGeometry(frames, sideSign, bridgeCrossSpec, baseY);
+    const curbGeom = buildProfiledCurbRibbonGeometry(
+      frames,
+      sideSign,
+      bridgeCrossSpec,
+      baseY,
+      [],
+      resolvedSampler,
+    );
     const curbMesh = new THREE.Mesh(curbGeom, materials.curbMaterial);
     curbMesh.name = `IntersectionCurbEdge_${edgeName}`;
     curbMesh.userData.isSidewalkSurface = true;
@@ -1025,7 +1070,14 @@ export function buildIntersectionCornerSidewalks(
     curbMesh.receiveShadow = true;
     group.add(curbMesh);
 
-    const swGeom = buildProfiledSidewalkRibbonGeometry(frames, sideSign, bridgeCrossSpec, baseY);
+    const swGeom = buildProfiledSidewalkRibbonGeometry(
+      frames,
+      sideSign,
+      bridgeCrossSpec,
+      baseY,
+      [],
+      resolvedSampler,
+    );
     const swMesh = new THREE.Mesh(swGeom, materials.sidewalkMaterial);
     swMesh.name = `IntersectionSidewalkEdge_${edgeName}`;
     swMesh.userData.isSidewalkSurface = true;
@@ -1186,14 +1238,27 @@ export function buildIntersectionCornerSidewalks(
     };
 
     // 1. 隅切り L 型側溝（縁石の外側、車道側 -gutterW .. 0）
-    const cornerGutterGeom = buildLGutterRibbonGeometry(frames, 1, cornerDummyCross, baseY);
+    const cornerGutterGeom = buildLGutterRibbonGeometry(
+      frames,
+      1,
+      cornerDummyCross,
+      baseY,
+      resolvedSampler,
+    );
     const cornerGutterMesh = new THREE.Mesh(cornerGutterGeom, materials.gutterMaterial);
     cornerGutterMesh.name = `IntersectionLGutterCorner_${q.label}`;
     cornerGutterMesh.receiveShadow = true;
     group.add(cornerGutterMesh);
 
     // 2. 隅切り面取り縁石リム (0 .. curbWidth)
-    const cornerCurbGeom = buildProfiledCurbRibbonGeometry(frames, 1, cornerDummyCross, baseY);
+    const cornerCurbGeom = buildProfiledCurbRibbonGeometry(
+      frames,
+      1,
+      cornerDummyCross,
+      baseY,
+      [],
+      resolvedSampler,
+    );
     const cornerCurbMesh = new THREE.Mesh(cornerCurbGeom, materials.curbMaterial);
     cornerCurbMesh.name = `IntersectionCurbCorner_${q.label}`;
     cornerCurbMesh.userData.isSidewalkSurface = true;
@@ -1213,6 +1278,7 @@ export function buildIntersectionCornerSidewalks(
       filletR,
       baseY,
       curbHeight,
+      resolvedSampler,
     );
     const swSlabMesh = new THREE.Mesh(swSlabGeom, materials.sidewalkMaterial);
     swSlabMesh.name = `IntersectionSidewalkCorner_${q.label}`;
@@ -1225,7 +1291,7 @@ export function buildIntersectionCornerSidewalks(
     if (hasBrailleSpace && (config.hasCrosswalks ?? true)) {
       const tileGeo = new THREE.PlaneGeometry(0.6, 1.6);
       tileGeo.rotateX(-Math.PI / 2);
-      const tileY = baseY + curbHeight + 0.004;
+      const tileBaseY = baseY + curbHeight + 0.006;
 
       const nsTileZ = q.sz * Math.min(halfD - 1.2, ewHalfRoad + filletR + 0.6);
       const nsTileX = q.sx * (nsHalfRoad + curbWidth + 0.42);
@@ -1233,7 +1299,8 @@ export function buildIntersectionCornerSidewalks(
         const nsTile = new THREE.Mesh(tileGeo, materials.brailleMaterial);
         nsTile.name = `IntersectionTactileCorner_${q.label}_NS`;
         nsTile.userData.markingType = "TactilePaving";
-        nsTile.position.set(nsTileX, tileY, nsTileZ);
+        const nsTileY = tileBaseY + (resolvedSampler ? resolvedSampler(nsTileX, nsTileZ) : 0);
+        nsTile.position.set(nsTileX, nsTileY, nsTileZ);
         group.add(nsTile);
       }
 
@@ -1244,7 +1311,8 @@ export function buildIntersectionCornerSidewalks(
         ewTile.name = `IntersectionTactileCorner_${q.label}_EW`;
         ewTile.userData.markingType = "TactilePaving";
         ewTile.rotation.y = Math.PI / 2;
-        ewTile.position.set(ewTileX, tileY, ewTileZ);
+        const ewTileY = tileBaseY + (resolvedSampler ? resolvedSampler(ewTileX, ewTileZ) : 0);
+        ewTile.position.set(ewTileX, ewTileY, ewTileZ);
         group.add(ewTile);
       }
     }

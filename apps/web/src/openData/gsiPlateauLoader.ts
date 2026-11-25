@@ -83,12 +83,34 @@ export interface PlateauWaterBodyRenderSpec {
 const METERS_PER_DEG_LAT = 110946.0;
 const METERS_PER_DEG_LON = 91188.0;
 
+// 渋谷ストリーム（渋谷三丁目21-3）をアンカーとする非鏡像 1:1 投影定数（+X = 東, -Z = 北）
+const SHIBUYA_ORIGIN_LAT = 35.65722;
+const SHIBUYA_ORIGIN_LON = 139.70319;
+const SHIBUYA_ANCHOR_X = -750.0;
+const SHIBUYA_ANCHOR_Z = 527.6;
+const SHIBUYA_VALLEY_BASE_TP = 15.0;
+const SHIBUYA_SLOPE_SCALE = 0.72;
+
 // 行幸通り（都道404号）の東京駅→皇居（和田倉門）軸線角度（東から反時計回り 165.1° = 方位角 284.9° WNW）
 const GYOKO_THETA_RAD = (165.1 * Math.PI) / 180;
 const COS_THETA = Math.cos(GYOKO_THETA_RAD);
 const SIN_THETA = Math.sin(GYOKO_THETA_RAD);
 
 let activeOpenData: TokyoOpenDataBundle = TOKYO_MARUNOUCHI_OPEN_DATA;
+
+interface ShibuyaDemGrid {
+  xMin: number;
+  xMax: number;
+  zMin: number;
+  zMax: number;
+  gridStep: number;
+  rows: number;
+  cols: number;
+  elevationGrid: readonly (readonly number[])[];
+}
+
+let cachedRawShibuyaDemRef: ShibuyaDemGrid | null = null;
+let cachedSmoothedShibuyaGrid: number[][] | null = null;
 
 /**
  * 現在アクティブな東京都PLATEAU・国土地理院オープンデータバンドルを取得する
@@ -131,18 +153,17 @@ export async function loadTokyoOpenData(
 /**
  * JGD2011 / WGS84 緯度経度 (lat, lon) を東京駅丸の内 / 渋谷ストリームローカル3D座標 (x, z) に変換する。
  * How:
- * - 渋谷ゾーン (`lon < 139.725`) では渋谷ストリーム (35.65722°N, 139.70319°E -> local: -695, -15) をアンカーとして逆変換する。
+ * - 渋谷ゾーン (`lon < 139.725`) では渋谷ストリーム (35.65722°N, 139.70319°E -> local: -750, 527.6) をアンカーとし、
+ *   Three.js 右手座標系 (+Y=上) で左右反転が生じないよう +X=東, -Z=北 で 1:1 投影する。
  * - 丸の内・皇居ゾーン (`lon >= 139.725`) では行幸通り起点 (35.68158°N, 139.76525°E) を原点とし、行幸通り軸線 (方位角284.9°) を +z 軸へ直交回転投影する。
  */
 export function wgs84ToLocal(lat: number, lon: number): LocalCoordinate {
   const isShibuyaZone = lon < 139.725;
   if (isShibuyaZone) {
-    const shibuyaOriginLat = 35.65722;
-    const shibuyaOriginLon = 139.70319;
-    const eastM = (lon - shibuyaOriginLon) * METERS_PER_DEG_LON;
-    const northM = (lat - shibuyaOriginLat) * METERS_PER_DEG_LAT;
-    const x = -695.0 + eastM;
-    const z = -15.0 + northM;
+    const eastM = (lon - SHIBUYA_ORIGIN_LON) * METERS_PER_DEG_LON;
+    const northM = (lat - SHIBUYA_ORIGIN_LAT) * METERS_PER_DEG_LAT;
+    const x = SHIBUYA_ANCHOR_X + eastM;
+    const z = SHIBUYA_ANCHOR_Z - northM;
     return {
       x: Number(x.toFixed(2)),
       z: Number(z.toFixed(2)),
@@ -165,21 +186,18 @@ export function wgs84ToLocal(lat: number, lon: number): LocalCoordinate {
 /**
  * 東京駅丸の内 / 渋谷ストリームローカル3D座標 (x, z) を JGD2011 / WGS84 緯度経度 (lat, lon) に逆変換する。
  * How: 直交回転行列の転置（逆変換）により東西・南北メートル変位を復元し、緯度経度へ換算する。
- * 渋谷ゾーン (x < -550) では渋谷ストリーム (35.65722°N, 139.70319°E, local: -695, -15) をアンカーとして実在座標へ変換する。
+ * 渋谷ゾーン (x < -345) では渋谷ストリーム (35.65722°N, 139.70319°E, local: -750, 527.6) をアンカーとし +X=東, -Z=北 で変換する。
  */
 export function localToWgs84(x: number, z: number): Wgs84Coordinate {
   // Why x < -345:
-  // 宮益坂上 (-550) 〜 表参道 〜 青山一丁目 (-380) 〜 青山通り東端 (-346) を走行中に
-  // 丸の内側座標系（大手町・読売新聞本社付近）へ不連続ジャンプしないよう判定境界を x < -345 まで拡張し、
-  // 同時に openData.test.ts の大手町タワー判定 (-335, 110) は千代田区領域として維持する。
+  // 宮益坂上〜表参道〜青山通り〜外苑東通り (-380) 付近を走行中に丸の内側座標系へ不連続ジャンプしないよう境界を維持しつつ、
+  // openData.test.ts の大手町タワー判定 (-335, 110) は千代田区領域として維持する。
   const isShibuyaZone = x < -345;
   if (isShibuyaZone) {
-    const shibuyaOriginLat = 35.65722;
-    const shibuyaOriginLon = 139.70319;
-    const eastM = x - -695.0;
-    const northM = z - -15.0;
-    const lon = shibuyaOriginLon + eastM / METERS_PER_DEG_LON;
-    const lat = shibuyaOriginLat + northM / METERS_PER_DEG_LAT;
+    const eastM = x - SHIBUYA_ANCHOR_X;
+    const northM = SHIBUYA_ANCHOR_Z - z;
+    const lon = SHIBUYA_ORIGIN_LON + eastM / METERS_PER_DEG_LON;
+    const lat = SHIBUYA_ORIGIN_LAT + northM / METERS_PER_DEG_LAT;
     return {
       lat: Number(lat.toFixed(7)),
       lon: Number(lon.toFixed(7)),
@@ -199,27 +217,120 @@ export function localToWgs84(x: number, z: number): Wgs84Coordinate {
   };
 }
 
+function getSmoothedShibuyaElevationGrid(dem: ShibuyaDemGrid): number[][] {
+  if (cachedRawShibuyaDemRef === dem && cachedSmoothedShibuyaGrid !== null) {
+    return cachedSmoothedShibuyaGrid;
+  }
+
+  let current = dem.elevationGrid.map((row) => Array.from(row));
+  const rows = dem.rows;
+  const cols = dem.cols;
+
+  for (let pass = 0; pass < 2; pass++) {
+    const horiz = Array.from({ length: rows }, (_, r) => {
+      const src = current[r];
+      return Array.from({ length: cols }, (_, c) => {
+        const left = src[Math.max(0, c - 1)];
+        const mid = src[c];
+        const right = src[Math.min(cols - 1, c + 1)];
+        return left * 0.25 + mid * 0.5 + right * 0.25;
+      });
+    });
+
+    current = Array.from({ length: rows }, (_, r) => {
+      const rUp = Math.max(0, r - 1);
+      const rDown = Math.min(rows - 1, r + 1);
+      return Array.from(
+        { length: cols },
+        (_, c) => horiz[rUp][c] * 0.25 + horiz[r][c] * 0.5 + horiz[rDown][c] * 0.25,
+      );
+    });
+  }
+
+  cachedRawShibuyaDemRef = dem;
+  cachedSmoothedShibuyaGrid = current;
+  return current;
+}
+
+function bilinearSampleDemGrid(
+  dem: ShibuyaDemGrid,
+  grid: readonly (readonly number[])[],
+  x: number,
+  z: number,
+): number {
+  const clampedX = Math.max(dem.xMin, Math.min(dem.xMax, x));
+  const clampedZ = Math.max(dem.zMin, Math.min(dem.zMax, z));
+  const colFloat = (clampedX - dem.xMin) / dem.gridStep;
+  const rowFloat = (clampedZ - dem.zMin) / dem.gridStep;
+  const col0 = Math.max(0, Math.min(dem.cols - 1, Math.floor(colFloat)));
+  const row0 = Math.max(0, Math.min(dem.rows - 1, Math.floor(rowFloat)));
+  const col1 = Math.min(dem.cols - 1, col0 + 1);
+  const row1 = Math.min(dem.rows - 1, row0 + 1);
+  const tx = colFloat - col0;
+  const tz = rowFloat - row0;
+  const e00 = grid[row0][col0];
+  const e10 = grid[row0][col1];
+  const e01 = grid[row1][col0];
+  const e11 = grid[row1][col1];
+  const top = e00 * (1 - tx) + e10 * tx;
+  const bottom = e01 * (1 - tx) + e11 * tx;
+  return top * (1 - tz) + bottom * tz;
+}
+
+function computeFallbackShibuyaValleyTp(x: number, z: number): number {
+  const valleyDistFromStream = Math.abs(x - -840.0);
+  const slopeGain = Math.max(0, valleyDistFromStream - 95.0) * 0.042;
+  const northBias = Math.max(0, 260.0 - z) * 0.008;
+  return 15.2 + slopeGain + northBias;
+}
+
+/**
+ * 渋谷エリア（`x < -395`）の平滑済み実測 3D 地形・道路標高 Y (m) を計算する。
+ * How: 国土地理院 DEM5A 5mメッシュに 2 パス分離平滑化を適用し、渋谷川・明治通り谷底 (`TP +15.0m`) を
+ * `y = 0.0m` 基準として実勾配 (`SLOPE_SCALE = 0.72`) を算出する。`x ∈ [-500, -395]` はコサインテーパーで
+ * 外苑東通り (`x = -380`) 以降の平坦面 `y = 0.0m` へ滑らかに着地させる。
+ */
+export function sampleShibuyaTerrainY(x: number, z: number): number {
+  if (x >= -395) {
+    return 0;
+  }
+
+  const shibuyaDem = (
+    activeOpenData as TokyoOpenDataBundle & {
+      shibuyaDem5a?: ShibuyaDemGrid;
+    }
+  ).shibuyaDem5a;
+  const hasGrid =
+    Boolean(shibuyaDem) &&
+    Array.isArray(shibuyaDem?.elevationGrid) &&
+    (shibuyaDem?.elevationGrid.length ?? 0) > 0;
+
+  const smoothedTp =
+    hasGrid && shibuyaDem
+      ? bilinearSampleDemGrid(shibuyaDem, getSmoothedShibuyaElevationGrid(shibuyaDem), x, z)
+      : computeFallbackShibuyaValleyTp(x, z);
+
+  const rawY = Math.max(-0.4, (smoothedTp - SHIBUYA_VALLEY_BASE_TP) * SHIBUYA_SLOPE_SCALE);
+  if (x > -500) {
+    const t = (x - -500) / (-395 - -500);
+    const taper = 0.5 + 0.5 * Math.cos(Math.PI * t);
+    return Number((rawY * taper).toFixed(3));
+  }
+  return Number(rawY.toFixed(3));
+}
+
 /**
  * 国土地理院 地理院タイル DEM5A (5mメッシュ航空レーザ測量標高) から指定ローカル座標の標高 (TP +m) をバイリニア補間する。
  * How:
- * - 渋谷ゾーン (`x < -550`) では `activeOpenData.shibuyaDem5a` (タイル `15/29100/12906`: 渋谷川・明治通り谷底 TP +14.6m 〜 宮益坂・道玄坂・桜丘町・青山通り台地 TP +34.8m の実測スリバチ地形グリッド) をバイリニア補間する。
- * - 丸の内・皇居ゾーン (`x >= -550`) では `activeOpenData.dem5a` (タイル `15/29105/12903`) をバイリニア補間する。
+ * - 渋谷ゾーン (`x < -345`) では `activeOpenData.shibuyaDem5a` (渋谷全域タイル群 `15/29099..29100/12905..12906`) をバイリニア補間する。
+ * - 丸の内・皇居ゾーン (`x >= -345`) では `activeOpenData.dem5a` (タイル `15/29105/12903`) をバイリニア補間する。
  */
 export function sampleGsiDemElevation(x: number, z: number): number {
   const isShibuyaZone = x < -345;
   if (isShibuyaZone) {
     const shibuyaDem = (
       activeOpenData as TokyoOpenDataBundle & {
-        shibuyaDem5a?: {
-          xMin: number;
-          xMax: number;
-          zMin: number;
-          zMax: number;
-          gridStep: number;
-          rows: number;
-          cols: number;
-          elevationGrid: readonly (readonly number[])[];
-        };
+        shibuyaDem5a?: ShibuyaDemGrid;
       }
     ).shibuyaDem5a;
     const hasShibuyaDemGrid =
@@ -227,41 +338,11 @@ export function sampleGsiDemElevation(x: number, z: number): number {
       Array.isArray(shibuyaDem?.elevationGrid) &&
       (shibuyaDem?.elevationGrid.length ?? 0) > 0;
     if (hasShibuyaDemGrid && shibuyaDem) {
-      const clampedX = Math.max(shibuyaDem.xMin, Math.min(shibuyaDem.xMax, x));
-      const clampedZ = Math.max(shibuyaDem.zMin, Math.min(shibuyaDem.zMax, z));
-      const colFloat = (clampedX - shibuyaDem.xMin) / shibuyaDem.gridStep;
-      const rowFloat = (clampedZ - shibuyaDem.zMin) / shibuyaDem.gridStep;
-      const col0 = Math.max(0, Math.min(shibuyaDem.cols - 1, Math.floor(colFloat)));
-      const row0 = Math.max(0, Math.min(shibuyaDem.rows - 1, Math.floor(rowFloat)));
-      const col1 = Math.min(shibuyaDem.cols - 1, col0 + 1);
-      const row1 = Math.min(shibuyaDem.rows - 1, row0 + 1);
-      const tx = colFloat - col0;
-      const tz = rowFloat - row0;
-      const e00 = shibuyaDem.elevationGrid[row0][col0];
-      const e10 = shibuyaDem.elevationGrid[row0][col1];
-      const e01 = shibuyaDem.elevationGrid[row1][col0];
-      const e11 = shibuyaDem.elevationGrid[row1][col1];
-      const top = e00 * (1 - tx) + e10 * tx;
-      const bottom = e01 * (1 - tx) + e11 * tx;
-      const gridElevation = top * (1 - tz) + bottom * tz;
-      const isEastOfShibuyaDem = x > shibuyaDem.xMax;
-      if (isEastOfShibuyaDem) {
-        // 宮益坂上〜表参道〜青山一丁目 (xMax=-480 .. -345) は台地標高から東側へ滑らかに連続補間し、
-        // x=-550 で大手町低地 (TP +2.9m) へ標高段差ジャンプする現象を根本解消する。
-        const span = Math.max(1, -345 - shibuyaDem.xMax);
-        const eastT = Math.max(0, Math.min(1, (x - shibuyaDem.xMax) / span));
-        const smoothT = 0.5 - 0.5 * Math.cos(Math.PI * eastT);
-        const aoyamaEastElevation = Math.max(25.5, gridElevation - 3.2 * smoothT);
-        return Number(aoyamaEastElevation.toFixed(2));
-      }
+      const gridElevation = bilinearSampleDemGrid(shibuyaDem, shibuyaDem.elevationGrid, x, z);
       return Number(gridElevation.toFixed(2));
     }
 
-    // フォールバック: 渋谷川・明治通り谷底 (x=-750..-680: TP +15.2m) から東側宮益坂・ヒカリエ、西側桜丘町へのスリバチ地形標高モデル
-    const valleyOffset = Math.abs(x - -720.0);
-    const slopeGain = Math.max(0, valleyOffset - 35.0) * 0.065;
-    const northSouthSlope = Math.max(0, z + 50.0) * 0.008;
-    return Number((15.2 + slopeGain + northSouthSlope).toFixed(2));
+    return Number(computeFallbackShibuyaValleyTp(x, z).toFixed(2));
   }
 
   const dem = activeOpenData.dem5a;
@@ -337,8 +418,8 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     groundElevationM: 15.2,
     lat: 35.65722,
     lon: 139.70319,
-    localX: -695.0,
-    localZ: -15.0,
+    localX: -750.0,
+    localZ: 527.6,
     width: 44.0,
     depth: 92.0,
     color: 0xe2e8f0,
@@ -358,15 +439,15 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 47,
     storeysBelowGround: 7,
     roofEdgeAreaSqm: 4450.0,
-    groundElevationM: 15.8,
+    groundElevationM: 15.4,
     lat: 35.65845,
     lon: 139.70225,
-    localX: -808.0,
-    localZ: 145.0,
+    localX: -835.7,
+    localZ: 391.1,
     width: 58.0,
     depth: 62.0,
     color: 0x1e293b,
-    podiumColor: 0x94a3b8,
+    podiumColor: 0x9e9b93,
     glass: 0x7dd3fc,
     warmInterior: 0xfef08a,
   },
@@ -382,12 +463,12 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 34,
     storeysBelowGround: 4,
     roofEdgeAreaSqm: 4120.0,
-    groundElevationM: 21.4,
+    groundElevationM: 17.0,
     lat: 35.65902,
     lon: 139.70348,
-    localX: -690.0,
-    localZ: 148.0,
-    width: 48.0,
+    localX: -723.6,
+    localZ: 327.9,
+    width: 44.0,
     depth: 48.0,
     color: 0x25384e,
     podiumColor: 0xcbd5e1,
@@ -406,13 +487,13 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 39,
     storeysBelowGround: 4,
     roofEdgeAreaSqm: 4380.0,
-    groundElevationM: 18.5,
-    lat: 35.65665,
-    lon: 139.70085,
-    localX: -812.0,
-    localZ: -25.0,
-    width: 56.0,
-    depth: 66.0,
+    groundElevationM: 20.2,
+    lat: 35.65645,
+    lon: 139.70145,
+    localX: -908.7,
+    localZ: 613.0,
+    width: 52.0,
+    depth: 62.0,
     color: 0x334155,
     podiumColor: 0xd6d3d1,
     glass: 0xfda4af,
@@ -430,15 +511,15 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 18,
     storeysBelowGround: 4,
     roofEdgeAreaSqm: 3150.0,
-    groundElevationM: 17.6,
+    groundElevationM: 16.7,
     lat: 35.65798,
-    lon: 139.69952,
-    localX: -815.0,
-    localZ: 46.0,
+    lon: 139.70016,
+    localX: -1026.3,
+    localZ: 443.3,
     width: 50.0,
     depth: 48.0,
     color: 0x2d3748,
-    podiumColor: 0x94a3b8,
+    podiumColor: 0x9e9b93,
     glass: 0x60a5fa,
     warmInterior: 0xfde68a,
   },
@@ -457,8 +538,8 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     groundElevationM: 14.8,
     lat: 35.6552,
     lon: 139.7042,
-    localX: -692.0,
-    localZ: -135.0,
+    localX: -657.9,
+    localZ: 751.7,
     width: 48.0,
     depth: 52.0,
     color: 0x273549,
@@ -481,8 +562,8 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     groundElevationM: 15.0,
     lat: 35.6548,
     lon: 139.7012,
-    localX: -816.0,
-    localZ: -135.0,
+    localX: -931.5,
+    localZ: 796.1,
     width: 44.0,
     depth: 50.0,
     color: 0x334155,
@@ -502,11 +583,11 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 16,
     storeysBelowGround: 2,
     roofEdgeAreaSqm: 2450.0,
-    groundElevationM: 28.5,
-    lat: 35.6625,
-    lon: 139.7088,
-    localX: -565.0,
-    localZ: 152.0,
+    groundElevationM: 31.2,
+    lat: 35.6616,
+    lon: 139.70582,
+    localX: -510.2,
+    localZ: 41.7,
     width: 52.0,
     depth: 42.0,
     color: 0x334155,
@@ -527,14 +608,14 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysBelowGround: 3,
     roofEdgeAreaSqm: 2780.0,
     groundElevationM: 24.2,
-    lat: 35.6588,
-    lon: 139.7076,
-    localX: -565.0,
-    localZ: 42.0,
+    lat: 35.6576,
+    lon: 139.70664,
+    localX: -435.4,
+    localZ: 485.4,
     width: 48.0,
     depth: 44.0,
     color: 0x1e293b,
-    podiumColor: 0x94a3b8,
+    podiumColor: 0x9e9b93,
     glass: 0x38bdf8,
     warmInterior: 0xfde68a,
   },
@@ -550,11 +631,11 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 41,
     storeysBelowGround: 6,
     roofEdgeAreaSqm: 3680.0,
-    groundElevationM: 26.8,
+    groundElevationM: 24.2,
     lat: 35.65642,
     lon: 139.69942,
-    localX: -898.0,
-    localZ: -45.0,
+    localX: -1093.8,
+    localZ: 616.4,
     width: 48.0,
     depth: 48.0,
     color: 0x334155,
@@ -574,15 +655,15 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 32,
     storeysBelowGround: 3,
     roofEdgeAreaSqm: 2640.0,
-    groundElevationM: 22.8,
+    groundElevationM: 23.9,
     lat: 35.65845,
     lon: 139.70565,
-    localX: -605.0,
-    localZ: 42.0,
+    localX: -525.7,
+    localZ: 391.1,
     width: 44.0,
     depth: 44.0,
     color: 0x1e293b,
-    podiumColor: 0x94a3b8,
+    podiumColor: 0x9e9b93,
     glass: 0x60a5fa,
     warmInterior: 0xfde68a,
   },
@@ -598,13 +679,13 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 18,
     storeysBelowGround: 2,
     roofEdgeAreaSqm: 3860.0,
-    groundElevationM: 18.2,
-    lat: 35.66215,
-    lon: 139.70195,
-    localX: -695.0,
-    localZ: 320.0,
-    width: 46.0,
-    depth: 72.0,
+    groundElevationM: 20.1,
+    lat: 35.66155,
+    lon: 139.7016,
+    localX: -895.0,
+    localZ: 47.2,
+    width: 34.0,
+    depth: 100.0,
     color: 0x273549,
     podiumColor: 0xcbd5e1,
     glass: 0x38bdf8,
@@ -622,11 +703,11 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 25,
     storeysBelowGround: 4,
     roofEdgeAreaSqm: 3520.0,
-    groundElevationM: 24.5,
+    groundElevationM: 17.0,
     lat: 35.65815,
-    lon: 139.69815,
-    localX: -880.0,
-    localZ: 158.0,
+    lon: 139.69875,
+    localX: -1154.9,
+    localZ: 424.4,
     width: 56.0,
     depth: 44.0,
     color: 0x3b4252,
@@ -646,11 +727,11 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 16,
     storeysBelowGround: 3,
     roofEdgeAreaSqm: 2890.0,
-    groundElevationM: 17.5,
+    groundElevationM: 15.4,
     lat: 35.65985,
     lon: 139.70035,
-    localX: -815.0,
-    localZ: 288.0,
+    localX: -1009.0,
+    localZ: 235.8,
     width: 18.0,
     depth: 20.0,
     color: 0x0f172a,
@@ -670,11 +751,11 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 19,
     storeysBelowGround: 3,
     roofEdgeAreaSqm: 3750.0,
-    groundElevationM: 26.2,
+    groundElevationM: 25.1,
     lat: 35.66205,
     lon: 139.69875,
-    localX: -835.0,
-    localZ: 388.0,
+    localX: -1154.9,
+    localZ: -8.3,
     width: 36.0,
     depth: 36.0,
     color: 0x2e3440,
@@ -694,11 +775,11 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 21,
     storeysBelowGround: 2,
     roofEdgeAreaSqm: 2620.0,
-    groundElevationM: 31.2,
+    groundElevationM: 34.7,
     lat: 35.65565,
     lon: 139.69625,
-    localX: -898.0,
-    localZ: -145.0,
+    localX: -1382.8,
+    localZ: 701.8,
     width: 46.0,
     depth: 46.0,
     color: 0x1e3a5f,
@@ -719,10 +800,10 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysBelowGround: 2,
     roofEdgeAreaSqm: 1920.0,
     groundElevationM: 25.4,
-    lat: 35.65962,
+    lat: 35.66026,
     lon: 139.70374,
-    localX: -645.0,
-    localZ: 210.0,
+    localX: -699.9,
+    localZ: 190.4,
     width: 32.0,
     depth: 28.0,
     color: 0x334155,
@@ -743,10 +824,10 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysBelowGround: 2,
     roofEdgeAreaSqm: 2180.0,
     groundElevationM: 28.5,
-    lat: 35.66031,
+    lat: 35.66055,
     lon: 139.70471,
-    localX: -558.0,
-    localZ: 286.0,
+    localX: -611.4,
+    localZ: 158.2,
     width: 32.0,
     depth: 26.0,
     color: 0x273549,
@@ -767,10 +848,10 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysBelowGround: 2,
     roofEdgeAreaSqm: 2120.0,
     groundElevationM: 29.8,
-    lat: 35.66031,
-    lon: 139.70615,
-    localX: -428.0,
-    localZ: 286.0,
+    lat: 35.66115,
+    lon: 139.7056,
+    localX: -530.2,
+    localZ: 91.6,
     width: 32.0,
     depth: 26.0,
     color: 0x1e293b,
@@ -790,11 +871,11 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 23,
     storeysBelowGround: 4,
     roofEdgeAreaSqm: 3420.0,
-    groundElevationM: 29.8,
-    lat: 35.6722,
-    lon: 139.7245,
-    localX: -488.0,
-    localZ: 152.0,
+    groundElevationM: 32.8,
+    lat: 35.6616,
+    lon: 139.7067,
+    localX: -430.0,
+    localZ: 41.7,
     width: 48.0,
     depth: 42.0,
     color: 0x273549,
@@ -814,15 +895,15 @@ export const SHIBUYA_PLATEAU_BUILDINGS: readonly ShibuyaPlateauBuildingRecord[] 
     storeysAboveGround: 28,
     storeysBelowGround: 3,
     roofEdgeAreaSqm: 2960.0,
-    groundElevationM: 27.4,
-    lat: 35.6685,
-    lon: 139.7185,
-    localX: -488.0,
-    localZ: 42.0,
+    groundElevationM: 29.4,
+    lat: 35.65995,
+    lon: 139.70653,
+    localX: -445.5,
+    localZ: 224.7,
     width: 48.0,
     depth: 44.0,
     color: 0x1e3a5f,
-    podiumColor: 0x94a3b8,
+    podiumColor: 0x9e9b93,
     glass: 0x93c5fd,
     warmInterior: 0xfef3c7,
   },
@@ -835,26 +916,26 @@ export const SHIBUYA_GSI_ROAD_SEGMENTS: readonly GsiRoadSegmentRecord[] = [
     rnkWidth: "19.5m以上",
     displayName: "明治通り (都道305号芝新宿王子線・渋谷ストリーム前)",
     routeCode: "東京都道305号",
-    start: { x: -750, z: -210 },
-    end: { x: -750, z: 248 },
+    start: { x: -818.4, z: 245.8 },
+    end: { x: -457.3, z: 725.0 },
   },
   {
     rID: "533935-shibuya-rdcl-24601",
     rdCtg: "国道",
     rnkWidth: "19.5m以上",
-    displayName: "国道246号・青山通り・玉川通り (渋谷ストリーム北交差点)",
+    displayName: "国道246号・青山通り・金王坂 (渋谷駅東口〜宮益坂上)",
     routeCode: "国道246号",
-    start: { x: -860, z: 95 },
-    end: { x: -283, z: 95 },
+    start: { x: -762.8, z: 435.5 },
+    end: { x: -283.0, z: 95.0 },
   },
   {
     rID: "533935-shibuya-rdcl-shutoko3",
     rdCtg: "高速自動車国道等",
     rnkWidth: "19.5m以上",
-    displayName: "首都高速3号渋谷線 (国道246号・渋谷高架橋)",
+    displayName: "首都高速3号渋谷線 (玉川通り・渋谷高架橋・六本木通り直上)",
     routeCode: "首都高速3号渋谷線",
-    start: { x: -875, z: 99 },
-    end: { x: -580, z: 99 },
+    start: { x: -1625.0, z: 740.0 },
+    end: { x: -380.0, z: 400.0 },
   },
   {
     rID: "533935-shibuya-rdcl-river01",
@@ -862,18 +943,18 @@ export const SHIBUYA_GSI_ROAD_SEGMENTS: readonly GsiRoadSegmentRecord[] = [
     rnkWidth: "5.5m-13m未満",
     displayName: "渋谷川遊歩道・稲荷橋広場通り (渋谷区道)",
     routeCode: "渋谷区特別区道",
-    start: { x: -735, z: -180 },
-    end: { x: -735, z: 80 },
+    start: { x: -735.0, z: 495.0 },
+    end: { x: -480.0, z: 880.0 },
   },
   {
     rID: "533935-shibuya-rdcl-scramble",
     rdCtg: "主要地方道等",
     rnkWidth: "19.5m以上",
     displayName:
-      "渋谷スクランブル交差点連絡路 (109前〜スクランブル中心〜ハチ公前北〜宮益坂下連絡路)",
+      "渋谷スクランブル交差点連絡路 (109前〜スクランブル中心〜JR渋谷駅ガード下〜宮益坂下)",
     routeCode: "東京都道305号・413号交点",
-    start: { x: -835, z: 248 },
-    end: { x: -732, z: 248 },
+    start: { x: -1159.4, z: 272.4 },
+    end: { x: -818.4, z: 245.8 },
   },
   {
     rID: "533935-shibuya-rdcl-dogenzaka",
@@ -881,35 +962,35 @@ export const SHIBUYA_GSI_ROAD_SEGMENTS: readonly GsiRoadSegmentRecord[] = [
     rnkWidth: "13m-19.5m未満",
     displayName: "道玄坂 (都道413号・SHIBUYA109〜道玄坂上坂道区間)",
     routeCode: "東京都道413号赤坂杉並線",
-    start: { x: -830, z: 248 },
-    end: { x: -1080, z: 140 },
+    start: { x: -1159.4, z: 272.4 },
+    end: { x: -1440.0, z: 675.0 },
   },
   {
     rID: "533935-shibuya-rdcl-bunkamura",
     rdCtg: "市区町村道等",
     rnkWidth: "13m-19.5m未満",
-    displayName: "文化村通り (渋谷109〜東急本店〜松濤二丁目連絡路)",
+    displayName: "文化村通り (SHIBUYA109〜東急本店〜松濤二丁目)",
     routeCode: "渋谷区道文化村通線",
-    start: { x: -828, z: 258 },
-    end: { x: -1060, z: 370 },
+    start: { x: -1159.4, z: 272.4 },
+    end: { x: -1445.0, z: 75.0 },
   },
   {
     rID: "533935-shibuya-rdcl-koen-dori",
     rdCtg: "主要地方道等",
     rnkWidth: "13m-19.5m未満",
-    displayName: "渋谷公園通り (神南一丁目〜PARCO〜渋谷区役所・NHK方面)",
+    displayName: "渋谷公園通り (スクランブル〜西武・モディ〜PARCO〜渋谷区役所・NHK方面)",
     routeCode: "渋谷区道公園通線",
-    start: { x: -790, z: 265 },
-    end: { x: -810, z: 520 },
+    start: { x: -990.7, z: 275.8 },
+    end: { x: -1210.0, z: -202.0 },
   },
   {
     rID: "533935-shibuya-rdcl-inokashira-organ",
     rdCtg: "市区町村道等",
     rnkWidth: "5.5m-13m未満",
-    displayName: "井の頭通り・オルガン坂 (スクランブル北西〜宇田川町〜PARCO前)",
+    displayName: "井の頭通り・オルガン坂 (宇田川町交番〜PARCO前〜明治通り)",
     routeCode: "渋谷区道井の頭線",
-    start: { x: -875, z: 320 },
-    end: { x: -756, z: 354 },
+    start: { x: -1155.0, z: 128.0 },
+    end: { x: -839.2, z: -16.0 },
   },
   {
     rID: "533935-shibuya-rdcl-tamagawa-west",
@@ -917,8 +998,8 @@ export const SHIBUYA_GSI_ROAD_SEGMENTS: readonly GsiRoadSegmentRecord[] = [
     rnkWidth: "19.5m以上",
     displayName: "玉川通り・国道246号西進 (セルリアンタワー〜道玄坂上〜神泉町〜山手通り)",
     routeCode: "国道246号",
-    start: { x: -855, z: 95 },
-    end: { x: -1350, z: 150 },
+    start: { x: -762.8, z: 435.5 },
+    end: { x: -1625.0, z: 740.0 },
   },
   {
     rID: "533935-shibuya-rdcl-shinsen-nakadori",
@@ -926,26 +1007,26 @@ export const SHIBUYA_GSI_ROAD_SEGMENTS: readonly GsiRoadSegmentRecord[] = [
     rnkWidth: "5.5m-13m未満",
     displayName: "円山町・神泉仲通り (道玄坂上〜神泉駅前〜松濤二丁目)",
     routeCode: "渋谷区特別区道",
-    start: { x: -1080, z: 140 },
-    end: { x: -1060, z: 370 },
+    start: { x: -1440.0, z: 675.0 },
+    end: { x: -1445.0, z: 75.0 },
   },
   {
     rID: "533935-shibuya-rdcl-sakurazaka",
     rdCtg: "市区町村道等",
     rnkWidth: "5.5m-13m未満",
-    displayName: "桜丘さくら坂 (セルリアンタワー〜インフォスタワー〜玉川通り周回路)",
+    displayName: "桜丘さくら坂 (サクラステージ〜セルリアンタワー〜玉川通り周回路)",
     routeCode: "渋谷区特別区道",
-    start: { x: -855, z: 40 },
-    end: { x: -950, z: -60 },
+    start: { x: -974.8, z: 519.7 },
+    end: { x: -1177.4, z: 600.6 },
   },
   {
     rID: "533935-shibuya-rdcl-miyamasuzaka",
     rdCtg: "主要地方道等",
     rnkWidth: "13m-19.5m未満",
-    displayName: "宮益坂 (都道413号・宮益坂下〜宮益坂上〜表参道方面)",
+    displayName: "宮益坂 (都道413号・宮益坂下〜宮益坂上・国道246号合流)",
     routeCode: "東京都道413号赤坂杉並線",
-    start: { x: -745, z: 248 },
-    end: { x: -400, z: 248 },
+    start: { x: -818.4, z: 245.8 },
+    end: { x: -501.1, z: 194.8 },
   },
   {
     rID: "533935-shibuya-rdcl-jinnan-cross",
@@ -953,27 +1034,36 @@ export const SHIBUYA_GSI_ROAD_SEGMENTS: readonly GsiRoadSegmentRecord[] = [
     rnkWidth: "5.5m-13m未満",
     displayName: "神南二丁目連絡路 (宮下公園北〜勤労福祉会館前)",
     routeCode: "渋谷区道美竹線",
-    start: { x: -750, z: 440 },
-    end: { x: -855, z: 440 },
+    start: { x: -841.2, z: -61.2 },
+    end: { x: -1165.0, z: -120.0 },
   },
   {
     rID: "533935-shibuya-rdcl-center-gai",
     rdCtg: "市区町村道等",
     rnkWidth: "5.5m-13m未満",
     displayName:
-      "渋谷センター街・バスケットボール通り (スクランブル北西〜宇田川町交番・井の頭通り合流)",
+      "渋谷センター街・バスケットボール通り (スクランブル北西〜宇田川町交番〜文化村通り合流)",
     routeCode: "渋谷区道センター街線",
-    start: { x: -825, z: 265 },
-    end: { x: -940, z: 345 },
+    start: { x: -1024.0, z: 249.0 },
+    end: { x: -1325.0, z: 151.3 },
   },
   {
     rID: "533935-shibuya-rdcl-hikarie",
     rdCtg: "市区町村道等",
     rnkWidth: "5.5m-13m未満",
-    displayName: "ヒカリエ前通り・金王坂連絡路 (宮益坂下〜ヒカリエ前〜金王坂・国道246号)",
+    displayName: "ヒカリエ東側アクセス道路 (宮益坂東〜ヒカリエ東〜金王坂下)",
     routeCode: "渋谷区道ヒカリエ連絡線",
-    start: { x: -732, z: 248 },
-    end: { x: -710, z: 95 },
+    start: { x: -715.0, z: 229.0 },
+    end: { x: -672.0, z: 413.0 },
+  },
+  {
+    rID: "533935-shibuya-rdcl-roppongi",
+    rdCtg: "都道府県道",
+    rnkWidth: "19.5m以上",
+    displayName: "六本木通り (都道412号・渋谷駅東口〜渋谷二丁目〜六本木方面)",
+    routeCode: "東京都道412号霞ヶ関渋谷線",
+    start: { x: -762.8, z: 435.5 },
+    end: { x: -380.0, z: 400.0 },
   },
 ];
 
@@ -1025,10 +1115,15 @@ export function getShibuyaPlateauBuildingsForMap(): PlateauBuildingRenderSpec[] 
 
 /**
  * 基礎地面メッシュ頂点向けの相対地形変位 (m) を計算する。
- * Why not: 車道・交差点の走行面に地形凹凸をそのまま適用すると平坦な Rapier コライダーと視覚メッシュに乖離が生じるため、
- * 道路コリドー外周のみで国土地理院 DEM5A の実測微地形へ滑らかにブレンドする。
+ * How: 渋谷エリア (`x < -395`) は 3D 実測勾配を持つ連続地形 (`sampleShibuyaTerrainY`) を返し、
+ * 丸の内・東京駅側 (`x >= -395`) ではフラット車道コリドーを y=0 に保ちつつ外周の微地形のみブレンドする。
  */
 export function getRelativeTerrainDisplacement(x: number, z: number): number {
+  const isShibuyaSlopedTerrain = x < -395;
+  if (isShibuyaSlopedTerrain) {
+    return sampleShibuyaTerrainY(x, z);
+  }
+
   const isNearGyokoDori = Math.abs(x) < 42 && z > -35 && z < 385;
   const isNearMarunouchiSideStreets =
     (Math.abs(x - -156) < 20 || Math.abs(x - 156) < 20) && z > -15 && z < 275;
@@ -1036,27 +1131,19 @@ export function getRelativeTerrainDisplacement(x: number, z: number): number {
   const isNearBabasakimonDori = Math.abs(x - 270) < 26 && z > -95 && z < 385;
   const isNearCentralAve = Math.abs(z - 5) < 22 && Math.abs(x) < 460;
   const isNearNakadori = Math.abs(z - 165) < 20 && Math.abs(x) < 460;
-  const isNearHibiyaDori = Math.abs(z - 250) < 26 && Math.abs(x) < 500;
+  const isNearHibiyaDori = Math.abs(z - 250) < 26 && x >= -360 && x <= 500;
   const isNearUchiboriDori = Math.abs(z - 365) < 42 && Math.abs(x) < 500;
   const isNearKokyoGaienCurve = Math.abs(x) < 135 && z >= 250 && z <= 405;
-  const isNearShibuyaMeijiDori = Math.abs(x - -750) < 75 && z > -1050 && z < 1150;
-  const isNearShibuyaRoute246 = Math.abs(z - 95) < 58 && x >= -1450 && x <= 30;
-  const isNearShibuyaUrbanGrid = x >= -1450 && x <= -620 && z >= -1050 && z <= 1050;
-  // 宮益坂（x=-732..-380, z=248..250）〜青山通り（R246: z=95..108）の広域地形グリッド（83.3m間隔頂点）が道路・交差点に盛り上がるのを防ぐ
-  const isNearShibuyaEastCorridor = x >= -760 && x <= -330 && z >= -10 && z <= 345;
-  // 10倍拡張エリアの主要大動脈（六本木通り、晴海通り、銀座中央通り、昭和通り、山手通り、皇居一周道路等）
-  const isNearRoppongiDori = Math.abs(z - -350) < 40 && x >= -750 && x <= -120;
+  const isNearShibuyaRoute246 = Math.abs(z - 95) < 58 && x >= -395 && x <= 30;
   const isNearHarumiDori = Math.abs(z - -350) < 36 && x >= -200 && x <= 800;
   const isNearGinzaChuoDori = Math.abs(x - 156) < 32 && z >= -850 && z <= 5;
   const isNearShowaDori = Math.abs(x - 550) < 42 && z >= -850 && z <= 1050;
-  const isNearYamateDori = Math.abs(x - -1350) < 42 && z >= -1050 && z <= 1050;
   const isNearKokyoLoopWest = Math.abs(x - -350) < 38 && z >= 340 && z <= 900;
   const isNearKokyoLoopNorth = Math.abs(z - 850) < 38 && x >= -380 && x <= 50;
   const isNearShimbashiAvenue = Math.abs(z - -750) < 36 && x >= -300 && x <= 650;
   const isNearKandaChuoDori = Math.abs(x - 156) < 32 && z >= 250 && z <= 1050;
   const isNearHibiyaSouthNorth = Math.abs(x) < 36 && z >= -1050 && z <= 1050;
-  const isNearGaienWestEast =
-    (Math.abs(x - -550) < 32 || Math.abs(x - -380) < 32) && z >= -600 && z <= 800;
+  const isNearGaienEast = Math.abs(x - -380) < 32 && z >= -600 && z <= 800;
   const isOnRoadCorridor =
     isNearGyokoDori ||
     isNearMarunouchiSideStreets ||
@@ -1067,21 +1154,16 @@ export function getRelativeTerrainDisplacement(x: number, z: number): number {
     isNearHibiyaDori ||
     isNearUchiboriDori ||
     isNearKokyoGaienCurve ||
-    isNearShibuyaMeijiDori ||
     isNearShibuyaRoute246 ||
-    isNearShibuyaUrbanGrid ||
-    isNearShibuyaEastCorridor ||
-    isNearRoppongiDori ||
     isNearHarumiDori ||
     isNearGinzaChuoDori ||
     isNearShowaDori ||
-    isNearYamateDori ||
     isNearKokyoLoopWest ||
     isNearKokyoLoopNorth ||
     isNearShimbashiAvenue ||
     isNearKandaChuoDori ||
     isNearHibiyaSouthNorth ||
-    isNearGaienWestEast;
+    isNearGaienEast;
 
   if (isOnRoadCorridor) {
     return 0;
@@ -1140,6 +1222,7 @@ const NAV_CORRIDOR_TO_GSI_RID: ReadonlyMap<string, string> = new Map<string, str
   ["nav-road-shibuya-jinnan-cross", "533935-shibuya-rdcl-jinnan-cross"],
   ["nav-road-shibuya-center-gai", "533935-shibuya-rdcl-center-gai"],
   ["nav-road-shibuya-hikarie-access", "533935-shibuya-rdcl-hikarie"], // gitleaks:allow
+  ["nav-road-shibuya-roppongi-dori", "533935-shibuya-rdcl-roppongi"],
   ["nav-road-uchibori-dori", "50313-12849-i-3001"],
   ["nav-road-hibiya-dori", "50313-12849-i-3004"],
   ["nav-road-eitai-dori", "50313-12849-i-3003"],
@@ -1235,12 +1318,12 @@ export function findNearestGsiRoad(x: number, z: number): NearestGsiRoadResult {
     }
   }
 
-  // 高架の首都高速3号渋谷線は、明治通り交差部以外の地上市街地において地上道路中心線から 2.2m 超離れ、かつ高架中心線直上 (0.1m 未満) のときのみ返す
+  // 高架の首都高速3号渋谷線は、渋谷駅南・明治通り交差部以外の地上市街地において地上道路中心線から 2.2m 超離れ、かつ高架中心線直上 (0.1m 未満) のときのみ返す
   if (
     bestExpresswaySegment &&
     minExpresswayDistance < 0.1 &&
     minDistance > 2.2 &&
-    Math.abs(x - -750) > 12.0
+    Math.hypot(x - -762.8, z - 435.5) > 22.0
   ) {
     bestSegment = bestExpresswaySegment;
     minDistance = minExpresswayDistance;
@@ -1332,7 +1415,7 @@ function resolveBuildingPalette(b: PlateauBuildingRecord): {
   if (isMaruBldg) {
     return {
       color: 0x334155,
-      podiumColor: 0x94a3b8,
+      podiumColor: 0x9e9b93,
       glass: 0x93c5fd,
       warmInterior: 0xfde68a,
     };
@@ -1384,7 +1467,7 @@ function resolveBuildingPalette(b: PlateauBuildingRecord): {
 
   return {
     color: 0x273549,
-    podiumColor: 0x94a3b8,
+    podiumColor: 0x9e9b93,
     glass: 0x60a5fa,
     warmInterior: 0xe0f2fe,
   };
@@ -1709,18 +1792,18 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     displayName: "明治通り（都道305号）",
     routeCode: "東京都道305号",
     category: "major_avenue",
-    widthMeters: 21.0,
+    widthMeters: 16.0,
     hasMedianLine: true,
     points: [
-      { x: -750.0, z: -210.0 },
-      { x: -750.0, z: -140.0 },
-      { x: -750.0, z: -68.0 },
-      { x: -750.0, z: 0.0 },
-      { x: -750.0, z: 60.0 },
-      { x: -750.0, z: 95.0 },
-      { x: -750.0, z: 150.0 },
-      { x: -750.0, z: 206.0 },
-      { x: -750.0, z: 248.0 },
+      { x: -818.4, z: 245.8 },
+      { x: -802.0, z: 315.0 },
+      { x: -778.2, z: 386.1 },
+      { x: -762.8, z: 435.5 },
+      { x: -737.3, z: 462.6 },
+      { x: -678.0, z: 518.2 },
+      { x: -595.6, z: 594.9 },
+      { x: -525.0, z: 658.0 },
+      { x: -457.3, z: 725.0 },
     ],
   },
   {
@@ -1728,16 +1811,14 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     displayName: "明治通り（並木橋・恵比寿方面カーブ区間）",
     routeCode: "東京都道305号",
     category: "major_avenue",
-    widthMeters: 21.0,
+    widthMeters: 16.0,
     hasMedianLine: true,
     points: [
-      { x: -750, z: -210 },
-      { x: -756, z: -280 },
-      { x: -768, z: -380 },
-      { x: -780, z: -520 },
-      { x: -775, z: -680 },
-      { x: -762, z: -860 },
-      { x: -750, z: -1050 },
+      { x: -457.3, z: 725.0 },
+      { x: -420.0, z: 775.0 },
+      { x: -395.0, z: 860.0 },
+      { x: -390.0, z: 980.0 },
+      { x: -390.0, z: 1120.0 },
     ],
   },
   {
@@ -1745,16 +1826,17 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     displayName: "明治通り（宮下公園・原宿方面カーブ区間）",
     routeCode: "東京都道305号",
     category: "major_avenue",
-    widthMeters: 21.0,
+    widthMeters: 16.0,
     hasMedianLine: true,
     points: [
-      { x: -750, z: 248 },
-      { x: -753, z: 310 },
-      { x: -762, z: 420 },
-      { x: -774, z: 580 },
-      { x: -780, z: 750 },
-      { x: -772, z: 920 },
-      { x: -760, z: 1050 },
+      { x: -818.4, z: 245.8 },
+      { x: -829.2, z: 187.2 },
+      { x: -835.1, z: 70.9 },
+      { x: -841.2, z: -61.2 },
+      { x: -845.2, z: -156.0 },
+      { x: -825.0, z: -265.6 },
+      { x: -779.4, z: -352.5 },
+      { x: -731.9, z: -422.8 },
     ],
   },
 
@@ -1764,13 +1846,14 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     displayName: "渋谷スクランブル交差点連絡路（109前〜スクランブル中心〜ハチ公前北〜宮益坂下）",
     routeCode: "東京都道305号・413号交点",
     category: "major_avenue",
-    widthMeters: 22.0,
+    widthMeters: 18.0,
     hasMedianLine: false,
     points: [
-      { x: -835, z: 252 },
-      { x: -815, z: 249 },
-      { x: -775, z: 246 },
-      { x: -732, z: 248 },
+      { x: -1159.4, z: 272.4 },
+      { x: -1075.0, z: 274.0 },
+      { x: -990.7, z: 275.8 },
+      { x: -895.0, z: 260.2 },
+      { x: -818.4, z: 245.8 },
     ],
   },
   {
@@ -1781,12 +1864,13 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 12.0,
     hasMedianLine: true,
     points: [
-      { x: -830, z: 248 },
-      { x: -872, z: 235 },
-      { x: -925, z: 215 },
-      { x: -975, z: 188 },
-      { x: -1030, z: 162 },
-      { x: -1080, z: 140 },
+      { x: -1159.4, z: 272.4 },
+      { x: -1213.7, z: 316.1 },
+      { x: -1266.1, z: 355.0 },
+      { x: -1325.5, z: 418.0 },
+      { x: -1380.0, z: 515.0 },
+      { x: -1418.0, z: 600.0 },
+      { x: -1440.0, z: 675.0 },
     ],
   },
   {
@@ -1797,13 +1881,11 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 17.0,
     hasMedianLine: true,
     points: [
-      { x: -732, z: 248 },
-      { x: -685, z: 252 },
-      { x: -635, z: 254 },
-      { x: -560, z: 250 },
-      { x: -480, z: 248 },
-      { x: -400, z: 249 },
-      { x: -380, z: 250 },
+      { x: -818.4, z: 245.8 },
+      { x: -745.0, z: 234.0 },
+      { x: -660.0, z: 220.0 },
+      { x: -580.0, z: 206.0 },
+      { x: -501.1, z: 194.8 },
     ],
   },
   {
@@ -1814,12 +1896,12 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 12.0,
     hasMedianLine: false,
     points: [
-      { x: -838, z: 252 },
-      { x: -869, z: 282 },
-      { x: -905, z: 325 },
-      { x: -940, z: 345 },
-      { x: -1000, z: 360 },
-      { x: -1060, z: 370 },
+      { x: -1159.4, z: 272.4 },
+      { x: -1201.8, z: 213.9 },
+      { x: -1258.3, z: 188.4 },
+      { x: -1325.0, z: 151.3 },
+      { x: -1373.7, z: 116.0 },
+      { x: -1445.0, z: 75.0 },
     ],
   },
   {
@@ -1830,10 +1912,13 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 12.0,
     hasMedianLine: true,
     points: [
-      { x: -791, z: 250 },
-      { x: -798, z: 360 },
-      { x: -805, z: 440 },
-      { x: -810, z: 520 },
+      { x: -990.7, z: 275.8 },
+      { x: -981.6, z: 185.0 },
+      { x: -1005.0, z: 105.0 },
+      { x: -1055.0, z: 25.0 },
+      { x: -1108.1, z: -43.6 },
+      { x: -1165.0, z: -120.0 },
+      { x: -1210.0, z: -202.0 },
     ],
   },
   {
@@ -1844,12 +1929,13 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 11.0,
     hasMedianLine: false,
     points: [
-      { x: -875, z: 320 },
-      { x: -856, z: 342 },
-      { x: -822, z: 345 },
-      { x: -802, z: 348 },
-      { x: -798, z: 358 },
-      { x: -756, z: 354 },
+      { x: -1155.0, z: 128.0 },
+      { x: -1115.0, z: 75.0 },
+      { x: -1090.4, z: -5.0 },
+      { x: -1108.1, z: -43.6 },
+      { x: -1020.0, z: -35.0 },
+      { x: -935.0, z: -24.0 },
+      { x: -839.2, z: -16.0 },
     ],
   },
   {
@@ -1861,15 +1947,17 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 20.0,
     hasMedianLine: true,
     points: [
-      { x: -750, z: 102 },
-      { x: -802, z: 98 },
-      { x: -855, z: 95 },
-      { x: -940, z: 115 },
-      { x: -1010, z: 128 },
-      { x: -1080, z: 140 },
-      { x: -1170, z: 146 },
-      { x: -1250, z: 150 },
-      { x: -1350, z: 150 },
+      { x: -762.8, z: 435.5 },
+      { x: -841.3, z: 464.0 },
+      { x: -901.4, z: 488.7 },
+      { x: -974.8, z: 519.7 },
+      { x: -1091.2, z: 565.1 },
+      { x: -1177.4, z: 600.6 },
+      { x: -1267.8, z: 634.6 },
+      { x: -1346.6, z: 654.1 },
+      { x: -1440.0, z: 675.0 },
+      { x: -1530.0, z: 705.0 },
+      { x: -1625.0, z: 740.0 },
     ],
   },
   {
@@ -1880,11 +1968,11 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 9.5,
     hasMedianLine: false,
     points: [
-      { x: -1080, z: 140 },
-      { x: -1100, z: 185 },
-      { x: -1110, z: 230 },
-      { x: -1100, z: 300 },
-      { x: -1060, z: 370 },
+      { x: -1440.0, z: 675.0 },
+      { x: -1465.0, z: 520.0 },
+      { x: -1465.0, z: 360.0 },
+      { x: -1455.0, z: 210.0 },
+      { x: -1445.0, z: 75.0 },
     ],
   },
   {
@@ -1895,13 +1983,12 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 10.0,
     hasMedianLine: false,
     points: [
-      { x: -855, z: 95 },
-      { x: -855, z: 40 },
-      { x: -890, z: 10 },
-      { x: -940, z: -30 },
-      { x: -950, z: -60 },
-      { x: -980, z: 0 },
-      { x: -940, z: 115 },
+      { x: -974.8, z: 519.7 },
+      { x: -958.0, z: 565.0 },
+      { x: -970.0, z: 622.0 },
+      { x: -995.0, z: 675.0 },
+      { x: -1105.0, z: 668.0 },
+      { x: -1177.4, z: 600.6 },
     ],
   },
   {
@@ -1912,11 +1999,10 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 10.5,
     hasMedianLine: false,
     points: [
-      { x: -750, z: 430 },
-      { x: -772, z: 434 },
-      { x: -798, z: 440 },
-      { x: -825, z: 446 },
-      { x: -860, z: 450 },
+      { x: -841.2, z: -61.2 },
+      { x: -980.0, z: -98.0 },
+      { x: -1075.0, z: -110.0 },
+      { x: -1165.0, z: -120.0 },
     ],
   },
   {
@@ -1925,15 +2011,15 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
       "渋谷センター街・バスケットボール通り（スクランブル北西〜宇田川町交番・井の頭通り合流）",
     routeCode: "渋谷区道センター街線",
     category: "local_street",
-    widthMeters: 10.0,
+    widthMeters: 7.5,
     hasMedianLine: false,
     points: [
-      { x: -835, z: 268 },
-      { x: -850, z: 292 },
-      { x: -875, z: 320 },
-      { x: -902, z: 350 },
-      { x: -922, z: 356 },
-      { x: -940, z: 345 },
+      { x: -1024.0, z: 249.0 },
+      { x: -1065.0, z: 212.0 },
+      { x: -1110.0, z: 168.0 },
+      { x: -1155.0, z: 128.0 },
+      { x: -1240.0, z: 138.0 },
+      { x: -1325.0, z: 151.3 },
     ],
   },
   {
@@ -1944,11 +2030,25 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 10.0,
     hasMedianLine: false,
     points: [
-      { x: -729, z: 248 },
-      { x: -729, z: 205 },
-      { x: -727.5, z: 155 },
-      { x: -727.5, z: 120 },
-      { x: -727.5, z: 102 },
+      { x: -715.0, z: 229.0 },
+      { x: -698.0, z: 277.0 },
+      { x: -682.0, z: 325.0 },
+      { x: -672.0, z: 413.0 },
+    ],
+  },
+  {
+    id: "nav-road-shibuya-roppongi-dori",
+    displayName: "六本木通り（渋谷駅東口〜西麻布〜六本木・外苑東連絡）",
+    routeCode: "東京都道412号",
+    category: "major_avenue",
+    widthMeters: 18.0,
+    hasMedianLine: true,
+    points: [
+      { x: -762.8, z: 435.5 },
+      { x: -661.0, z: 422.1 },
+      { x: -611.9, z: 436.5 },
+      { x: -484.3, z: 428.3 },
+      { x: -380.0, z: 400.0 },
     ],
   },
 
@@ -1961,7 +2061,7 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 22.0,
     hasMedianLine: true,
     points: [
-      { x: -500, z: 250 },
+      { x: -360, z: 250 },
       { x: 500, z: 250 },
     ],
   },
@@ -1985,13 +2085,14 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 20.0,
     hasMedianLine: true,
     points: [
-      { x: -750, z: 102 },
-      { x: -690, z: 106 },
-      { x: -632, z: 108 },
-      { x: -545, z: 108 },
-      { x: -450, z: 104 },
-      { x: -355, z: 98 },
-      { x: -283, z: 95 },
+      { x: -762.8, z: 435.5 },
+      { x: -680.0, z: 415.0 },
+      { x: -607.1, z: 349.8 },
+      { x: -550.0, z: 268.0 },
+      { x: -501.1, z: 194.8 },
+      { x: -440.0, z: 142.0 },
+      { x: -380.0, z: 98.0 },
+      { x: -283.0, z: 95.0 },
     ],
   },
   // 10倍広域マップ拡張幹線道路
@@ -2000,16 +2101,17 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     displayName: "明治通り北（原宿・代々木方面）",
     routeCode: "都道305号",
     category: "major_avenue",
-    widthMeters: 21.0,
+    widthMeters: 16.0,
     hasMedianLine: true,
     points: [
-      { x: -750, z: 248 },
-      { x: -753, z: 310 },
-      { x: -762, z: 420 },
-      { x: -774, z: 580 },
-      { x: -780, z: 750 },
-      { x: -772, z: 920 },
-      { x: -760, z: 1050 },
+      { x: -818.4, z: 245.8 },
+      { x: -829.2, z: 187.2 },
+      { x: -835.1, z: 70.9 },
+      { x: -841.2, z: -61.2 },
+      { x: -845.2, z: -156.0 },
+      { x: -825.0, z: -265.6 },
+      { x: -779.4, z: -352.5 },
+      { x: -731.9, z: -422.8 },
     ],
   },
   {
@@ -2017,16 +2119,14 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     displayName: "明治通り南（恵比寿・広尾方面）",
     routeCode: "都道305号",
     category: "major_avenue",
-    widthMeters: 21.0,
+    widthMeters: 16.0,
     hasMedianLine: true,
     points: [
-      { x: -750, z: -210 },
-      { x: -756, z: -280 },
-      { x: -768, z: -380 },
-      { x: -780, z: -520 },
-      { x: -775, z: -680 },
-      { x: -762, z: -860 },
-      { x: -750, z: -1050 },
+      { x: -457.3, z: 725.0 },
+      { x: -420.0, z: 775.0 },
+      { x: -395.0, z: 860.0 },
+      { x: -390.0, z: 980.0 },
+      { x: -390.0, z: 1120.0 },
     ],
   },
   {
@@ -2037,25 +2137,22 @@ const NAVIGATION_ROAD_CORRIDORS: ReadonlyArray<NavigationRoadCorridorSpec> = [
     widthMeters: 24.0,
     hasMedianLine: true,
     points: [
-      { x: -1365, z: -850 },
-      { x: -1355, z: -550 },
-      { x: -1346, z: -200 },
-      { x: -1348, z: 0 },
-      { x: -1350, z: 150 },
-      { x: -1358, z: 380 },
-      { x: -1368, z: 620 },
-      { x: -1362, z: 850 },
+      { x: -1640.0, z: -350.0 },
+      { x: -1635.0, z: 100.0 },
+      { x: -1630.0, z: 450.0 },
+      { x: -1625.0, z: 740.0 },
+      { x: -1620.0, z: 1050.0 },
     ],
   },
   {
     id: "nav-road-roppongi-dori",
-    displayName: "六本木通り（渋谷〜六本木〜赤坂）",
+    displayName: "六本木通り（外苑東・溜池〜日比谷方面）",
     routeCode: "都道412号",
     category: "major_avenue",
     widthMeters: 22.0,
     hasMedianLine: true,
     points: [
-      { x: -600, z: -350 },
+      { x: -380, z: -350 },
       { x: 0, z: -350 },
     ],
   },
@@ -2229,160 +2326,160 @@ const NAVIGATION_INTERSECTIONS: ReadonlyArray<NavigationIntersectionSpec> = [
   {
     id: "nav-int-shibuya-east",
     name: "渋谷駅東口",
-    x: -750,
-    z: 95,
-    widthMeters: 21,
-    depthMeters: 18,
+    x: -762.8,
+    z: 435.5,
+    widthMeters: 26,
+    depthMeters: 24,
   },
   {
     id: "nav-int-shibuya-miyamasuzaka-shita",
     name: "宮益坂下",
-    x: -750,
-    z: 248,
+    x: -818.4,
+    z: 245.8,
     widthMeters: 28,
     depthMeters: 24,
   },
   {
     id: "nav-int-shibuya-109-y",
     name: "SHIBUYA109前",
-    x: -830,
-    z: 252,
+    x: -1159.4,
+    z: 272.4,
     widthMeters: 30,
     depthMeters: 28,
   },
   {
     id: "nav-int-shibuya-scramble",
     name: "渋谷スクランブル交差点",
-    x: -815,
-    z: 248,
+    x: -990.7,
+    z: 275.8,
     widthMeters: 38,
     depthMeters: 38,
   },
   {
     id: "nav-int-shibuya-dogenzaka-ue",
     name: "道玄坂上（玉川通り合流）",
-    x: -1080,
-    z: 140,
+    x: -1440.0,
+    z: 675.0,
     widthMeters: 24,
     depthMeters: 22,
   },
   {
     id: "nav-int-shibuya-shinsen-cho",
     name: "神泉町（旧山手通り交差点）",
-    x: -1250,
-    z: 150,
+    x: -1530.0,
+    z: 705.0,
     widthMeters: 26,
     depthMeters: 24,
   },
   {
     id: "nav-int-shibuya-tokyu-honten",
     name: "東急本店前（松濤文化村通り）",
-    x: -940,
-    z: 345,
+    x: -1325.0,
+    z: 151.3,
     widthMeters: 22,
     depthMeters: 20,
   },
   {
     id: "nav-int-shibuya-shoto-2chome",
     name: "松濤二丁目",
-    x: -1060,
-    z: 370,
+    x: -1445.0,
+    z: 75.0,
     widthMeters: 20,
     depthMeters: 18,
   },
   {
     id: "nav-int-shibuya-jinnan-1chome",
     name: "神南一丁目（公園通り入口）",
-    x: -790,
-    z: 265,
+    x: -981.6,
+    z: 185.0,
     widthMeters: 22,
     depthMeters: 20,
   },
   {
     id: "nav-int-shibuya-parco",
     name: "渋谷PARCO前（オルガン坂合流）",
-    x: -798,
-    z: 360,
+    x: -1108.1,
+    z: -43.6,
     widthMeters: 22,
     depthMeters: 20,
   },
   {
     id: "nav-int-shibuya-kinro-fukushi",
     name: "勤労福祉会館前",
-    x: -805,
-    z: 440,
+    x: -1165.0,
+    z: -120.0,
     widthMeters: 22,
     depthMeters: 20,
   },
   {
     id: "nav-int-shibuya-ward-office",
     name: "渋谷区役所・NHK前",
-    x: -810,
-    z: 520,
+    x: -1210.0,
+    z: -202.0,
     widthMeters: 24,
     depthMeters: 22,
   },
   {
     id: "nav-int-shibuya-udagawa-koban",
     name: "宇田川町交番前",
-    x: -875,
-    z: 320,
+    x: -1155.0,
+    z: 128.0,
     widthMeters: 18,
     depthMeters: 16,
   },
   {
     id: "nav-int-shibuya-sakurazaka-infotower",
     name: "さくら坂上（インフォスタワー前）",
-    x: -950,
-    z: -60,
+    x: -995.0,
+    z: 675.0,
     widthMeters: 18,
     depthMeters: 16,
   },
   {
     id: "nav-int-shibuya-miyamasuzaka-ue",
     name: "宮益坂上",
-    x: -560,
-    z: 248,
+    x: -501.1,
+    z: 194.8,
     widthMeters: 22,
     depthMeters: 20,
   },
   {
     id: "nav-int-shibuya-aoyama-omotesando",
     name: "青山通り・表参道方面接続",
-    x: -400,
-    z: 248,
+    x: -380.0,
+    z: 98.0,
     widthMeters: 24,
     depthMeters: 22,
   },
   {
     id: "nav-int-shibuya-cerulean-tamagawa",
     name: "セルリアンタワー前（玉川通り・さくら坂入口）",
-    x: -855,
-    z: 95,
+    x: -974.8,
+    z: 519.7,
     widthMeters: 24,
     depthMeters: 22,
   },
   {
     id: "nav-int-shibuya-center-gai",
     name: "センター街入口（スクランブル北西）",
-    x: -835,
-    z: 268,
+    x: -1024.0,
+    z: 249.0,
     widthMeters: 20,
     depthMeters: 18,
   },
   {
     id: "nav-int-shibuya-hikarie-front",
     name: "ヒカリエ前（アクセス道路・ShinQsエントランス前）",
-    x: -730,
-    z: 155,
+    x: -682.0,
+    z: 325.0,
     widthMeters: 22,
     depthMeters: 20,
   },
   {
     id: "nav-int-shibuya-kon-ozaka",
     name: "金王坂下・ヒカリエ南（国道246号・青山通り合流）",
-    x: -730,
-    z: 95,
+    x: -672.0,
+    z: 413.0,
     widthMeters: 24,
     depthMeters: 22,
   },
@@ -2390,56 +2487,56 @@ const NAVIGATION_INTERSECTIONS: ReadonlyArray<NavigationIntersectionSpec> = [
   {
     id: "nav-int-jingumae",
     name: "神宮前",
-    x: -750,
-    z: 550,
+    x: -841.2,
+    z: -61.2,
     widthMeters: 28,
     depthMeters: 24,
   },
   {
     id: "nav-int-harajuku-station",
     name: "原宿駅前",
-    x: -750,
-    z: 850,
+    x: -779.4,
+    z: -352.5,
     widthMeters: 28,
     depthMeters: 24,
   },
   {
     id: "nav-int-shibuyabashi",
     name: "渋谷橋",
-    x: -750,
-    z: -550,
+    x: -457.3,
+    z: 725.0,
     widthMeters: 28,
     depthMeters: 24,
   },
   {
     id: "nav-int-ebisu-station",
     name: "恵比寿駅前",
-    x: -750,
-    z: -800,
+    x: -390.0,
+    z: 980.0,
     widthMeters: 28,
     depthMeters: 24,
   },
   {
     id: "nav-int-nishi-azabu",
     name: "西麻布",
-    x: -550,
-    z: -350,
+    x: -484.3,
+    z: 428.3,
     widthMeters: 30,
     depthMeters: 30,
   },
   {
     id: "nav-int-roppongi",
-    name: "六本木",
-    x: -380,
-    z: -350,
-    widthMeters: 30,
-    depthMeters: 30,
+    name: "六本木（六本木通り・外苑東接続）",
+    x: -380.0,
+    z: 400.0,
+    widthMeters: 28,
+    depthMeters: 26,
   },
   {
     id: "nav-int-omotesando",
     name: "表参道",
-    x: -550,
-    z: 250,
+    x: -440.0,
+    z: 142.0,
     widthMeters: 30,
     depthMeters: 30,
   },
@@ -2510,8 +2607,8 @@ const NAVIGATION_INTERSECTIONS: ReadonlyArray<NavigationIntersectionSpec> = [
   {
     id: "nav-int-yamate-shinsen",
     name: "山手神泉",
-    x: -1350,
-    z: 150,
+    x: -1625.0,
+    z: 740.0,
     widthMeters: 30,
     depthMeters: 26,
   },
@@ -2565,18 +2662,18 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       displayName: "明治通り（都道305号・渋谷駅前本線）",
       routeCode: "東京都道305号",
       category: "major_avenue",
-      widthMeters: 21.0,
+      widthMeters: 16.0,
       hasMedianLine: true,
       points: [
-        { x: -750.0, z: -210.0 },
-        { x: -750.0, z: -140.0 },
-        { x: -750.0, z: -68.0 },
-        { x: -750.0, z: 0.0 },
-        { x: -750.0, z: 60.0 },
-        { x: -750.0, z: 95.0 },
-        { x: -750.0, z: 150.0 },
-        { x: -750.0, z: 206.0 },
-        { x: -750.0, z: 248.0 },
+        { x: -818.4, z: 245.8 },
+        { x: -802.0, z: 315.0 },
+        { x: -778.2, z: 386.1 },
+        { x: -762.8, z: 435.5 },
+        { x: -737.3, z: 462.6 },
+        { x: -678.0, z: 518.2 },
+        { x: -595.6, z: 594.9 },
+        { x: -525.0, z: 658.0 },
+        { x: -457.3, z: 725.0 },
       ],
     },
     {
@@ -2584,16 +2681,14 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       displayName: "明治通り（並木橋・恵比寿方面カーブ区間）",
       routeCode: "東京都道305号",
       category: "major_avenue",
-      widthMeters: 21.0,
+      widthMeters: 16.0,
       hasMedianLine: true,
       points: [
-        { x: -750, z: -210 },
-        { x: -756, z: -280 },
-        { x: -768, z: -380 },
-        { x: -780, z: -520 },
-        { x: -775, z: -680 },
-        { x: -762, z: -860 },
-        { x: -750, z: -1050 },
+        { x: -457.3, z: 725.0 },
+        { x: -420.0, z: 775.0 },
+        { x: -395.0, z: 860.0 },
+        { x: -390.0, z: 980.0 },
+        { x: -390.0, z: 1120.0 },
       ],
     },
     {
@@ -2601,16 +2696,17 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       displayName: "明治通り（宮下公園・原宿方面カーブ区間）",
       routeCode: "東京都道305号",
       category: "major_avenue",
-      widthMeters: 21.0,
+      widthMeters: 16.0,
       hasMedianLine: true,
       points: [
-        { x: -750, z: 248 },
-        { x: -753, z: 310 },
-        { x: -762, z: 420 },
-        { x: -774, z: 580 },
-        { x: -780, z: 750 },
-        { x: -772, z: 920 },
-        { x: -760, z: 1050 },
+        { x: -818.4, z: 245.8 },
+        { x: -829.2, z: 187.2 },
+        { x: -835.1, z: 70.9 },
+        { x: -841.2, z: -61.2 },
+        { x: -845.2, z: -156.0 },
+        { x: -825.0, z: -265.6 },
+        { x: -779.4, z: -352.5 },
+        { x: -731.9, z: -422.8 },
       ],
     },
     {
@@ -2621,14 +2717,11 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 24.0,
       hasMedianLine: true,
       points: [
-        { x: -1365, z: -850 },
-        { x: -1355, z: -550 },
-        { x: -1346, z: -200 },
-        { x: -1348, z: 0 },
-        { x: -1350, z: 150 },
-        { x: -1358, z: 380 },
-        { x: -1368, z: 620 },
-        { x: -1362, z: 850 },
+        { x: -1640.0, z: -350.0 },
+        { x: -1635.0, z: 100.0 },
+        { x: -1630.0, z: 450.0 },
+        { x: -1625.0, z: 740.0 },
+        { x: -1620.0, z: 1050.0 },
       ],
     },
     {
@@ -2636,13 +2729,14 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       displayName: "渋谷スクランブル交差点連絡路（109前〜スクランブル中心〜ハチ公前北〜宮益坂下）",
       routeCode: "東京都道305号・413号交点",
       category: "major_avenue",
-      widthMeters: 22.0,
+      widthMeters: 18.0,
       hasMedianLine: false,
       points: [
-        { x: -835, z: 252 },
-        { x: -815, z: 249 },
-        { x: -775, z: 246 },
-        { x: -732, z: 248 },
+        { x: -1159.4, z: 272.4 },
+        { x: -1075.0, z: 274.0 },
+        { x: -990.7, z: 275.8 },
+        { x: -895.0, z: 260.2 },
+        { x: -818.4, z: 245.8 },
       ],
     },
     {
@@ -2653,13 +2747,14 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 20.0,
       hasMedianLine: true,
       points: [
-        { x: -750, z: 102 },
-        { x: -690, z: 106 },
-        { x: -632, z: 108 },
-        { x: -545, z: 108 },
-        { x: -450, z: 104 },
-        { x: -355, z: 98 },
-        { x: -283, z: 95 },
+        { x: -762.8, z: 435.5 },
+        { x: -680.0, z: 415.0 },
+        { x: -607.1, z: 349.8 },
+        { x: -550.0, z: 268.0 },
+        { x: -501.1, z: 194.8 },
+        { x: -440.0, z: 142.0 },
+        { x: -380.0, z: 98.0 },
+        { x: -283.0, z: 95.0 },
       ],
     },
     {
@@ -2670,12 +2765,13 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 12.0,
       hasMedianLine: true,
       points: [
-        { x: -837, z: 248 },
-        { x: -872, z: 235 },
-        { x: -925, z: 215 },
-        { x: -975, z: 188 },
-        { x: -1030, z: 162 },
-        { x: -1080, z: 140 },
+        { x: -1159.4, z: 272.4 },
+        { x: -1213.7, z: 316.1 },
+        { x: -1266.1, z: 355.0 },
+        { x: -1325.5, z: 418.0 },
+        { x: -1380.0, z: 515.0 },
+        { x: -1418.0, z: 600.0 },
+        { x: -1440.0, z: 675.0 },
       ],
     },
     {
@@ -2686,13 +2782,11 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 17.0,
       hasMedianLine: true,
       points: [
-        { x: -732, z: 248 },
-        { x: -685, z: 252 },
-        { x: -635, z: 254 },
-        { x: -560, z: 250 },
-        { x: -480, z: 248 },
-        { x: -400, z: 249 },
-        { x: -380, z: 250 },
+        { x: -818.4, z: 245.8 },
+        { x: -745.0, z: 234.0 },
+        { x: -660.0, z: 220.0 },
+        { x: -580.0, z: 206.0 },
+        { x: -501.1, z: 194.8 },
       ],
     },
     {
@@ -2703,12 +2797,12 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 12.0,
       hasMedianLine: false,
       points: [
-        { x: -838, z: 252 },
-        { x: -869, z: 282 },
-        { x: -905, z: 325 },
-        { x: -940, z: 345 },
-        { x: -1000, z: 360 },
-        { x: -1060, z: 370 },
+        { x: -1159.4, z: 272.4 },
+        { x: -1201.8, z: 213.9 },
+        { x: -1258.3, z: 188.4 },
+        { x: -1325.0, z: 151.3 },
+        { x: -1373.7, z: 116.0 },
+        { x: -1445.0, z: 75.0 },
       ],
     },
     {
@@ -2719,10 +2813,13 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 12.0,
       hasMedianLine: true,
       points: [
-        { x: -791, z: 250 },
-        { x: -798, z: 360 },
-        { x: -805, z: 440 },
-        { x: -810, z: 520 },
+        { x: -990.7, z: 275.8 },
+        { x: -981.6, z: 185.0 },
+        { x: -1005.0, z: 105.0 },
+        { x: -1055.0, z: 25.0 },
+        { x: -1108.1, z: -43.6 },
+        { x: -1165.0, z: -120.0 },
+        { x: -1210.0, z: -202.0 },
       ],
     },
     {
@@ -2733,12 +2830,13 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 11.0,
       hasMedianLine: false,
       points: [
-        { x: -875, z: 320 },
-        { x: -856, z: 342 },
-        { x: -822, z: 345 },
-        { x: -802, z: 348 },
-        { x: -798, z: 358 },
-        { x: -756, z: 354 },
+        { x: -1155.0, z: 128.0 },
+        { x: -1115.0, z: 75.0 },
+        { x: -1090.4, z: -5.0 },
+        { x: -1108.1, z: -43.6 },
+        { x: -1020.0, z: -35.0 },
+        { x: -935.0, z: -24.0 },
+        { x: -839.2, z: -16.0 },
       ],
     },
     {
@@ -2750,15 +2848,17 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 20.0,
       hasMedianLine: true,
       points: [
-        { x: -750, z: 102 },
-        { x: -802, z: 98 },
-        { x: -855, z: 95 },
-        { x: -940, z: 115 },
-        { x: -1010, z: 128 },
-        { x: -1080, z: 140 },
-        { x: -1170, z: 146 },
-        { x: -1250, z: 150 },
-        { x: -1350, z: 150 },
+        { x: -762.8, z: 435.5 },
+        { x: -841.3, z: 464.0 },
+        { x: -901.4, z: 488.7 },
+        { x: -974.8, z: 519.7 },
+        { x: -1091.2, z: 565.1 },
+        { x: -1177.4, z: 600.6 },
+        { x: -1267.8, z: 634.6 },
+        { x: -1346.6, z: 654.1 },
+        { x: -1440.0, z: 675.0 },
+        { x: -1530.0, z: 705.0 },
+        { x: -1625.0, z: 740.0 },
       ],
     },
     {
@@ -2769,11 +2869,11 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 9.5,
       hasMedianLine: false,
       points: [
-        { x: -1080, z: 140 },
-        { x: -1100, z: 185 },
-        { x: -1110, z: 230 },
-        { x: -1100, z: 300 },
-        { x: -1060, z: 370 },
+        { x: -1440.0, z: 675.0 },
+        { x: -1465.0, z: 520.0 },
+        { x: -1465.0, z: 360.0 },
+        { x: -1455.0, z: 210.0 },
+        { x: -1445.0, z: 75.0 },
       ],
     },
     {
@@ -2784,13 +2884,12 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 10.0,
       hasMedianLine: false,
       points: [
-        { x: -855, z: 95 },
-        { x: -855, z: 40 },
-        { x: -890, z: 10 },
-        { x: -940, z: -30 },
-        { x: -950, z: -60 },
-        { x: -980, z: 0 },
-        { x: -940, z: 115 },
+        { x: -974.8, z: 519.7 },
+        { x: -958.0, z: 565.0 },
+        { x: -970.0, z: 622.0 },
+        { x: -995.0, z: 675.0 },
+        { x: -1105.0, z: 668.0 },
+        { x: -1177.4, z: 600.6 },
       ],
     },
     {
@@ -2801,11 +2900,10 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 10.5,
       hasMedianLine: false,
       points: [
-        { x: -750, z: 430 },
-        { x: -772, z: 434 },
-        { x: -798, z: 440 },
-        { x: -825, z: 446 },
-        { x: -860, z: 450 },
+        { x: -841.2, z: -61.2 },
+        { x: -980.0, z: -98.0 },
+        { x: -1075.0, z: -110.0 },
+        { x: -1165.0, z: -120.0 },
       ],
     },
     {
@@ -2814,15 +2912,15 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
         "渋谷センター街・バスケットボール通り（スクランブル北西〜宇田川町交番・井の頭通り合流）",
       routeCode: "渋谷区道センター街線",
       category: "local_street",
-      widthMeters: 10.0,
+      widthMeters: 7.5,
       hasMedianLine: false,
       points: [
-        { x: -835, z: 268 },
-        { x: -850, z: 292 },
-        { x: -875, z: 320 },
-        { x: -902, z: 350 },
-        { x: -922, z: 356 },
-        { x: -940, z: 345 },
+        { x: -1024.0, z: 249.0 },
+        { x: -1065.0, z: 212.0 },
+        { x: -1110.0, z: 168.0 },
+        { x: -1155.0, z: 128.0 },
+        { x: -1240.0, z: 138.0 },
+        { x: -1325.0, z: 151.3 },
       ],
     },
     {
@@ -2833,11 +2931,25 @@ export function getOpenDataCurvedRoadCorridors(): ReadonlyArray<NavigationRoadCo
       widthMeters: 10.0,
       hasMedianLine: false,
       points: [
-        { x: -729, z: 248 },
-        { x: -729, z: 205 },
-        { x: -727.5, z: 155 },
-        { x: -727.5, z: 120 },
-        { x: -727.5, z: 102 },
+        { x: -715.0, z: 229.0 },
+        { x: -698.0, z: 277.0 },
+        { x: -682.0, z: 325.0 },
+        { x: -672.0, z: 413.0 },
+      ],
+    },
+    {
+      id: "nav-road-shibuya-roppongi-dori",
+      displayName: "六本木通り（渋谷駅東口〜西麻布〜六本木・外苑東連絡）",
+      routeCode: "東京都道412号",
+      category: "major_avenue",
+      widthMeters: 18.0,
+      hasMedianLine: true,
+      points: [
+        { x: -762.8, z: 435.5 },
+        { x: -661.0, z: 422.1 },
+        { x: -611.9, z: 436.5 },
+        { x: -484.3, z: 428.3 },
+        { x: -380.0, z: 400.0 },
       ],
     },
   ];

@@ -23,6 +23,7 @@ export class VehiclePhysics {
   private hasInitializedVisualFilter = false;
   private smoothedQuat = new THREE.Quaternion();
   private obstacleColliderHandleSet = new Set<number>();
+  private drivableColliderHandleSet = new Set<number>();
 
   // 4輪レイキャストサスペンション・タイヤ仕様
   public readonly wheelRadius = 0.38;
@@ -108,6 +109,14 @@ export class VehiclePhysics {
    */
   public setObstacleColliderHandles(handles: Iterable<number>): void {
     this.obstacleColliderHandleSet = new Set(handles);
+  }
+
+  /**
+   * 起伏地形 Trimesh 等の走行可能路面コライダーハンドル群を登録し、
+   * 標高 `y > 0.2m` の坂道区間（道玄坂・宮益坂・玉川通り等）でも車輪レイキャストが確実に接地するようにする。
+   */
+  public setDrivableColliderHandles(handles: Iterable<number>): void {
+    this.drivableColliderHandleSet = new Set(handles);
   }
 
   /**
@@ -222,6 +231,10 @@ export class VehiclePhysics {
       if (isRegisteredObstacle) {
         return false;
       }
+      const isRegisteredDrivable = this.drivableColliderHandleSet.has(collider.handle);
+      if (isRegisteredDrivable) {
+        return true;
+      }
       // 車道(y=-0.25)・歩道(y=0.075)・広域地面(y=-0.5)より高い位置にある垂直構造物（y > 0.20）は車輪レイキャストから除外し、シャシー剛体衝突のみで受け止める
       const hasTranslation = typeof collider.translation === "function";
       if (hasTranslation) {
@@ -269,9 +282,9 @@ export class VehiclePhysics {
     if (isFallenOutOfBounds) {
       const isInShibuyaZone = transform.x < -345;
       const safeSpawn = isInShibuyaZone
-        ? new THREE.Vector3(-744.75, 1.0, -70.0)
+        ? new THREE.Vector3(-728.0, 1.5, 480.0)
         : new THREE.Vector3(1.75, 1.0, 26.0);
-      this.resetPosition(safeSpawn, 0);
+      this.resetPosition(safeSpawn, isInShibuyaZone ? -2.35 : 0);
     }
   }
 
@@ -372,8 +385,8 @@ export class VehiclePhysics {
       this.engineRpm = 800;
     }
 
-    // タイヤ接地面（y=0）と車体底面（wheelRadius=0.38）が視覚的に一致するよう垂直オフセットを算出
-    const rawVisualY = Math.max(0.0, pos.y - (this.wheelRadius + this.suspensionRestLength - 0.08));
+    // タイヤ接地面（地形標高Y）と車体底面（wheelRadius=0.38）が視覚的に一致するよう垂直オフセットを算出
+    const rawVisualY = pos.y - (this.wheelRadius + this.suspensionRestLength - 0.08);
 
     // 可変フレームレート時のレイキャストサスペンション微小振動を平滑化（クラウンのフラットライド姿勢制御）
     if (!this.hasInitializedVisualFilter) {

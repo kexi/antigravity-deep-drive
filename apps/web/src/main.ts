@@ -57,6 +57,7 @@ import {
   loadTokyoOpenData,
   localToWgs84,
   sampleGsiDemElevation,
+  sampleShibuyaTerrainY,
   wgs84ToLocal,
 } from "./openData/gsiPlateauLoader";
 import type {
@@ -112,7 +113,7 @@ export interface ParsedUrlLocationQuery {
 /**
  * コンパス方位角（0°=北, 90°=東, 180°=南, 270°=西）を指定緯度経度におけるローカル3D空間のヨー角（rad）へ変換する。
  * How: 現在地 (lat, lon) とコンパス方位へ10m進んだ地点の WGS84 座標をそれぞれ `wgs84ToLocal` でローカル座標へ投影し、
- * 渋谷ゾーン（+Z=北）と丸の内ゾーン（+Z=行幸通り軸線 284.9°）の双方で正確なローカル進行方向角を算出する。
+ * 渋谷ゾーン（-Z=北, +X=東）と丸の内ゾーン（+Z=行幸通り軸線 284.9°）の双方で正確なローカル進行方向角を算出する。
  */
 export function compassHeadingDegToLocalYawRad(
   lat: number,
@@ -232,7 +233,8 @@ export function buildUrlWithGpsCoordinates(
 
 /**
  * StreetReaderAI (`LocationProviderService.getRelativePosition`) 準拠の自車進行方向基準・4象限相対位置判定。
- * How: 車両進行方向ベクトル `(sin(headingRad), cos(headingRad))` と右方向ベクトル `(cos(headingRad), -sin(headingRad))` への内積から
+ * How: Three.js 右手座標系（+Y=上）における車両進行方向ベクトル `(sin(headingRad), cos(headingRad))` と
+ * 右方向ベクトル `up × fwd = (-cos(headingRad), sin(headingRad))` への内積から
  * `FRONT LEFT` / `FRONT RIGHT` / `BEHIND LEFT` / `BEHIND RIGHT` を算出する。
  */
 export function getObserverRelativePosition(
@@ -246,8 +248,8 @@ export function getObserverRelativePosition(
   const dz = targetZ - observerZ;
   const fwdX = Math.sin(headingAngleRad);
   const fwdZ = Math.cos(headingAngleRad);
-  const rightX = Math.cos(headingAngleRad);
-  const rightZ = -Math.sin(headingAngleRad);
+  const rightX = -Math.cos(headingAngleRad);
+  const rightZ = Math.sin(headingAngleRad);
   const forwardProj = dx * fwdX + dz * fwdZ;
   const rightProj = dx * rightX + dz * rightZ;
   const depth = forwardProj >= 0 ? "FRONT" : "BEHIND";
@@ -580,7 +582,11 @@ async function bootstrap() {
   const startX = initialLocationQuery.x;
   const startZ = initialLocationQuery.z;
   const startYaw = initialLocationQuery.yawRadians;
-  const startPosition = new THREE.Vector3(startX, initialAreaSpawn.position.y, startZ);
+  const startGroundY = startX < -395 ? sampleShibuyaTerrainY(startX, startZ) : 0;
+  const startY = initialLocationQuery.hasCustomCoordinates
+    ? startGroundY + 0.62
+    : initialAreaSpawn.position.y;
+  const startPosition = new THREE.Vector3(startX, startY, startZ);
   let activeSpawnTransform = {
     position: startPosition.clone(),
     yawRadians: startYaw,
@@ -591,6 +597,7 @@ async function bootstrap() {
     vehiclePhysics.resetPosition(startPosition, startYaw);
   }
   vehiclePhysics.setObstacleColliderHandles(cityMap.obstacleColliderHandles);
+  vehiclePhysics.setDrivableColliderHandles(cityMap.getDrivableColliderHandles());
   const carModel = new CarModel();
   carModel.setLocale(i18n.getLocale());
   scene.add(carModel.group);
@@ -1924,6 +1931,7 @@ async function bootstrap() {
     onPlaceSign: (spec) => {
       const created = cityMap.addCustomRoadSign(spec);
       vehiclePhysics.setObstacleColliderHandles(cityMap.obstacleColliderHandles);
+      vehiclePhysics.setDrivableColliderHandles(cityMap.getDrivableColliderHandles());
       cityMap.setNightMode(weatherSystem.shouldEnableHeadlights());
       renderer.shadowMap.needsUpdate = true;
       return created;
@@ -1931,6 +1939,7 @@ async function bootstrap() {
     onRemoveSign: (id) => {
       const removed = cityMap.removeCustomRoadSign(id);
       vehiclePhysics.setObstacleColliderHandles(cityMap.obstacleColliderHandles);
+      vehiclePhysics.setDrivableColliderHandles(cityMap.getDrivableColliderHandles());
       renderer.shadowMap.needsUpdate = true;
       return removed;
     },
@@ -1978,12 +1987,14 @@ async function bootstrap() {
         cityMap.removeCustomRoadSign(sign.id);
         cityMap.addCustomRoadSign(sign);
         vehiclePhysics.setObstacleColliderHandles(cityMap.obstacleColliderHandles);
+        vehiclePhysics.setDrivableColliderHandles(cityMap.getDrivableColliderHandles());
         cityMap.setNightMode(weatherSystem.shouldEnableHeadlights());
         renderer.shadowMap.needsUpdate = true;
       },
       onRemoveSignFromScene: (signId) => {
         cityMap.removeCustomRoadSign(signId);
         vehiclePhysics.setObstacleColliderHandles(cityMap.obstacleColliderHandles);
+        vehiclePhysics.setDrivableColliderHandles(cityMap.getDrivableColliderHandles());
         renderer.shadowMap.needsUpdate = true;
       },
       onApplyWeatherPresetToScene: (preset) => {
@@ -2169,17 +2180,18 @@ async function bootstrap() {
       currentDriveArea = inferredArea;
       syncAreaButtons(currentDriveArea);
     }
-    // Why y = 0.62m (wheelRadius 0.38 + suspensionRestLength 0.32 - 0.08):
-    // y = 0.02m だとシャシー底面が路面下へめり込んで Rapier 貫通反発パルスを誘発するため、サスペンション静止高へ配置する
-    const targetPos = new THREE.Vector3(x, 0.62, z);
+    // Why y = groundY + 0.62m (wheelRadius 0.38 + suspensionRestLength 0.32 - 0.08):
+    // 渋谷エリアの3D起伏標高へ追従させつつサスペンション静止高へ配置し、路面下へのめり込み・反発パルスを防止する
+    const groundY = x < -395 ? sampleShibuyaTerrainY(x, z) : 0;
+    const targetPos = new THREE.Vector3(x, groundY + 0.62, z);
     activeSpawnTransform = {
       position: targetPos.clone(),
       yawRadians: headingRad,
     };
     vehiclePhysics.resetPosition(targetPos, headingRad);
     const speedMs = speedKmh / 3.6;
-    const vx = -Math.sin(headingRad) * speedMs;
-    const vz = -Math.cos(headingRad) * speedMs;
+    const vx = Math.sin(headingRad) * speedMs;
+    const vz = Math.cos(headingRad) * speedMs;
     const status = streamingSystem.updateFrame({
       vehicleX: x,
       vehicleZ: z,

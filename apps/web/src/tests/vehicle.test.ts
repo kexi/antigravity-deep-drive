@@ -307,13 +307,13 @@ describe("車両およびゲームシステムの仕様検証", () => {
     expect(cityMap.obstacleColliderHandles.length).toBeGreaterThan(400);
     expect(world.colliders.len()).toBeGreaterThan(cityMap.obstacleColliderHandles.length);
 
-    // 渋谷ストリーム フォールバックの正面バッジが明治通り側（worldX < -710、西向き）を向いていることを保証する
+    // 渋谷ストリーム フォールバックの正面バッジが明治通り側（1:1実座標 worldX ≈ -735.7）を向いていることを保証する
     scene.updateMatrixWorld(true);
     const fallbackBadge = scene.getObjectByName("FallbackStreamBadgeBack");
     expect(fallbackBadge).toBeDefined();
     const badgeWorldPos = new THREE.Vector3();
     fallbackBadge!.getWorldPosition(badgeWorldPos);
-    expect(badgeWorldPos.x).toBeCloseTo(-715.2, 1);
+    expect(badgeWorldPos.x).toBeCloseTo(-735.7, 1);
 
     // shibuya_stream.glb のマテリアルが適切な 3D テクスチャモードと発光属性にルーティングされ、
     // 共有マテリアル (StreamDarkVoidSteel) が発光色に誤上書きされないことを保証する
@@ -378,12 +378,12 @@ describe("車両およびゲームシステムの仕様検証", () => {
 
     const plazaBox = new THREE.Box3().setFromObject(inaribashiPlaza);
     const riverBox = new THREE.Box3().setFromObject(shibuyaRiverWater);
-    expect(plazaBox.min.z).toBeCloseTo(-52, 1);
-    expect(plazaBox.max.z).toBeCloseTo(76, 1);
-    expect(riverBox.min.z).toBeCloseTo(-195, 1);
-    expect(riverBox.max.z).toBeCloseTo(-55, 1);
-    // 稲荷橋広場南端 (z = -52) が渋谷川開渠北端 (z = -55) より北側にあり重複しないこと
-    expect(plazaBox.min.z).toBeGreaterThan(riverBox.max.z);
+    expect(plazaBox.min.z).toBeCloseTo(484.3, 0);
+    expect(plazaBox.max.z).toBeCloseTo(547.7, 0);
+    expect(riverBox.min.z).toBeCloseTo(519.3, 0);
+    expect(riverBox.max.z).toBeCloseTo(869.3, 0);
+    // 稲荷橋広場に隣接する渋谷川開渠が南東 (+Z側) へ流下すること
+    expect(riverBox.max.z).toBeGreaterThan(plazaBox.max.z);
 
     // 高さ順序: 地面 (-0.01) < 河床 (0.04) < 水面 (0.18) であること
     expect(groundMesh.position.y).toBeCloseTo(-0.01, 3);
@@ -901,14 +901,16 @@ describe("車両およびゲームシステムの仕様検証", () => {
       parseUrlLocationQuery,
     } = await import("../main");
 
-    // 1. 渋谷スクランブル交差点付近の緯度経度 URL クエリ解析と渋谷エリア自動推定
+    // 1. 渋谷スクランブル交差点付近の緯度経度 URL クエリ解析と渋谷エリア自動推定（非鏡像 +Z=南 -> heading=180 で yaw=0, heading=0 で |yaw|=π）
     const shibuyaParsed = parseUrlLocationQuery("?lat=35.65959&lon=139.70187&heading=180");
     expect(shibuyaParsed.hasLatLonQuery).toBe(true);
     expect(shibuyaParsed.hasCustomCoordinates).toBe(true);
     expect(shibuyaParsed.area).toBe("shibuya");
     expect(shibuyaParsed.x).toBeLessThan(-750);
     expect(shibuyaParsed.z).toBeGreaterThan(200);
-    expect(Math.abs(shibuyaParsed.yawRadians)).toBeCloseTo(Math.PI, 2);
+    expect(shibuyaParsed.yawRadians).toBeCloseTo(0, 2);
+    const shibuyaNorthParsed = parseUrlLocationQuery("?lat=35.65959&lon=139.70187&heading=0");
+    expect(Math.abs(shibuyaNorthParsed.yawRadians)).toBeCloseTo(Math.PI, 2);
 
     // 2. ブラウザアドレスバー同期用 URL 生成 (?area=...&lat=...&lon=...&heading=... かつ古い x/z パラメータを除去)
     const syncedUrl = buildUrlWithGpsCoordinates(
@@ -928,10 +930,11 @@ describe("車両およびゲームシステムの仕様検証", () => {
     expect(syncedUrl).not.toContain("x=-792");
 
     // 3. StreetReaderAI 方式の進行方向基準4象限相対位置 (FRONT LEFT / FRONT RIGHT / BEHIND LEFT / BEHIND RIGHT) と空間コンテキスト
-    expect(getObserverRelativePosition(0, 0, 0, 10, 20)).toBe("FRONT RIGHT");
-    expect(getObserverRelativePosition(0, 0, 0, -10, 20)).toBe("FRONT LEFT");
-    expect(getObserverRelativePosition(0, 0, 0, 10, -20)).toBe("BEHIND RIGHT");
-    expect(getObserverRelativePosition(0, 0, 0, -10, -20)).toBe("BEHIND LEFT");
+    expect(getObserverRelativePosition(0, 0, 0, -10, 20)).toBe("FRONT RIGHT");
+    expect(getObserverRelativePosition(0, 0, 0, 10, 20)).toBe("FRONT LEFT");
+    expect(getObserverRelativePosition(0, 0, 0, -10, -20)).toBe("BEHIND RIGHT");
+    expect(getObserverRelativePosition(0, 0, 0, 10, -20)).toBe("BEHIND LEFT");
+    expect(getObserverRelativePosition(0, 0, Math.PI, 10, -20)).toBe("FRONT RIGHT");
 
     const ctxJa = computeStreetReaderContext(-750, -30, 0, "ja");
     expect(ctxJa.currentStreetName.length).toBeGreaterThan(0);

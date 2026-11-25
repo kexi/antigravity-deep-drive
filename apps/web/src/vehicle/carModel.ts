@@ -1860,9 +1860,9 @@ export class CarModel {
 
     const isShibuyaZone = carX < -345;
 
-    // 次の交差点までの距離計算（渋谷エリアは宮益坂・青山通り z = 248m または国道246号・渋谷駅南 z = 102m、丸の内エリアは日比谷通り z = 250m を目標）
-    const isOnMiyamasuOrAoyama = isShibuyaZone && carX > -735 && Math.abs(carZ - 248) < 48;
-    const targetIntersectionZ = isShibuyaZone ? (isOnMiyamasuOrAoyama ? 248 : 102) : 250;
+    // 次の交差点までの距離計算（渋谷エリアは宮益坂・スクランブル z = 245.8m または渋谷駅東口 z = 435.5m、丸の内エリアは日比谷通り z = 250m を目標）
+    const isOnMiyamasuOrAoyama = isShibuyaZone && carX > -825 && Math.abs(carZ - 220) < 60;
+    const targetIntersectionZ = isShibuyaZone ? (isOnMiyamasuOrAoyama ? 245.8 : 435.5) : 250;
     const distToIntersection = Math.max(0, Math.round(Math.abs(targetIntersectionZ - carZ)));
     ctx.fillStyle = "#1d4ed8";
     ctx.fillRect(10, 48, leftW - 20, 128);
@@ -1996,7 +1996,9 @@ export class CarModel {
     if (!this.cachedNavWaterBodies) {
       this.cachedNavWaterBodies = [
         ...openData.waterBodies,
-        { localX: -726.0, localZ: -40.0, width: 8.5, depth: 520.0 },
+        { localX: -692.0, localZ: 562.0, width: 10.0, depth: 115.0 },
+        { localX: -612.0, localZ: 676.0, width: 10.0, depth: 125.0 },
+        { localX: -522.0, localZ: 804.0, width: 10.0, depth: 135.0 },
       ];
     }
     const waterBodiesForNav = this.cachedNavWaterBodies;
@@ -2272,59 +2274,77 @@ export class CarModel {
 
     // 4.3b 首都高速3号渋谷線（高架都市高速道路）＆ JR山手線高架橋の立体オーバーレイ描画
     if (isShibuyaZone) {
-      const shutokoStart = worldToMapPx(-875, 99);
-      const shutokoEnd = worldToMapPx(-300, 99);
+      const shutokoPolyline = [
+        { x: -1625, z: 740 },
+        { x: -1440, z: 675 },
+        { x: -1177.4, z: 600.6 },
+        { x: -974.8, z: 519.7 },
+        { x: -762.8, z: 435.5 },
+        { x: -611.9, z: 436.5 },
+        { x: -380, z: 400 },
+      ].map((pt) => worldToMapPx(pt.x, pt.z));
+
+      const traceShutoko = (): void => {
+        ctx.beginPath();
+        ctx.moveTo(shutokoPolyline[0].x, shutokoPolyline[0].y);
+        for (let i = 1; i < shutokoPolyline.length; i++) {
+          ctx.lineTo(shutokoPolyline[i].x, shutokoPolyline[i].y);
+        }
+      };
+
       // 高架橋の外枠シャドウケーシング
       ctx.strokeStyle = "rgba(2, 44, 34, 0.88)";
       ctx.lineWidth = 10.5;
-      ctx.beginPath();
-      ctx.moveTo(shutokoStart.x, shutokoStart.y);
-      ctx.lineTo(shutokoEnd.x, shutokoEnd.y);
+      traceShutoko();
       ctx.stroke();
 
       // 首都高グリーンの高架道路ライン
       ctx.strokeStyle = "#10b981";
       ctx.lineWidth = 5.2;
-      ctx.beginPath();
-      ctx.moveTo(shutokoStart.x, shutokoStart.y);
-      ctx.lineTo(shutokoEnd.x, shutokoEnd.y);
+      traceShutoko();
       ctx.stroke();
 
       // 高架中央分離帯の白破線
       ctx.strokeStyle = "rgba(236, 253, 245, 0.78)";
       ctx.lineWidth = 1.3;
       ctx.setLineDash([6, 6]);
-      ctx.beginPath();
-      ctx.moveTo(shutokoStart.x, shutokoStart.y);
-      ctx.lineTo(shutokoEnd.x, shutokoEnd.y);
+      traceShutoko();
       ctx.stroke();
 
-      // JR山手線・埼京線 鉄道高架ライン (x = -779)
-      const jrSouth = worldToMapPx(-779, -220);
-      const jrNorth = worldToMapPx(-779, 240);
+      // JR山手線・埼京線 鉄道高架ライン（NNE-SSW 実軸）
+      const jrPolyline = [
+        { x: -925, z: -120 },
+        { x: -895, z: 260.2 },
+        { x: -870, z: 391 },
+        { x: -855, z: 466 },
+        { x: -815, z: 680 },
+      ].map((pt) => worldToMapPx(pt.x, pt.z));
       ctx.strokeStyle = "rgba(148, 163, 184, 0.65)";
       ctx.lineWidth = 3.2;
       ctx.setLineDash([8, 5]);
       ctx.beginPath();
-      ctx.moveTo(jrSouth.x, jrSouth.y);
-      ctx.lineTo(jrNorth.x, jrNorth.y);
+      ctx.moveTo(jrPolyline[0].x, jrPolyline[0].y);
+      for (let i = 1; i < jrPolyline.length; i++) {
+        ctx.lineTo(jrPolyline[i].x, jrPolyline[i].y);
+      }
       ctx.stroke();
       ctx.setLineDash([]);
     }
 
     // 4.4 推奨ナビゲーションルート（交差点コーナーR補間付きシアン＆ブルー発光ライン＋進行方向シェブロン）
-    // Why コーナーR補間 (quadraticCurveTo) を入れるか:
-    // 交差点で直角 (90度) に折れ曲がるポリラインや180度折り返し点をそのまま lineTo で結ぶと、
-    // 交差点の角が鋭利に尖ってカクカクに見えるため、交差点手前16mから滑らかな接線円弧でカーブさせる。
     const routeWaypoints: ReadonlyArray<{ x: number; z: number }> = isShibuyaZone
       ? [
-          { x: -750.0, z: -240.0 },
-          { x: -750.0, z: 95.0 },
-          { x: -640.0, z: 95.0 },
-          { x: -545.0, z: 108.0 },
-          { x: -450.0, z: 108.0 },
-          { x: -355.0, z: 98.0 },
-          { x: -268.0, z: 95.0 },
+          { x: -457.3, z: 725.0 },
+          { x: -595.6, z: 594.9 },
+          { x: -678.0, z: 518.2 },
+          { x: -737.3, z: 462.6 },
+          { x: -762.8, z: 435.5 },
+          { x: -680.0, z: 415.0 },
+          { x: -607.1, z: 349.8 },
+          { x: -501.1, z: 194.8 },
+          { x: -440.0, z: 142.0 },
+          { x: -380.0, z: 98.0 },
+          { x: -283.0, z: 95.0 },
           { x: -268.0, z: 250.0 },
           { x: 0.0, z: 250.0 },
         ]
@@ -2391,48 +2411,45 @@ export class CarModel {
     if (isShibuyaZone) {
       const shibuyaConnectedBranches: ReadonlyArray<ReadonlyArray<{ x: number; z: number }>> = [
         [
-          { x: -750.0, z: 248.0 },
-          { x: -815.0, z: 249.0 },
-          { x: -835.0, z: 268.0 },
-          { x: -850.0, z: 292.0 },
-          { x: -875.0, z: 320.0 },
-          { x: -902.0, z: 350.0 },
-          { x: -922.0, z: 356.0 },
-          { x: -940.0, z: 345.0 },
-          { x: -905.0, z: 325.0 },
-          { x: -869.0, z: 282.0 },
-          { x: -838.0, z: 252.0 },
-          { x: -872.0, z: 235.0 },
-          { x: -925.0, z: 215.0 },
-          { x: -975.0, z: 188.0 },
-          { x: -1030.0, z: 162.0 },
-          { x: -1080.0, z: 140.0 },
-          { x: -940.0, z: 115.0 },
-          { x: -855.0, z: 95.0 },
-          { x: -750.0, z: 95.0 },
+          { x: -762.8, z: 435.5 },
+          { x: -778.2, z: 386.1 },
+          { x: -818.4, z: 245.8 },
+          { x: -895.0, z: 260.2 },
+          { x: -990.7, z: 275.8 },
+          { x: -1159.4, z: 272.4 },
+          { x: -1266.1, z: 355.0 },
+          { x: -1380.0, z: 515.0 },
+          { x: -1440.0, z: 675.0 },
+          { x: -1267.8, z: 634.6 },
+          { x: -974.8, z: 519.7 },
+          { x: -762.8, z: 435.5 },
         ],
         [
-          { x: -875.0, z: 320.0 },
-          { x: -856.0, z: 342.0 },
-          { x: -822.0, z: 345.0 },
-          { x: -802.0, z: 348.0 },
-          { x: -798.0, z: 358.0 },
-          { x: -756.0, z: 354.0 },
+          { x: -1024.0, z: 249.0 },
+          { x: -1155.0, z: 128.0 },
+          { x: -1325.0, z: 151.3 },
+          { x: -1201.8, z: 213.9 },
+          { x: -1159.4, z: 272.4 },
         ],
         [
-          { x: -810.0, z: 520.0 },
-          { x: -805.0, z: 440.0 },
-          { x: -798.0, z: 358.0 },
-          { x: -791.0, z: 270.0 },
-          { x: -815.0, z: 249.0 },
+          { x: -990.7, z: 275.8 },
+          { x: -981.6, z: 185.0 },
+          { x: -1055.0, z: 25.0 },
+          { x: -1108.1, z: -43.6 },
+          { x: -1165.0, z: -120.0 },
+          { x: -841.2, z: -61.2 },
+          { x: -829.2, z: 187.2 },
+          { x: -818.4, z: 245.8 },
         ],
         [
-          { x: -750.0, z: 248.0 },
-          { x: -685.0, z: 252.0 },
-          { x: -635.0, z: 254.0 },
-          { x: -560.0, z: 250.0 },
-          { x: -480.0, z: 248.0 },
-          { x: -380.0, z: 250.0 },
+          { x: -818.4, z: 245.8 },
+          { x: -660.0, z: 220.0 },
+          { x: -501.1, z: 194.8 },
+        ],
+        [
+          { x: -762.8, z: 435.5 },
+          { x: -611.9, z: 436.5 },
+          { x: -380.0, z: 400.0 },
         ],
       ];
 

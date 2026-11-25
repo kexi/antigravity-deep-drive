@@ -33,15 +33,102 @@ import bpy
 import bmesh
 from mathutils import Vector
 
-# 東京駅丸の内原点と渋谷アンカー
+# 東京駅丸の内原点と渋谷アンカー（1:1 非反転 WGS84 投影: +X = 東, -Z = 北）
 ORIGIN_LAT = 35.68158
 ORIGIN_LON = 139.76525
 SHIBUYA_ORIGIN_LAT = 35.65722
 SHIBUYA_ORIGIN_LON = 139.70319
-SHIBUYA_LOCAL_ANCHOR_X = -695.0
-SHIBUYA_LOCAL_ANCHOR_Z = -15.0
-METERS_PER_DEG_LAT = 110946.25
-METERS_PER_DEG_LON = 111319.49 * math.cos(ORIGIN_LAT * math.pi / 180)
+SHIBUYA_LOCAL_ANCHOR_X = -750.0
+SHIBUYA_LOCAL_ANCHOR_Z = 527.6
+SHIBUYA_VALLEY_BASE_TP = 15.0
+SHIBUYA_SLOPE_SCALE = 0.72
+METERS_PER_DEG_LAT = 110946.0
+METERS_PER_DEG_LON = 91188.0
+
+_CACHED_DEM_META: dict | None = None
+_CACHED_SMOOTH_DEM: list[list[float]] | None = None
+
+
+def _ensure_shibuya_dem() -> tuple[dict, list[list[float]]]:
+    global _CACHED_DEM_META, _CACHED_SMOOTH_DEM
+    if _CACHED_DEM_META is not None and _CACHED_SMOOTH_DEM is not None:
+        return _CACHED_DEM_META, _CACHED_SMOOTH_DEM
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+    json_path = os.path.join(
+        project_root, "apps", "web", "public", "data", "tokyo_marunouchi_open_data.json"
+    )
+    with open(json_path, encoding="utf-8") as fh:
+        bundle = json.load(fh)
+    dem = bundle["shibuyaDem5a"]
+    grid = [[float(v) for v in row] for row in dem["elevationGrid"]]
+    rows = len(grid)
+    cols = len(grid[0]) if rows > 0 else 0
+
+    for _pass in range(2):
+        nxt = [[0.0] * cols for _ in range(rows)]
+        for r in range(rows):
+            r_m = max(0, r - 1)
+            r_p = min(rows - 1, r + 1)
+            for c in range(cols):
+                c_m = max(0, c - 1)
+                c_p = min(cols - 1, c + 1)
+                val = (
+                    grid[r_m][c_m]
+                    + 2.0 * grid[r_m][c]
+                    + grid[r_m][c_p]
+                    + 2.0 * grid[r][c_m]
+                    + 4.0 * grid[r][c]
+                    + 2.0 * grid[r][c_p]
+                    + grid[r_p][c_m]
+                    + 2.0 * grid[r_p][c]
+                    + grid[r_p][c_p]
+                ) / 16.0
+                nxt[r][c] = val
+        grid = nxt
+
+    _CACHED_DEM_META = dem
+    _CACHED_SMOOTH_DEM = grid
+    return dem, grid
+
+
+def sample_shibuya_terrain_y(x: float, z: float) -> float:
+    """TypeScript `sampleShibuyaTerrainY` と一致する 2-pass 平滑済み GSI DEM5A 地形標高（m）"""
+    if x >= -395.0:
+        return 0.0
+    dem, grid = _ensure_shibuya_dem()
+    x_min = float(dem["xMin"])
+    z_min = float(dem["zMin"])
+    step = float(dem["gridStep"])
+    rows = len(grid)
+    cols = len(grid[0]) if rows > 0 else 0
+    if rows == 0 or cols == 0:
+        return 0.0
+
+    fx = max(0.0, min(cols - 1.0001, (x - x_min) / step))
+    fz = max(0.0, min(rows - 1.0001, (z - z_min) / step))
+    c0 = min(cols - 1, math.floor(fx))
+    r0 = min(rows - 1, math.floor(fz))
+    c1 = min(cols - 1, c0 + 1)
+    r1 = min(rows - 1, r0 + 1)
+    tx = fx - c0
+    tz = fz - r0
+
+    e00 = grid[r0][c0]
+    e10 = grid[r0][c1]
+    e01 = grid[r1][c0]
+    e11 = grid[r1][c1]
+    elev = (e00 * (1.0 - tx) + e10 * tx) * (1.0 - tz) + (e01 * (1.0 - tx) + e11 * tx) * tz
+    rel_y = (elev - SHIBUYA_VALLEY_BASE_TP) * SHIBUYA_SLOPE_SCALE
+    rel_y = max(-0.4, rel_y)
+
+    if x > -500.0:
+        t = max(0.0, min(1.0, (x - -500.0) / (-395.0 - -500.0)))
+        rel_y *= 0.5 * (1.0 + math.cos(math.pi * t))
+
+    return rel_y
+
 
 # shibuya_stream.glb で高精度 Blender モデリング済みの主要ランドマーク GML ID
 LANDMARK_GML_IDS = {
@@ -111,11 +198,11 @@ def ecef_to_latlon(x: float, y: float, z: float) -> tuple[float, float, float]:
 
 
 def wgs84_to_local(lat: float, lon: float) -> tuple[float, float]:
-    """WGS84 緯度経度を渋谷ローカル3D座標系 (x, z) へ投影する（北方向が +Z、東方向が +X）"""
+    """WGS84 緯度経度を渋谷ローカル 1:1 非反転 3D 座標系 (x, z) へ投影する（+X = 東, -Z = 北）"""
     east_m = (lon - SHIBUYA_ORIGIN_LON) * METERS_PER_DEG_LON
     north_m = (lat - SHIBUYA_ORIGIN_LAT) * METERS_PER_DEG_LAT
     x = SHIBUYA_LOCAL_ANCHOR_X + east_m
-    z = SHIBUYA_LOCAL_ANCHOR_Z + north_m
+    z = SHIBUYA_LOCAL_ANCHOR_Z - north_m
     return x, z
 
 
@@ -274,18 +361,222 @@ def dist_point_to_triangle_2d_sq(
     return rx * rx + rz * rz
 
 
-# gsiPlateauLoader.ts の getOpenDataCurvedRoadCorridors() と1対1対応する実車道中心線＆クリアランス半径 (halfW + 1.8m)
+# gsiPlateauLoader.ts の getOpenDataCurvedRoadCorridors() と 1:1 対応する非反転実車道中心線＆クリアランス半径 (halfW + 1.8m)
 EXACT_CURVED_ROAD_CLEARANCES = [
     {
         "name": "nav-road-uchibori-dori",
-        "radius": 13.5,
+        "radius": 10.8,
+        "points": [(-253.0, 365.0), (-165.0, 378.0), (0.0, 390.0), (165.0, 378.0), (255.0, 365.0)],
+    },
+    {
+        "name": "nav-road-meiji-dori",
+        "radius": 10.8,
         "points": [
-            (-500.0, 365.0),
-            (-268.0, 365.0),
-            (-165.0, 378.0),
-            (0.0, 390.0),
-            (165.0, 378.0),
-            (270.0, 365.0),
+            (-818.4, 245.8),
+            (-802.0, 315.0),
+            (-778.2, 386.1),
+            (-762.8, 435.5),
+            (-737.3, 462.6),
+            (-678.0, 518.2),
+            (-595.6, 594.9),
+            (-525.0, 658.0),
+            (-457.3, 725.0),
+        ],
+    },
+    {
+        "name": "nav-road-meiji-dori-ebisu-curve",
+        "radius": 10.8,
+        "points": [
+            (-457.3, 725.0),
+            (-420.0, 775.0),
+            (-395.0, 860.0),
+            (-390.0, 980.0),
+            (-390.0, 1120.0),
+        ],
+    },
+    {
+        "name": "nav-road-meiji-dori-harajuku-curve",
+        "radius": 10.8,
+        "points": [
+            (-818.4, 245.8),
+            (-829.2, 187.2),
+            (-835.1, 70.9),
+            (-841.2, -61.2),
+            (-845.2, -156.0),
+            (-825.0, -265.6),
+            (-779.4, -352.5),
+            (-731.9, -422.8),
+        ],
+    },
+    {
+        "name": "nav-road-yamate-dori",
+        "radius": 13.8,
+        "points": [
+            (-1640.0, -350.0),
+            (-1635.0, 100.0),
+            (-1630.0, 450.0),
+            (-1625.0, 740.0),
+            (-1620.0, 1050.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-scramble",
+        "radius": 11.2,
+        "points": [
+            (-1159.4, 272.4),
+            (-1075.0, 274.0),
+            (-990.7, 275.8),
+            (-895.0, 260.2),
+            (-818.4, 245.8),
+        ],
+    },
+    {
+        "name": "nav-road-route246",
+        "radius": 11.8,
+        "points": [
+            (-762.8, 435.5),
+            (-680.0, 415.0),
+            (-607.1, 349.8),
+            (-550.0, 268.0),
+            (-501.1, 194.8),
+            (-440.0, 142.0),
+            (-380.0, 98.0),
+            (-283.0, 95.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-dogenzaka",
+        "radius": 8.0,
+        "points": [
+            (-1159.4, 272.4),
+            (-1213.7, 316.1),
+            (-1266.1, 355.0),
+            (-1325.5, 418.0),
+            (-1380.0, 515.0),
+            (-1418.0, 600.0),
+            (-1440.0, 675.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-miyamasuzaka",
+        "radius": 10.5,
+        "points": [
+            (-818.4, 245.8),
+            (-745.0, 234.0),
+            (-660.0, 220.0),
+            (-580.0, 206.0),
+            (-501.1, 194.8),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-bunkamura-dori",
+        "radius": 7.8,
+        "points": [
+            (-1159.4, 272.4),
+            (-1201.8, 213.9),
+            (-1258.3, 188.4),
+            (-1325.0, 151.3),
+            (-1373.7, 116.0),
+            (-1445.0, 75.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-koen-dori",
+        "radius": 7.8,
+        "points": [
+            (-990.7, 275.8),
+            (-981.6, 185.0),
+            (-1005.0, 105.0),
+            (-1055.0, 25.0),
+            (-1108.1, -43.6),
+            (-1165.0, -120.0),
+            (-1210.0, -202.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-inokashira-organ",
+        "radius": 7.3,
+        "points": [
+            (-1155.0, 128.0),
+            (-1115.0, 75.0),
+            (-1090.4, -5.0),
+            (-1108.1, -43.6),
+            (-1020.0, -35.0),
+            (-935.0, -20.0),
+            (-838.0, 10.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-tamagawa-west",
+        "radius": 12.2,
+        "points": [
+            (-762.8, 435.5),
+            (-841.3, 464.0),
+            (-901.4, 488.7),
+            (-974.8, 519.7),
+            (-1091.2, 565.1),
+            (-1177.4, 600.6),
+            (-1267.8, 634.6),
+            (-1346.6, 654.1),
+            (-1440.0, 675.0),
+            (-1530.0, 705.0),
+            (-1625.0, 740.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-shinsen-nakadori",
+        "radius": 6.6,
+        "points": [
+            (-1440.0, 675.0),
+            (-1465.0, 520.0),
+            (-1465.0, 360.0),
+            (-1455.0, 210.0),
+            (-1445.0, 75.0),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-sakurazaka-loop",
+        "radius": 6.8,
+        "points": [
+            (-974.8, 519.7),
+            (-958.0, 565.0),
+            (-970.0, 622.0),
+            (-995.0, 675.0),
+            (-1105.0, 668.0),
+            (-1177.4, 600.6),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-jinnan-cross",
+        "radius": 7.1,
+        "points": [(-841.2, -61.2), (-980.0, -98.0), (-1165.0, -120.0)],
+    },
+    {
+        "name": "nav-road-shibuya-center-gai",
+        "radius": 5.8,
+        "points": [
+            (-1024.0, 249.0),
+            (-1065.0, 212.0),
+            (-1110.0, 168.0),
+            (-1155.0, 128.0),
+            (-1240.0, 138.0),
+            (-1325.0, 151.3),
+        ],
+    },
+    {
+        "name": "nav-road-shibuya-hikarie-access",
+        "radius": 6.8,
+        "points": [(-715.0, 229.0), (-682.0, 325.0), (-672.0, 413.0)],
+    },
+    {
+        "name": "nav-road-shibuya-roppongi-dori",
+        "radius": 11.4,
+        "points": [
+            (-762.8, 435.5),
+            (-661.0, 422.1),
+            (-611.9, 436.5),
+            (-484.3, 428.3),
+            (-380.0, 400.0),
         ],
     },
     {
@@ -293,503 +584,75 @@ EXACT_CURVED_ROAD_CLEARANCES = [
         "radius": 13.5,
         "points": [(-380.0, -360.0), (-380.0, 540.0)],
     },
-    {
-        "name": "nav-road-marunouchi-central",
-        "radius": 11.5,
-        "points": [(-460.0, 5.0), (-200.0, 5.0)],
-    },
-    {
-        "name": "nav-road-marunouchi-nakadori",
-        "radius": 11.5,
-        "points": [(-460.0, 165.0), (-200.0, 165.0)],
-    },
-    {
-        "name": "nav-road-route246-aoyama-main",
-        "radius": 16.5,
-        "points": [(-380.0, 250.0), (-200.0, 250.0)],
-    },
-    {
-        "name": "nav-road-uchibori-dori-west",
-        "radius": 16.5,
-        "points": [(-350.0, 350.0), (-350.0, 700.0)],
-    },
-    {
-        "name": "nav-road-eitai-dori",
-        "radius": 14.0,
-        "points": [(-268.0, -100.0), (-268.0, 380.0)],
-    },
-    {
-        "name": "nav-road-roppongi-dori",
-        "radius": 16.5,
-        "points": [(-600.0, -350.0), (-180.0, -350.0)],
-    },
-    {
-        "name": "nav-road-meiji-dori",
-        "radius": 12.3,
-        "points": [
-            (-750.0, -210.0),
-            (-750.0, -140.0),
-            (-750.0, -68.0),
-            (-750.0, 0.0),
-            (-750.0, 60.0),
-            (-750.0, 95.0),
-            (-750.0, 150.0),
-            (-750.0, 206.0),
-            (-750.0, 248.0),
-        ],
-    },
-    {
-        "name": "nav-road-meiji-dori-ebisu-curve",
-        "radius": 12.3,
-        "points": [
-            (-750.0, -210.0),
-            (-756.0, -280.0),
-            (-768.0, -380.0),
-            (-780.0, -520.0),
-            (-775.0, -680.0),
-            (-762.0, -860.0),
-            (-750.0, -1050.0),
-        ],
-    },
-    {
-        "name": "nav-road-meiji-dori-harajuku-curve",
-        "radius": 12.3,
-        "points": [
-            (-750.0, 248.0),
-            (-753.0, 310.0),
-            (-762.0, 420.0),
-            (-774.0, 580.0),
-            (-780.0, 750.0),
-            (-772.0, 920.0),
-            (-760.0, 1050.0),
-        ],
-    },
-    {
-        "name": "nav-road-yamate-dori",
-        "radius": 13.8,
-        "points": [
-            (-1365.0, -850.0),
-            (-1355.0, -550.0),
-            (-1346.0, -200.0),
-            (-1348.0, 0.0),
-            (-1350.0, 150.0),
-            (-1358.0, 380.0),
-            (-1368.0, 620.0),
-            (-1362.0, 850.0),
-        ],
-    },
-    {
-        "name": "nav-road-shibuya-scramble",
-        "radius": 12.8,
-        "points": [(-835.0, 252.0), (-815.0, 249.0), (-775.0, 246.0), (-732.0, 248.0)],
-    },
-    {
-        "name": "nav-road-route246",
-        "radius": 10.8,
-        "points": [
-            (-738.0, 102.0),
-            (-690.0, 106.0),
-            (-632.0, 108.0),
-            (-545.0, 108.0),
-            (-450.0, 104.0),
-            (-355.0, 98.0),
-            (-283.0, 95.0),
-        ],
-    },
-    {
-        "name": "nav-road-route246-underpass-link",
-        "radius": 11.8,
-        "points": [(-855.0, 95.0), (-795.0, 98.5), (-738.0, 102.0)],
-    },
-    {
-        "name": "nav-road-shibuya-dogenzaka",
-        "radius": 7.8,
-        "points": [
-            (-830.0, 248.0),
-            (-872.0, 235.0),
-            (-925.0, 215.0),
-            (-975.0, 188.0),
-            (-1030.0, 162.0),
-            (-1080.0, 140.0),
-        ],
-    },
-    {
-        "name": "nav-road-shibuya-miyamasuzaka",
-        "radius": 12.5,
-        "points": [
-            (-732.0, 248.0),
-            (-685.0, 252.0),
-            (-635.0, 254.0),
-            (-560.0, 250.0),
-            (-480.0, 248.0),
-            (-400.0, 249.0),
-            (-380.0, 250.0),
-        ],
-    },
-    {
-        "name": "nav-road-shibuya-bunkamura-dori",
-        "radius": 7.5,
-        "points": [
-            (-838.0, 252.0),
-            (-869.0, 282.0),
-            (-905.0, 325.0),
-            (-940.0, 345.0),
-            (-1000.0, 360.0),
-            (-1060.0, 370.0),
-        ],
-    },
-    {
-        "name": "nav-road-shibuya-koen-dori",
-        "radius": 7.5,
-        "points": [(-791.0, 250.0), (-798.0, 360.0), (-805.0, 440.0), (-810.0, 520.0)],
-    },
-    {
-        "name": "nav-road-shibuya-inokashira-organ",
-        "radius": 7.3,
-        "points": [
-            (-875.0, 320.0),
-            (-856.0, 342.0),
-            (-822.0, 345.0),
-            (-802.0, 348.0),
-            (-798.0, 358.0),
-            (-756.0, 354.0),
-        ],
-    },
-    {
-        "name": "nav-road-shibuya-tamagawa-west",
-        "radius": 11.8,
-        "points": [
-            (-855.0, 95.0),
-            (-940.0, 115.0),
-            (-1010.0, 128.0),
-            (-1080.0, 140.0),
-            (-1170.0, 146.0),
-            (-1250.0, 150.0),
-            (-1350.0, 150.0),
-        ],
-    },
-    {
-        "name": "nav-road-shibuya-shinsen-nakadori",
-        "radius": 6.6,
-        "points": [
-            (-1080.0, 140.0),
-            (-1100.0, 185.0),
-            (-1110.0, 230.0),
-            (-1100.0, 300.0),
-            (-1060.0, 370.0),
-        ],
-    },
-    {
-        "name": "nav-road-shibuya-sakurazaka-loop",
-        "radius": 6.8,
-        "points": [
-            (-855.0, 95.0),
-            (-855.0, 40.0),
-            (-890.0, 10.0),
-            (-940.0, -30.0),
-            (-950.0, -60.0),
-            (-980.0, 0.0),
-            (-940.0, 115.0),
-        ],
-    },
-    {
-        "name": "nav-road-shibuya-jinnan-cross",
-        "radius": 7.1,
-        "points": [
-            (-750.0, 430.0),
-            (-772.0, 434.0),
-            (-798.0, 440.0),
-            (-825.0, 446.0),
-            (-860.0, 450.0),
-        ],
-    },
-    {
-        "name": "nav-road-shibuya-center-gai",
-        "radius": 6.8,
-        "points": [
-            (-835.0, 268.0),
-            (-850.0, 292.0),
-            (-875.0, 320.0),
-            (-902.0, 350.0),
-            (-922.0, 356.0),
-            (-940.0, 345.0),
-        ],
-    },
-    {
-        "name": "nav-road-shibuya-hikarie-access",
-        "radius": 6.8,
-        "points": [
-            (-729.0, 248.0),
-            (-729.0, 205.0),
-            (-727.5, 155.0),
-            (-727.5, 120.0),
-            (-727.5, 102.0),
-        ],
-    },
-    # 首都高速3号渋谷線高架橋コリドー（R246上空 X[-1252..-572], Z[83..107] と建物躯体の貫通を根絶）
-    {
-        "name": "shutoko-route3-viaduct",
-        "radius": 12.2,
-        "points": [(-1252.0, 95.0), (-1050.0, 95.0), (-865.0, 95.0), (-572.0, 95.0)],
-    },
 ]
 
 EXACT_INTERSECTION_CLEARANCES = [
-    ((-815.0, 248.0), 23.0),
-    ((-750.0, 248.0), 18.0),
-    ((-1080.0, 140.0), 19.0),
-    ((-1250.0, 150.0), 18.0),
-    ((-940.0, 345.0), 16.0),
-    ((-1060.0, 370.0), 15.0),
-    ((-798.0, 360.0), 16.0),
-    ((-805.0, 440.0), 15.0),
-    ((-810.0, 520.0), 16.0),
-    ((-875.0, 320.0), 14.0),
-    ((-950.0, -60.0), 14.0),
-    ((-1350.0, 150.0), 17.0),
-    ((-855.0, 95.0), 22.0),
-    ((-940.0, 115.0), 18.0),
-    ((-750.0, 102.0), 18.0),
-    ((-750.0, -210.0), 14.0),
+    ((-762.8, 435.5), 18.0),  # 渋谷駅東口
+    ((-818.4, 245.8), 18.0),  # 宮益坂下
+    ((-1159.4, 272.4), 19.0),  # SHIBUYA109前
+    ((-990.7, 275.8), 23.0),  # 渋谷スクランブル交差点
+    ((-1440.0, 675.0), 17.0),  # 道玄坂上
+    ((-1530.0, 705.0), 17.0),  # 神泉町
+    ((-1325.0, 151.3), 15.0),  # 東急本店前
+    ((-1445.0, 75.0), 14.0),  # 松濤二丁目
+    ((-981.6, 185.0), 15.0),  # 神南一丁目
+    ((-1108.1, -43.6), 15.0),  # 渋谷PARCO前
+    ((-1165.0, -120.0), 15.0),  # 勤労福祉会館前
+    ((-1210.0, -202.0), 16.0),  # 渋谷区役所・NHK前
+    ((-1155.0, 128.0), 14.0),  # 宇田川町交番前
+    ((-995.0, 675.0), 14.0),  # さくら坂上
+    ((-501.1, 194.8), 15.0),  # 宮益坂上
+    ((-380.0, 98.0), 16.0),  # 青山通り接続
+    ((-974.8, 519.7), 16.0),  # セルリアンタワー前
+    ((-1024.0, 249.0), 14.0),  # センター街入口
+    ((-682.0, 325.0), 15.0),  # ヒカリエ前
+    ((-672.0, 413.0), 16.0),  # 金王坂下
+    ((-841.2, -61.2), 17.0),  # 神宮前
+    ((-779.4, -352.5), 17.0),  # 原宿駅前
+    ((-457.3, 725.0), 17.0),  # 渋谷橋
+    ((-390.0, 980.0), 17.0),  # 恵比寿駅前
+    ((-484.3, 428.3), 18.0),  # 西麻布
+    ((-380.0, 400.0), 17.0),  # 六本木
+    ((-440.0, 142.0), 18.0),  # 表参道
+    ((-380.0, 250.0), 18.0),  # 青山一丁目
+    ((-1625.0, 740.0), 18.0),  # 山手神泉
 ]
 
-# shibuya_stream.glb の高精度カスタムランドマーク建物フットプリント（重複する生PLATEAU躯体を除外）
+# shibuya_stream.glb の高精度カスタムランドマーク建物＆広場フットプリント（1:1 非反転 実座標）
 CUSTOM_LANDMARK_EXCLUSIONS = [
-    ("ShibuyaCerulean", -934.0, -868.0, -76.0, -14.0),
-    ("ShibuyaFukuras", -840.0, -773.0, 21.0, 71.0),
-    ("ShibuyaHikarie", -725.0, -667.0, 117.0, 174.0),
-    ("ShibuyaMagnet", -785.0, -775.0, 276.0, 302.0),
-    ("ShibuyaMarkCity", -918.0, -844.0, 132.0, 190.0),
-    ("ShibuyaMiyashitaPark", -718.0, -672.0, 283.0, 357.0),
-    ("ShibuyaParco", -858.0, -812.0, 362.0, 410.0),
-    ("ShibuyaQfront", -825.0, -805.0, 277.0, 299.0),
-    ("Shibuya109", -901.0, -868.0, 252.0, 274.0),
-    ("ShibuyaSakuraStage", -838.0, -772.0, -54.0, 6.0),
-    ("ShibuyaScrambleSquare", -835.0, -781.0, 117.0, 173.0),
-    ("ShibuyaStream", -731.0, -673.0, -44.0, 14.0),
-    ("ShibuyaToeiBic", -738.0, -709.0, 260.0, 289.0),
-    ("CenterGaiCommercial_North_1", -839.0, -824.0, 287.0, 302.0),
-    ("CenterGaiCommercial_North_2", -859.0, -842.0, 313.0, 330.0),
-    ("CenterGaiCommercial_North_3", -873.0, -859.0, 355.0, 369.0),
-    ("ExpBldgShinsenCrossing", -1300.0, -1256.0, 169.0, 207.0),
+    ("ShibuyaHachikoPlaza", -1004.0, -964.0, 308.0, 352.0),
+    ("13113-bldg-shibuya-stream", -775.0, -725.0, 478.6, 576.6),
+    ("13113-bldg-scramble-square", -867.7, -803.7, 357.1, 425.1),
+    ("13113-bldg-shibuya-hikarie", -748.6, -698.6, 300.9, 354.9),
+    ("13113-bldg-sakura-stage", -937.7, -879.7, 579.0, 647.0),
+    ("13113-bldg-shibuya-fukuras", -1054.3, -998.3, 416.3, 470.3),
+    ("13113-bldg-shibuya-cast", -684.9, -630.9, 722.7, 780.7),
+    ("13113-bldg-meiji-dori-south-west", -956.5, -906.5, 768.1, 824.1),
+    ("13113-bldg-aoyama-oval", -539.2, -481.2, 17.7, 65.7),
+    ("13113-bldg-shibuya-first-tower", -462.4, -408.4, 460.4, 510.4),
+    ("13113-bldg-cerulean-tower", -1120.8, -1066.8, 589.4, 643.4),
+    ("13113-bldg-shibuya-cross-tower", -550.7, -500.7, 366.1, 416.1),
+    ("13113-bldg-miyashita-park", -915.0, -875.0, -5.8, 100.2),
+    ("13113-bldg-shibuya-mark-city", -1185.9, -1123.9, 399.4, 449.4),
+    ("13113-bldg-qfront-109", -1021.0, -997.0, 222.8, 248.8),
+    ("Shibuya109_Y_Fork", -1198.0, -1168.0, 252.0, 280.0),
+    ("13113-bldg-shibuya-parco", -1175.9, -1133.9, -29.3, 12.7),
+    ("13113-bldg-shibuya-solasta", -1408.8, -1356.8, 675.8, 727.8),
+    ("13113-bldg-shibuya-miyamasu-tower", -718.9, -680.9, 173.4, 207.4),
+    ("13113-bldg-miyamasuzaka-ue-tower", -630.4, -592.4, 142.2, 174.2),
+    ("13113-bldg-aoyama-omotesando-square", -549.2, -511.2, 75.6, 107.6),
+    ("13103-bldg-aoyama-twins", -457.0, -403.0, 17.7, 65.7),
+    ("13103-bldg-akasaka-intercity", -472.5, -418.5, 199.7, 249.7),
+    ("CenterGaiCommercial_N1", -1060.0, -1042.0, 196.0, 216.0),
+    ("CenterGaiCommercial_N2", -1094.0, -1074.0, 164.0, 185.0),
+    ("CenterGaiCommercial_N3", -1206.0, -1186.0, 105.0, 126.0),
+    ("CenterGaiCommercial_S1", -1080.0, -1060.0, 216.0, 236.0),
+    ("CenterGaiCommercial_S2", -1113.0, -1093.0, 183.0, 204.0),
+    ("CenterGaiCommercial_S3", -1257.0, -1236.0, 142.0, 163.0),
 ]
 
-
-ROAD_CORRIDOR_POLYLINES = [
-    # 1. 道玄坂本線（109前〜道玄坂上〜神泉接続: 道路実幅12mに整合）
-    {
-        "name": "Dogenzaka",
-        "radius": 7.5,
-        "points": [
-            (-830.0, 248.0),
-            (-872.0, 235.0),
-            (-925.0, 215.0),
-            (-975.0, 188.0),
-            (-1030.0, 162.0),
-            (-1080.0, 140.0),
-        ],
-    },
-    # 2. 文化村通り（109前〜東急本店〜松濤二丁目: 道路実幅12mに整合）
-    {
-        "name": "Bunkamura",
-        "radius": 7.2,
-        "points": [
-            (-838.0, 252.0),
-            (-869.0, 282.0),
-            (-905.0, 325.0),
-            (-940.0, 345.0),
-            (-1000.0, 360.0),
-            (-1060.0, 370.0),
-        ],
-    },
-    # 3. 玉川通り・国道246号西進（セルリアンタワー〜道玄坂上〜神泉町〜山手通り）
-    {
-        "name": "Tamagawa_West",
-        "radius": 10.8,
-        "points": [
-            (-855.0, 95.0),
-            (-940.0, 115.0),
-            (-1010.0, 128.0),
-            (-1080.0, 140.0),
-            (-1170.0, 146.0),
-            (-1250.0, 150.0),
-            (-1350.0, 150.0),
-        ],
-    },
-    # 4. 渋谷公園通り（神南一丁目〜PARCO〜渋谷区役所・NHK放送センター: 道路実幅12mに整合）
-    {
-        "name": "Koen_Dori",
-        "radius": 7.2,
-        "points": [
-            (-790.0, 265.0),
-            (-798.0, 360.0),
-            (-805.0, 440.0),
-            (-810.0, 520.0),
-        ],
-    },
-    # 5. 井の頭通り・オルガン坂（スクランブル北西〜宇田川町〜PARCO前〜明治通り）
-    {
-        "name": "Inokashira_Organ",
-        "radius": 6.2,
-        "points": [
-            (-875.0, 320.0),
-            (-856.0, 342.0),
-            (-822.0, 345.0),
-            (-802.0, 348.0),
-            (-798.0, 358.0),
-            (-756.0, 354.0),
-        ],
-    },
-    # 6. 桜丘町・さくら坂（サクラステージ〜インフォスタワー〜玉川通り周回路）
-    {
-        "name": "Sakurazaka",
-        "radius": 5.8,
-        "points": [
-            (-855.0, 95.0),
-            (-855.0, 40.0),
-            (-890.0, 10.0),
-            (-940.0, -30.0),
-            (-950.0, -60.0),
-            (-980.0, 0.0),
-            (-940.0, 115.0),
-        ],
-    },
-    # 7. 円山町・神泉仲通り（道玄坂上〜神泉駅前〜松濤二丁目）
-    {
-        "name": "Shinsen_Nakadori",
-        "radius": 5.5,
-        "points": [
-            (-1080.0, 140.0),
-            (-1100.0, 185.0),
-            (-1110.0, 230.0),
-            (-1100.0, 300.0),
-            (-1060.0, 370.0),
-        ],
-    },
-    # 8. 宮益坂・青山通り延伸（宮益坂下〜宮益坂上〜表参道方面）
-    {
-        "name": "Miyamasuzaka",
-        "radius": 12.5,
-        "points": [
-            (-732.0, 248.0),
-            (-685.0, 252.0),
-            (-635.0, 254.0),
-            (-560.0, 250.0),
-            (-480.0, 248.0),
-            (-400.0, 249.0),
-            (-380.0, 250.0),
-        ],
-    },
-    # 9. 神南二丁目連絡路（宮下公園北〜勤労福祉会館前）
-    {
-        "name": "Jinnan_Cross",
-        "radius": 6.0,
-        "points": [
-            (-750.0, 440.0),
-            (-778.0, 440.0),
-            (-805.0, 440.0),
-            (-855.0, 440.0),
-        ],
-    },
-    # 10. 渋谷スクランブル交差点連絡路（109前〜スクランブル中心〜ハチ公前北〜宮益坂下）
-    {
-        "name": "Shibuya_Scramble",
-        "radius": 11.5,
-        "points": [
-            (-835.0, 252.0),
-            (-815.0, 248.0),
-            (-780.0, 248.0),
-            (-732.0, 248.0),
-        ],
-    },
-    # 11. 渋谷センター街・バスケットボール通り（スクランブル北西〜宇田川町交番・井の頭通り合流〜東急本店前）
-    {
-        "name": "Center_Gai",
-        "radius": 5.5,
-        "points": [
-            (-835.0, 268.0),
-            (-850.0, 292.0),
-            (-875.0, 320.0),
-            (-902.0, 350.0),
-            (-922.0, 356.0),
-            (-940.0, 345.0),
-        ],
-    },
-    # 12. 渋谷ヒカリエ連絡路・金王坂（宮益坂下〜ヒカリエ前〜金王坂・国道246号合流）
-    {
-        "name": "Hikarie_Access",
-        "radius": 5.8,
-        "points": [
-            (-729.0, 248.0),
-            (-729.0, 205.0),
-            (-727.5, 155.0),
-            (-727.5, 120.0),
-            (-727.5, 102.0),
-        ],
-    },
-    # 13. 外苑東通り・青山〜大手町境界南北幹線（data150 東端の車道閉塞を防止）
-    {
-        "name": "Gaien_Higashi_Dori",
-        "radius": 13.5,
-        "points": [(-380.0, -360.0), (-380.0, 540.0)],
-    },
-    # 14. 丸の内中央通り・仲通り・青山通り東・内堀通り・六本木通り（広域幹線クリアランス）
-    {
-        "name": "Marunouchi_Central_Ave",
-        "radius": 11.5,
-        "points": [(-460.0, 5.0), (-200.0, 5.0)],
-    },
-    {
-        "name": "Marunouchi_Naka_Dori",
-        "radius": 11.5,
-        "points": [(-460.0, 165.0), (-200.0, 165.0)],
-    },
-    {
-        "name": "Route_246_Aoyama_Main",
-        "radius": 16.5,
-        "points": [(-380.0, 250.0), (-200.0, 250.0)],
-    },
-    {
-        "name": "Uchibori_Dori_Main",
-        "radius": 13.5,
-        "points": [(-500.0, 365.0), (-200.0, 365.0)],
-    },
-    {
-        "name": "Uchibori_Dori_West",
-        "radius": 16.5,
-        "points": [(-350.0, 350.0), (-350.0, 700.0)],
-    },
-    {
-        "name": "Roppongi_Dori",
-        "radius": 16.5,
-        "points": [(-600.0, -350.0), (-180.0, -350.0)],
-    },
-]
-
-# 主要交差点・広場の円形クリアランス（中心とクリアランス半径 m）
-ROAD_INTERSECTION_CLEARANCES = [
-    ((-815.0, 248.0), 22.5),  # 渋谷スクランブル交差点中心
-    ((-795.0, 225.0), 18.0),  # ハチ公前広場
-    ((-830.0, 252.0), 14.0),  # 109前Y字路
-    ((-835.0, 268.0), 11.0),  # センター街入口交差点
-    ((-1080.0, 140.0), 19.0),  # 道玄坂上
-    ((-1250.0, 150.0), 18.0),  # 神泉町
-    ((-1350.0, 150.0), 18.0),  # 山手通り・神泉町（玉川通り西進合流）
-    ((-855.0, 95.0), 18.5),  # セルリアンタワー前・玉川通り（さくら坂分岐）
-    ((-750.0, 95.0), 18.5),  # 渋谷駅東口・明治通り（青山通り分岐）
-    ((-730.0, 155.0), 14.0),  # 渋谷ヒカリエ前交差点（アクセス道路・ShinQs前）
-    ((-730.0, 95.0), 15.0),  # 金王坂下・ヒカリエ南交差点（国道246号・青山通り合流）
-    ((-940.0, 345.0), 16.0),  # 東急本店前
-    ((-1060.0, 370.0), 15.0),  # 松濤二丁目
-    ((-790.0, 265.0), 13.5),  # 神南一丁目
-    ((-798.0, 360.0), 14.0),  # 渋谷PARCO前
-    ((-805.0, 440.0), 15.0),  # 勤労福祉会館前
-    ((-810.0, 520.0), 16.0),  # 渋谷区役所・NHK前
-    ((-875.0, 320.0), 13.5),  # 宇田川町交番前
-    ((-950.0, -60.0), 14.0),  # さくら坂上
-    ((-560.0, 248.0), 16.5),  # 宮益坂上
-    ((-400.0, 248.0), 16.5),  # 青山通り接続
-]
+ROAD_CORRIDOR_POLYLINES = EXACT_CURVED_ROAD_CLEARANCES
+ROAD_INTERSECTION_CLEARANCES = EXACT_INTERSECTION_CLEARANCES
 
 
 def clean_scene() -> None:
@@ -1101,22 +964,12 @@ def generate_shibuya_plateau_city() -> str:
                 shell_w = c_max_x - c_min_x
                 shell_d = c_world_max_z - c_world_min_z
                 shell_area_xz = max(1.0, shell_w * shell_d)
-                # Why skip narrow slivers & tiny low sheds & isolated data151 shard & data155 viaducts:
-                # PLATEAU の細長い境界壁・低層物置シェル (幅 <3.5m、面積 <180m2 かつ 高さ <4.5m、
-                # または面積 <45m2 かつ 高さ <7.0m)、道玄坂南側の広場中央に孤立する data151 西端残骸 (-870.2, 198.1)、
-                # および data155 に混入している首都高3号線の超長大高架橋スラブ (>85m) を除外する。
-                is_isolated_dogenzaka_shard = (
-                    tile_name == "data151"
-                    and -880.0 <= c_cx <= -860.0
-                    and 183.0 <= c_cz <= 215.0
-                    and c_h < 12.0
-                )
+                # PLATEAU の細長い境界壁・低層物置シェルおよび data155 に混入している首都高3号線高架スラブ (>85m) を除外する
                 is_highway_viaduct_shell = tile_name == "data155" and max(shell_w, shell_d) > 85.0
                 if (
                     min(shell_w, shell_d) < 3.5
                     or (shell_area_xz < 180.0 and c_h < 4.5)
                     or (shell_area_xz < 45.0 and c_h < 7.0)
-                    or is_isolated_dogenzaka_shard
                     or is_highway_viaduct_shell
                 ):
                     total_landmarks_skipped += len(sp)
@@ -1676,6 +1529,26 @@ def generate_shibuya_plateau_city() -> str:
                 iso_pv = [pv for pv in bm_proxy.verts if not pv.link_faces]
                 if iso_pv:
                     bmesh.ops.delete(bm_proxy, geom=iso_pv, context="VERTS")
+
+            # 残存プロキシシェルを 3D 地形標高 + -3.5m 地中スカートへ接地させる
+            shifted_pverts: set[int] = set()
+            for pc in proxy_comps:
+                pc_faces = [pf for pf in pc["faces"] if pf.is_valid]
+                if not pc_faces:
+                    continue
+                pc_wx = 0.5 * (pc["min_x"] + pc["max_x"])
+                pc_wz = -0.5 * (pc["min_y"] + pc["max_y"])
+                pc_ty = sample_shibuya_terrain_y(pc_wx, pc_wz)
+                for pf in pc_faces:
+                    for pv in pf.verts:
+                        if pv.index in shifted_pverts:
+                            continue
+                        shifted_pverts.add(pv.index)
+                        if pv.co.z <= pc["min_z"] + 0.15 and (pc["max_z"] - pc["min_z"]) >= 2.0:
+                            pv.co.z = pc_ty - 3.5
+                        else:
+                            pv.co.z += pc_ty
+
             bm_proxy.normal_update()
             bm_proxy.to_mesh(eval_mesh)
             bm_proxy.free()
@@ -1708,6 +1581,7 @@ def generate_shibuya_plateau_city() -> str:
                         next_i = (i + 1) % 4
                         try:
                             f_side = bm.faces.new([vb[i], vb[next_i], vt[next_i], vt[i]])
+                            f_side[cid_layer] = cid
                             f_side.material_index = 1 if bldg_h < 55.0 else 0
                             for loop in f_side.loops:
                                 u = (loop.vert.co.x + loop.vert.co.y) / 4.0
@@ -1718,6 +1592,7 @@ def generate_shibuya_plateau_city() -> str:
                             pass
                     try:
                         f_top = bm.faces.new(vt)
+                        f_top[cid_layer] = cid
                         f_top.material_index = 4  # PlateauRooftop
                         for loop in f_top.loops:
                             loop[uv_layer].uv = (loop.vert.co.x / 4.0, -loop.vert.co.y / 4.0)
@@ -1726,6 +1601,25 @@ def generate_shibuya_plateau_city() -> str:
                         pass
                     if hut_faces:
                         bmesh.ops.recalc_face_normals(bm, faces=hut_faces)
+
+        # 7b. 全詳細シェル＋塔屋を 3D 地形標高（sample_shibuya_terrain_y + -3.5m スカート）へ配置
+        vert_cid: dict[int, int] = {}
+        bm.verts.ensure_lookup_table()
+        for f in bm.faces:
+            fcid = f[cid_layer]
+            if fcid > 0:
+                for v in f.verts:
+                    if v.index not in vert_cid:
+                        vert_cid[v.index] = fcid
+        for v in bm.verts:
+            fcid = vert_cid.get(v.index, 0)
+            if fcid in comp_info:
+                _zb, bh, b_cx, b_cy = comp_info[fcid]
+                ty = sample_shibuya_terrain_y(b_cx, -b_cy)
+                if v.co.z <= 0.15 and bh >= 2.0:
+                    v.co.z = ty - 3.5
+                else:
+                    v.co.z += ty
 
         # 8. 詳細メッシュ・プロキシメッシュをシーンへ出力（成分単位溶接済みのため全体remove_doublesは行わない）
         bm.normal_update()
@@ -1854,7 +1748,7 @@ def render_360_review(review_dir: str) -> None:
     ground_bm.to_mesh(ground_mesh)
     ground_bm.free()
     ground_obj = bpy.data.objects.new("ReviewGround", ground_mesh)
-    ground_obj.location = Vector((-750.0, 0.0, -0.05))
+    ground_obj.location = Vector((-950.0, -350.0, -0.05))
     ground_mat = bpy.data.materials.new("ReviewGroundMat")
     ground_mat.use_nodes = True
     bsdf_g = next(n for n in ground_mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
@@ -1884,49 +1778,49 @@ def render_360_review(review_dir: str) -> None:
     scene.collection.objects.link(cam_obj)
     scene.camera = cam_obj
 
-    # 渋谷周辺4倍拡大エリアの主要6大スポット（各スポット360度マルチアングル 8方位 + 俯瞰）
+    # 渋谷エリア 1:1 非反転 実座標の主要6大スポット（各スポット360度マルチアングル + 俯瞰）
     review_spots = [
         {
             "id": "spot1_scramble_109_y_fork",
             "name": "スクランブル交差点〜109前Y字路（道玄坂下・文化村通り）",
-            "center": Vector((-825.0, -250.0, 1.8)),
-            "birdseye_height": 80.0,
-            "look_radius": 60.0,
+            "center": Vector((-990.7, -275.8, sample_shibuya_terrain_y(-990.7, 275.8) + 2.0)),
+            "birdseye_height": 85.0,
+            "look_radius": 65.0,
         },
         {
             "id": "spot2_dogenzaka_ue_tamagawa",
-            "name": "道玄坂上・玉川通り合流・神泉町（西進エリア）",
-            "center": Vector((-1080.0, -140.0, 2.0)),
-            "birdseye_height": 65.0,
-            "look_radius": 50.0,
+            "name": "道玄坂上・玉川通り合流・神泉町（西進傾斜エリア）",
+            "center": Vector((-1440.0, -675.0, sample_shibuya_terrain_y(-1440.0, 675.0) + 2.2)),
+            "birdseye_height": 70.0,
+            "look_radius": 55.0,
         },
         {
             "id": "spot3_bunkamura_shoto",
             "name": "文化村通り・東急本店前・松濤二丁目",
-            "center": Vector((-940.0, -345.0, 1.8)),
-            "birdseye_height": 60.0,
-            "look_radius": 45.0,
+            "center": Vector((-1325.0, -151.3, sample_shibuya_terrain_y(-1325.0, 151.3) + 2.0)),
+            "birdseye_height": 65.0,
+            "look_radius": 50.0,
         },
         {
             "id": "spot4_koen_dori_parco",
             "name": "渋谷公園通り・PARCO前・オルガン坂",
-            "center": Vector((-798.0, -360.0, 2.0)),
-            "birdseye_height": 65.0,
-            "look_radius": 45.0,
+            "center": Vector((-1108.1, 43.6, sample_shibuya_terrain_y(-1108.1, -43.6) + 2.2)),
+            "birdseye_height": 70.0,
+            "look_radius": 50.0,
         },
         {
             "id": "spot5_sakurazaka_cerulean",
-            "name": "桜丘町・さくら坂・セルリアンタワー周回路",
-            "center": Vector((-920.0, 10.0, 2.0)),
-            "birdseye_height": 65.0,
-            "look_radius": 45.0,
+            "name": "桜丘町・さくら坂・セルリアンタワー周辺",
+            "center": Vector((-974.8, -519.7, sample_shibuya_terrain_y(-974.8, 519.7) + 2.0)),
+            "birdseye_height": 70.0,
+            "look_radius": 50.0,
         },
         {
             "id": "spot6_miyamasuzaka_ue",
             "name": "宮益坂・宮益坂上・青山通り",
-            "center": Vector((-560.0, -248.0, 2.2)),
-            "birdseye_height": 65.0,
-            "look_radius": 50.0,
+            "center": Vector((-501.1, -194.8, sample_shibuya_terrain_y(-501.1, 194.8) + 2.2)),
+            "birdseye_height": 70.0,
+            "look_radius": 55.0,
         },
     ]
 
@@ -1947,15 +1841,13 @@ def render_360_review(review_dir: str) -> None:
         spot_center = spot["center"]
         look_r = spot["look_radius"]
 
-        # A. アイレベル 360度 全8方位レンダリング
+        # A. アイレベル 360度 全8方位レンダリング（非反転 Blender: +X=東, +Y=北, -Y=南）
         for dir_name, deg in directions:
             rad = math.radians(deg)
             cam_obj.location = spot_center
-            # Blender 座標系: x: 東 (+X), y: 南 (-Y なので北は -Y, 南は +Y)
-            # deg=0 (北): y方向は -1.0, deg=90 (東): x方向は +1.0
             dx = math.sin(rad) * look_r
-            dy = -math.cos(rad) * look_r
-            target = spot_center + Vector((dx, dy, 14.0))  # 沿道ビル見上げ角度
+            dy = math.cos(rad) * look_r
+            target = spot_center + Vector((dx, dy, 14.0))
             direction = target - spot_center
             cam_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
@@ -1967,15 +1859,15 @@ def render_360_review(review_dir: str) -> None:
         # B. スポット直上からの高解像度俯瞰（Birdseye View）
         bh = spot["birdseye_height"]
         cam_obj.location = spot_center + Vector((0.0, 0.0, bh))
-        cam_obj.rotation_euler = (0.0, 0.0, 0.0)  # 直下
+        cam_obj.rotation_euler = (0.0, 0.0, 0.0)
         out_file = os.path.join(review_dir, f"{spot_id}_999_birdseye.png")
         scene.render.filepath = out_file
         bpy.ops.render.render(write_still=True)
         rendered_count += 1
 
-    # C. 渋谷エリア全域高空バードズアイ（南西から北東全景）
-    cam_obj.location = Vector((-1100.0, 150.0, 480.0))
-    direction = Vector((-750.0, -150.0, 50.0)) - cam_obj.location
+    # C. 渋谷エリア全域高空バードズアイ
+    cam_obj.location = Vector((-1250.0, -700.0, 560.0))
+    direction = Vector((-920.0, -320.0, 40.0)) - cam_obj.location
     cam_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
     out_file = os.path.join(review_dir, "00_shibuya_metropolis_high_birdseye.png")
     scene.render.filepath = out_file

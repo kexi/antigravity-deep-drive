@@ -34,6 +34,7 @@ import {
   getPlateauWaterBodies,
   getRelativeTerrainDisplacement,
   getShibuyaPlateauBuildingsForMap,
+  sampleShibuyaTerrainY,
   SHIBUYA_PLATEAU_BUILDINGS,
 } from "../openData/gsiPlateauLoader";
 import {
@@ -100,6 +101,7 @@ export class TokyoStationMap {
   public signSpotLights: THREE.SpotLight[] = [];
   public colliders: RAPIER.Collider[] = [];
   public obstacleColliderHandles: number[] = [];
+  private drivableColliderHandles: number[] = [];
   public plateauBuildingGroups: THREE.Group[] = [];
   public glbStationGroup: THREE.Group | null = null;
   public glbShibuyaStreamGroup: THREE.Group | null = null;
@@ -124,6 +126,7 @@ export class TokyoStationMap {
   private proceduralCeruleanGroup: THREE.Group | null = null;
   private proceduralMarkCityGroup: THREE.Group | null = null;
   private proceduralCenterGaiArchGroup: THREE.Group | null = null;
+  private proceduralHachikoStatueGroup: THREE.Group | null = null;
   private proceduralShutokoCoreMeshes: THREE.Mesh[] = [];
   private proceduralGlbOverlappingColliders: RAPIER.Collider[] = [];
   private treeSlots: {
@@ -170,11 +173,18 @@ export class TokyoStationMap {
   private shibuyaPlateauGlbLoadingPromise: Promise<void> | null = null;
   private treeTemplateLoadingPromise: Promise<void> | null = null;
 
-  private registerCollider(col: RAPIER.Collider, isObstacle = true): void {
+  public getDrivableColliderHandles(): ReadonlyArray<number> {
+    return this.drivableColliderHandles;
+  }
+
+  private registerCollider(col: RAPIER.Collider, isObstacle = true, isDrivable = false): void {
     this.colliders.push(col);
     const hasValidHandle = isObstacle && typeof col?.handle === "number";
     if (hasValidHandle) {
       this.obstacleColliderHandles.push(col.handle);
+    }
+    if (isDrivable && typeof col?.handle === "number") {
+      this.drivableColliderHandles.push(col.handle);
     }
   }
 
@@ -268,16 +278,17 @@ export class TokyoStationMap {
   public static getAreaSpawnTransform(area: DriveAreaId = "shibuya"): AreaSpawnTransform {
     const isShibuya = area === "shibuya";
     if (isShibuya) {
-      // Why x = -744.9, yawRadians = 0.018 か:
-      // 明治通りスプライン（中心線 x = -750、片側3車線・車線幅3.4m）において、
-      // 第2車線（中央走行車線）は法線オフセット +5.1m（3.4m 〜 6.8m の中央）に位置する。
-      // スプライン接線角（yaw ≈ 0.018 rad）に合わせることで、スポーン直後から車線境界破線（x = -746.6m および x = -743.2m）
-      // と完全に平行かつ車線中央に正対し、視界前方に整然としたレーンが伸びる。
+      // Why (-709.3, 492.2), yawRadians = -2.324 か:
+      // 非鏡像 1:1 座標系 (+X=東, -Z=北) の明治通り（渋谷ストリーム (-750, 527.6) 前: (-678.0, 518.2)→(-737.3, 462.6)）における
+      // 左側通行（北西向き）第1車線中央にスポーンさせ、右手前方へ渋谷ヒカリエ・スクランブルスクエア・首都高3号線高架・JRガードを望む。
+      const spawnX = -709.3;
+      const spawnZ = 492.2;
+      const groundY = sampleShibuyaTerrainY(spawnX, spawnZ);
       return {
         area: "shibuya",
         areaLabel: "渋谷 (渋谷ストリーム / 明治通り)",
-        position: new THREE.Vector3(-744.9, 0.9, -68.0),
-        yawRadians: 0.018,
+        position: new THREE.Vector3(spawnX, groundY + 0.62, spawnZ),
+        yawRadians: -2.324,
       };
     }
 
@@ -350,7 +361,8 @@ export class TokyoStationMap {
     for (let i = 0; i < posAttr.count; i++) {
       const vx = posAttr.getX(i);
       const vz = posAttr.getZ(i);
-      const terrainDeltaY = getRelativeTerrainDisplacement(vx, vz);
+      const terrainDeltaY =
+        vx < -395 ? sampleShibuyaTerrainY(vx, vz) - 1.5 : getRelativeTerrainDisplacement(vx, vz);
       posAttr.setY(i, terrainDeltaY);
     }
     groundGeo.computeVertexNormals();
@@ -366,39 +378,87 @@ export class TokyoStationMap {
     groundMesh.receiveShadow = true;
     this.group.add(groundMesh);
 
-    // 渋谷市街地（道玄坂・スクランブル・桜丘・神南・宇田川町）の街区舗装基壇
-    // 道路路面 (y = 0.011) より下の y = -0.008 に明るい御影石系スレート基壇を敷設し、道玄坂が黒空間に浮いて見える現象を防ぐ
-    const shibuyaUrbanBaseGeo = new THREE.PlaneGeometry(760, 1150);
-    shibuyaUrbanBaseGeo.rotateX(-Math.PI / 2);
-    const shibuyaUrbanBaseMat = new THREE.MeshStandardMaterial({
-      color: 0x6b7280,
-      roughness: 0.88,
+    // 渋谷全域（x ∈ [-1720, -392], z ∈ [-460, 1140]）連続 3D 起伏地形メッシュ＆Rapier Trimesh 走行コライダー
+    // 8m 間隔グリッドで標高差と谷・坂道勾配を連続表現し、x ∈ [-500, -395] のコサインテーパーで丸の内平坦面 (y=0) へ着地させる。
+    const terrainXMin = -1720;
+    const terrainXMax = -392;
+    const terrainZMin = -460;
+    const terrainZMax = 1140;
+    const terrainStep = 8;
+    const terrainCols = Math.floor((terrainXMax - terrainXMin) / terrainStep) + 1;
+    const terrainRows = Math.floor((terrainZMax - terrainZMin) / terrainStep) + 1;
+    const terrainVertCount = terrainCols * terrainRows;
+    const visualTerrainVerts = new Float32Array(terrainVertCount * 3);
+    const physicsTerrainVerts = new Float32Array(terrainVertCount * 3);
+    const terrainIndices = new Uint32Array((terrainRows - 1) * (terrainCols - 1) * 6);
+
+    for (let r = 0; r < terrainRows; r++) {
+      const z = terrainZMin + r * terrainStep;
+      for (let c = 0; c < terrainCols; c++) {
+        const x = terrainXMin + c * terrainStep;
+        const y = sampleShibuyaTerrainY(x, z);
+        const idx3 = (r * terrainCols + c) * 3;
+        physicsTerrainVerts[idx3] = x;
+        physicsTerrainVerts[idx3 + 1] = y;
+        physicsTerrainVerts[idx3 + 2] = z;
+
+        visualTerrainVerts[idx3] = x;
+        visualTerrainVerts[idx3 + 1] = y - 0.035;
+        visualTerrainVerts[idx3 + 2] = z;
+      }
+    }
+
+    let triCursor = 0;
+    for (let r = 0; r < terrainRows - 1; r++) {
+      for (let c = 0; c < terrainCols - 1; c++) {
+        const i00 = r * terrainCols + c;
+        const i10 = i00 + 1;
+        const i01 = (r + 1) * terrainCols + c;
+        const i11 = i01 + 1;
+        // 反時計回り（+Y 上向き法線）
+        terrainIndices[triCursor++] = i00;
+        terrainIndices[triCursor++] = i01;
+        terrainIndices[triCursor++] = i10;
+        terrainIndices[triCursor++] = i10;
+        terrainIndices[triCursor++] = i01;
+        terrainIndices[triCursor++] = i11;
+      }
+    }
+
+    const shibuyaTerrainGeo = new THREE.BufferGeometry();
+    shibuyaTerrainGeo.setAttribute("position", new THREE.BufferAttribute(visualTerrainVerts, 3));
+    shibuyaTerrainGeo.setIndex(new THREE.BufferAttribute(terrainIndices, 1));
+    shibuyaTerrainGeo.computeVertexNormals();
+    const shibuyaTerrainMat = new THREE.MeshStandardMaterial({
+      color: 0x6b6a65,
+      roughness: 0.9,
       metalness: 0.04,
     });
-    this.applyArchitecture3DTexture(shibuyaUrbanBaseMat, "white_granite");
-    const shibuyaUrbanBaseMesh = new THREE.Mesh(shibuyaUrbanBaseGeo, shibuyaUrbanBaseMat);
-    shibuyaUrbanBaseMesh.name = "ShibuyaUrbanDistrictPavement";
-    shibuyaUrbanBaseMesh.userData.isRoadInfrastructure = true;
-    shibuyaUrbanBaseMesh.position.set(-1040, -0.008, 75);
-    shibuyaUrbanBaseMesh.receiveShadow = true;
-    this.group.add(shibuyaUrbanBaseMesh);
+    this.applyArchitecture3DTexture(shibuyaTerrainMat, "white_granite");
+    const shibuyaTerrainMesh = new THREE.Mesh(shibuyaTerrainGeo, shibuyaTerrainMat);
+    shibuyaTerrainMesh.name = "ShibuyaTerrainMesh";
+    shibuyaTerrainMesh.userData.isRoadInfrastructure = true;
+    shibuyaTerrainMesh.receiveShadow = true;
+    this.group.add(shibuyaTerrainMesh);
 
-    // 宮益坂〜青山通り東伸（x = -660..-340）の連続都市街区舗装基壇（丸の内側の距離カリング境界と分離）
-    const shibuyaEastBaseGeo = new THREE.PlaneGeometry(320, 900);
-    shibuyaEastBaseGeo.rotateX(-Math.PI / 2);
-    const shibuyaEastBaseMesh = new THREE.Mesh(shibuyaEastBaseGeo, shibuyaUrbanBaseMat);
-    shibuyaEastBaseMesh.name = "ShibuyaEastCorridorPavement";
-    shibuyaEastBaseMesh.userData.isRoadInfrastructure = true;
-    shibuyaEastBaseMesh.position.set(-500, -0.008, 120);
-    shibuyaEastBaseMesh.receiveShadow = true;
-    this.group.add(shibuyaEastBaseMesh);
+    const shibuyaTerrainBody = world.createRigidBody(
+      rapier.RigidBodyDesc.fixed().setTranslation(0, 0, 0),
+    );
+    const shibuyaTrimeshDesc = rapier.ColliderDesc.trimesh(physicsTerrainVerts, terrainIndices)
+      .setFriction(0.9)
+      .setRestitution(0.01);
+    const shibuyaTerrainCollider = world.createCollider(shibuyaTrimeshDesc, shibuyaTerrainBody);
+    this.registerCollider(shibuyaTerrainCollider, false, true);
 
-    // 広域地面コライダー（Rapier: 8000m × 8000m, halfExtent = 4000m）
-    const groundBodyDesc = rapier.RigidBodyDesc.fixed().setTranslation(0, -0.5, 0);
-    const groundBody = world.createRigidBody(groundBodyDesc);
-    const groundColliderDesc = rapier.ColliderDesc.cuboid(4000, 0.5, 4000).setFriction(0.9);
+    // 丸の内・千代田側平坦地面コライダー（x ∈ [-395, +4000] のみカバーし、渋谷側の連続起伏 Trimesh・谷底と干渉しない）
+    const groundBody = world.createRigidBody(
+      rapier.RigidBodyDesc.fixed().setTranslation(0, -0.5, 0),
+    );
+    const groundColliderDesc = rapier.ColliderDesc.cuboid(2197.5, 0.5, 4000)
+      .setTranslation(1802.5, 0, 0)
+      .setFriction(0.9);
     const groundCollider = world.createCollider(groundColliderDesc, groundBody);
-    this.registerCollider(groundCollider, false);
+    this.registerCollider(groundCollider, false, true);
 
     // 登録済み直線道路・交差点パッドのメタデータを保持し、交差点隅切り・曲線歩道クリッピングで共有する
     interface StraightRoadRecord {
@@ -859,54 +919,52 @@ export class TokyoStationMap {
     // 多頂点 Catmull-Rom スプライン曲線道路（buildPolylineSegment: 3車線・白破線・縁石・歩道）として構築する。
     // また東西連絡路（Shibuya-Station-Link-St）も nav-road-shibuya-scramble に完全包含されているため直線生成を廃止。
 
-    // 渋谷スクランブル交差点（x = -815, z = 248）および宮益坂下交差点（x = -750, z = 248）
-    // Why not hasCrosswalks / hasCenterDiamond / hasGuideDots:
-    // スクランブル交差点内部は対角線X字型横断歩道が交差する全方向歩行者専用領域であり、
-    // 中央ダイヤ標示（◇）や南北誘導破線を描画すると斜め横断歩道白線と十字に衝突・貫通して視覚的ノイズとなる。
-    // また宮益坂下交差点（スポーン地点正面）およびスクランブル交差点に真北・真南・真東・真西の
-    // 直角横断歩道白線スタンプを押すと「碁盤の目」の視覚的要因となるため、hasCrosswalks を false に設定し
-    // 平滑なアスファルト舗装接続面と物理コライダーのみを供給する。
-    addIntersectionPadAndMarkings(-815, 248, 44, 44, 3, 3, false, {
+    // 渋谷スクランブル交差点 (-990.7, 275.8) および宮益坂下交差点 (-818.4, 245.8)
+    addIntersectionPadAndMarkings(-990.7, 275.8, 44, 44, 3, 3, false, {
       hasCenterDiamond: false,
       hasGuideDots: false,
       hasCornerSidewalks: false,
     });
-    addIntersectionPadAndMarkings(-750, 248, 32, 24, 3, 2, false, {
+    addIntersectionPadAndMarkings(-818.4, 245.8, 32, 24, 3, 2, false, {
       hasCenterDiamond: false,
       hasGuideDots: false,
       hasCornerSidewalks: false,
     });
 
-    // 渋谷スクランブル交差点 象徴の対角線X字型スクランブル横断歩道（斜め横断歩道）
-    // 外周横断歩道上面（world y = 0.0115 + 0.022 = 0.0335）と完全に揃えた y = 0.0336 で重畳
-    const scrambleDiagonalCrosswalks = this.roadBuilder.buildScrambleDiagonalCrosswalks(44);
-    scrambleDiagonalCrosswalks.position.set(-815, 0.0336, 248);
+    // 渋谷スクランブル交差点 象徴の対角線X字型スクランブル横断歩道（斜め横断歩道、3D地形追従）
+    const scrambleGroundY = sampleShibuyaTerrainY(-990.7, 275.8);
+    const scrambleDiagonalCrosswalks = this.roadBuilder.buildScrambleDiagonalCrosswalks(
+      44,
+      sampleShibuyaTerrainY,
+      -990.7,
+      275.8,
+      scrambleGroundY,
+    );
+    scrambleDiagonalCrosswalks.position.set(-990.7, scrambleGroundY + 0.0336, 275.8);
     this.group.add(scrambleDiagonalCrosswalks);
 
     // 永代通り×国道246号T字交差点（x = -268 × z = 95）フラットアスファルト接続パッド＆路面標示
     addIntersectionPadAndMarkings(-268, 95, 26, 26, 2, 2, true);
 
-    // I-6. 渋谷放射状曲線道路合流点 フラットアスファルト接続パッド（直角横断歩道・ダイヤ標示抑制）
-    // Why not hasCrosswalks / hasCenterDiamond:
-    // 有機的な放射状曲線道路同士の合流点に真北・真南・真東・真西を向いた直角横断歩道スタンプや
-    // 中央ダイヤ標示を押すと、斜め道路と直角白線が格子状に衝突して「碁盤の目」の視覚的印象を生むため、
-    // 横断歩道・ダイヤ標示を無効化し、平滑なアスファルト舗装接続面と物理コライダーのみを供給する。
-    // また旧グリッド座標（z = 95）の架空交差点パッド（-750, 95 および -730, 95）は完全廃止。
-    // 注意: 青山一丁目（-380, 250）は Section P の expandedIntersections 側に集約し重複配置を防止する。
+    // I-6. 渋谷放射状曲線道路合流点 3D起伏追従アスファルト接続パッド（非鏡像 1:1 座標）
     const shibuyaRadialIntersections = [
-      { x: -1080, z: 140, w: 36, d: 32, lx: 2, lz: 2 }, // 道玄坂上交差点（玉川通り合流）
-      { x: -1250, z: 150, w: 34, d: 32, lx: 2, lz: 2 }, // 神泉町交差点（旧山手通り交差）
-      { x: -940, z: 345, w: 30, d: 28, lx: 2, lz: 2 }, // 東急本店前交差点（松濤文化村通り）
-      { x: -1060, z: 370, w: 28, d: 26, lx: 1, lz: 1 }, // 松濤二丁目交差点（円山町連絡路接続）
-      { x: -798, z: 360, w: 28, d: 28, lx: 2, lz: 1 }, // 渋谷PARCO前交差点（オルガン坂合流）
-      { x: -805, z: 440, w: 28, d: 26, lx: 2, lz: 1 }, // 勤労福祉会館前交差点（神南連絡路接続）
-      { x: -810, z: 520, w: 32, d: 30, lx: 2, lz: 2 }, // 渋谷区役所・NHK放送センター前交差点
-      { x: -875, z: 320, w: 26, d: 24, lx: 1, lz: 1 }, // 宇田川町交番前交差点（井の頭通り・オルガン坂）
-      { x: -950, z: -60, w: 26, d: 24, lx: 1, lz: 1 }, // さくら坂上・インフォスタワー前交差点
-      { x: -1350, z: 150, w: 32, d: 28, lx: 3, lz: 2 }, // 山手通り・神泉町交差点（玉川通り西進合流）
-      { x: -855, z: 95, w: 32, d: 28, lx: 2, lz: 2 }, // セルリアンタワー前・玉川通り（国道246号・さくら坂入口）
-      { x: -940, z: 115, w: 28, d: 26, lx: 2, lz: 1 }, // さくら坂西口・玉川通り合流交差点
-      { x: -750, z: 102, w: 34, d: 30, lx: 3, lz: 2 }, // 渋谷駅南・明治通り×国道246号（渋谷ストリーム北）交差点
+      { x: -1440.0, z: 675.0, w: 34, d: 32, lx: 2, lz: 2 }, // 道玄坂上交差点（玉川通り合流）
+      { x: -1530.0, z: 705.0, w: 32, d: 30, lx: 2, lz: 2 }, // 神泉町交差点（南平台）
+      { x: -1625.0, z: 740.0, w: 34, d: 30, lx: 3, lz: 2 }, // 山手通り・山手神泉交差点
+      { x: -1325.0, z: 151.3, w: 30, d: 28, lx: 2, lz: 2 }, // 東急本店前交差点（松濤文化村通り×センター街）
+      { x: -1445.0, z: 75.0, w: 28, d: 26, lx: 1, lz: 1 }, // 松濤二丁目交差点
+      { x: -981.6, z: 185.0, w: 26, d: 24, lx: 2, lz: 1 }, // 神南一丁目交差点（MODI/公園通り入口）
+      { x: -1108.1, z: -43.6, w: 28, d: 26, lx: 2, lz: 1 }, // 渋谷PARCO前交差点（オルガン坂合流）
+      { x: -1165.0, z: -120.0, w: 28, d: 26, lx: 2, lz: 1 }, // 勤労福祉会館前交差点（神南二丁目連絡路）
+      { x: -1210.0, z: -202.0, w: 30, d: 28, lx: 2, lz: 2 }, // 渋谷区役所・NHK放送センター前交差点
+      { x: -1155.0, z: 128.0, w: 26, d: 24, lx: 1, lz: 1 }, // 宇田川町交番前交差点（センター街×オルガン坂）
+      { x: -995.0, z: 675.0, w: 26, d: 24, lx: 1, lz: 1 }, // さくら坂上・インフォスタワー前交差点
+      { x: -974.8, z: 519.7, w: 32, d: 28, lx: 2, lz: 2 }, // セルリアンタワー前・玉川通り
+      { x: -1177.4, z: 600.6, w: 28, d: 26, lx: 2, lz: 1 }, // さくら坂西口・玉川通り合流交差点
+      { x: -762.8, z: 435.5, w: 36, d: 32, lx: 3, lz: 2 }, // 渋谷駅東口・明治通り×国道246号×六本木通り
+      { x: -501.1, z: 194.8, w: 30, d: 28, lx: 2, lz: 2 }, // 宮益坂上交差点（宮益坂×青山通り）
+      { x: -841.2, z: -61.2, w: 30, d: 26, lx: 2, lz: 2 }, // 神宮前・美竹通り北交差点
+      { x: -457.3, z: 725.0, w: 30, d: 28, lx: 2, lz: 2 }, // 渋谷橋（明治通り×恵比寿カーブ接続）
     ];
     for (const ri of shibuyaRadialIntersections) {
       addIntersectionPadAndMarkings(ri.x, ri.z, ri.w, ri.d, ri.lx, ri.lz, false, {
@@ -916,49 +974,64 @@ export class TokyoStationMap {
       });
     }
 
-    // I-6b. SHIBUYA109前Y字路（道玄坂×文化村通り分岐 有機的Y字拡幅アスファルト＋三角広場基壇）
-    // Why ShapeGeometry instead of 24x20 box: 四角い矩形パッドは道玄坂・文化村通り・スクランブルの間で
-    // 角が黒く宙浮きに見えるため、分岐形状に沿った滑らかなY字舗装面と109三角街区基壇を形成する。
+    // I-6b. SHIBUYA109前Y字路（道玄坂 SW × 文化村通り NW 分岐 (-1159.4, 272.4) 有機的Y字拡幅アスファルト＋三角広場基壇）
     const yForkGroup = new THREE.Group();
-    yForkGroup.name = "Intersection_-847_250";
+    yForkGroup.name = "Intersection_-1159_272";
     yForkGroup.userData.isRoadInfrastructure = true;
     yForkGroup.position.set(0, 0.0115, 0);
 
+    const drapeHorizontalShape = (geom: THREE.BufferGeometry): void => {
+      const posAttr = geom.getAttribute("position");
+      if (!posAttr) {
+        return;
+      }
+      for (let i = 0; i < posAttr.count; i++) {
+        const vx = posAttr.getX(i);
+        const vz = posAttr.getZ(i);
+        posAttr.setY(i, posAttr.getY(i) + sampleShibuyaTerrainY(vx, vz));
+      }
+      posAttr.needsUpdate = true;
+      geom.computeVertexNormals();
+    };
+
     const yForkShape = new THREE.Shape();
-    yForkShape.moveTo(-834, 241.5);
-    yForkShape.lineTo(-862, 232.8);
-    yForkShape.lineTo(-866, 243.5);
-    yForkShape.quadraticCurveTo(-856, 250.5, -864, 261.0);
-    yForkShape.lineTo(-855, 273.5);
-    yForkShape.lineTo(-834, 261.0);
+    yForkShape.moveTo(-1148.0, -261.0);
+    yForkShape.lineTo(-1182.0, -240.0);
+    yForkShape.lineTo(-1192.0, -251.0);
+    yForkShape.quadraticCurveTo(-1178.0, -272.4, -1194.0, -294.0);
+    yForkShape.lineTo(-1184.0, -305.0);
+    yForkShape.lineTo(-1148.0, -284.0);
     yForkShape.closePath();
     const yForkGeo = new THREE.ShapeGeometry(yForkShape, 12);
-    yForkGeo.rotateX(Math.PI / 2);
+    yForkGeo.rotateX(-Math.PI / 2);
+    drapeHorizontalShape(yForkGeo);
     const yForkMesh = new THREE.Mesh(yForkGeo, intersectionPadMat);
     yForkMesh.name = "Shibuya109YForkAsphalt";
     yForkMesh.userData.isRoadInfrastructure = true;
     yForkMesh.receiveShadow = true;
     yForkGroup.add(yForkMesh);
 
-    const yForkCorePlaneGeo = new THREE.PlaneGeometry(14, 14);
+    const yForkCorePlaneGeo = new THREE.PlaneGeometry(16, 16, 4, 4);
     yForkCorePlaneGeo.rotateX(-Math.PI / 2);
+    yForkCorePlaneGeo.translate(-1162.0, -0.0005, 272.4);
+    drapeHorizontalShape(yForkCorePlaneGeo);
     const yForkCorePlane = new THREE.Mesh(yForkCorePlaneGeo, intersectionPadMat);
-    yForkCorePlane.position.set(-847, -0.0005, 250);
     yForkCorePlane.userData.isRoadInfrastructure = true;
     yForkGroup.add(yForkCorePlane);
     this.group.add(yForkGroup);
 
     const plaza109IslandShape = new THREE.Shape();
-    plaza109IslandShape.moveTo(-854, 248.5);
-    plaza109IslandShape.lineTo(-865, 241.5);
-    plaza109IslandShape.lineTo(-898, 245.5);
-    plaza109IslandShape.lineTo(-898, 274.5);
-    plaza109IslandShape.lineTo(-869, 268.5);
-    plaza109IslandShape.quadraticCurveTo(-854, 256.5, -854, 248.5);
+    plaza109IslandShape.moveTo(-1176.0, -272.4);
+    plaza109IslandShape.lineTo(-1190.0, -255.0);
+    plaza109IslandShape.lineTo(-1226.0, -252.0);
+    plaza109IslandShape.lineTo(-1226.0, -293.0);
+    plaza109IslandShape.lineTo(-1190.0, -290.0);
+    plaza109IslandShape.quadraticCurveTo(-1176.0, -280.0, -1176.0, -272.4);
     const plaza109IslandGeo = new THREE.ShapeGeometry(plaza109IslandShape, 12);
-    plaza109IslandGeo.rotateX(Math.PI / 2);
+    plaza109IslandGeo.rotateX(-Math.PI / 2);
+    drapeHorizontalShape(plaza109IslandGeo);
     const plaza109IslandMat = new THREE.MeshStandardMaterial({
-      color: 0xb8c0cc,
+      color: 0xa8a6a0,
       roughness: 0.72,
       metalness: 0.06,
     });
@@ -969,6 +1042,44 @@ export class TokyoStationMap {
     plaza109IslandMesh.position.set(0, 0.022, 0);
     plaza109IslandMesh.receiveShadow = true;
     this.group.add(plaza109IslandMesh);
+
+    const plaza109CurbPts: Array<[number, number]> = [
+      [-1218.0, 252.5],
+      [-1190.0, 255.0],
+      [-1182.5, 263.5],
+      [-1176.0, 272.4],
+      [-1182.5, 281.5],
+      [-1190.0, 290.0],
+      [-1218.0, 292.5],
+    ];
+    const plaza109CurbMat = new THREE.MeshStandardMaterial({
+      color: 0xc2bfb8,
+      roughness: 0.66,
+      metalness: 0.05,
+    });
+    this.applyArchitecture3DTexture(plaza109CurbMat, "white_granite");
+    const plaza109CurbGroup = new THREE.Group();
+    plaza109CurbGroup.name = "Shibuya109TriangularPlazaCurb";
+    plaza109CurbGroup.userData.isRoadInfrastructure = true;
+    for (let ci = 0; ci < plaza109CurbPts.length - 1; ci++) {
+      const [ax, az] = plaza109CurbPts[ci];
+      const [bx, bz] = plaza109CurbPts[ci + 1];
+      const segLen = Math.hypot(bx - ax, bz - az);
+      const midX = (ax + bx) * 0.5;
+      const midZ = (az + bz) * 0.5;
+      const midY = sampleShibuyaTerrainY(midX, midZ);
+      const segMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.32, 0.24, segLen + 0.16),
+        plaza109CurbMat,
+      );
+      segMesh.name = `Shibuya109TriangularPlazaCurb_${ci}`;
+      segMesh.userData.isRoadInfrastructure = true;
+      segMesh.position.set(midX, midY + 0.04, midZ);
+      segMesh.rotation.y = Math.atan2(bx - ax, bz - az);
+      segMesh.receiveShadow = true;
+      plaza109CurbGroup.add(segMesh);
+    }
+    this.group.add(plaza109CurbGroup);
 
     // I-7. 渋谷ハチ公前広場インフラ（忠犬ハチ公像・石畳舗装・植栽・ベンチ・照明灯・JR駅前キャノピー）
     this.buildHachikoPlazaInfrastructure(world, rapier, groundBody);
@@ -1021,14 +1132,14 @@ export class TokyoStationMap {
     // Why not addRoadSegment: 明治通り（x = -750）と完全平行に走る直線板道路であり、
     // 渋谷エリアを直角格子状にする主要因であったため撤去。
 
-    // 3. 外苑東通り（x = -380 南北幹線: 六本木〜青山一丁目〜信濃町、z = 98 国道246号交差で分割開口）
+    // 3. 外苑東通り（x = -380 南北幹線: 六本木〜青山一丁目〜信濃町、z = 98 国道246号・z = 400 六本木通り交差で分割開口）
     for (const gaienEastSeg of [
-      { cz: -168.5, len: 331 }, // 六本木 z=-334 .. 新宿通り南側 z=-3
+      { cz: -168.5, len: 331 }, // 六本木東 z=-334 .. 新宿通り南側 z=-3
       { cz: 45.5, len: 65 }, // 新宿通り北側 z=13 .. 国道246号南側 z=78
       { cz: 137.5, len: 39 }, // 国道246号北側 z=118 .. 仲通り延長南側 z=157
       { cz: 203.5, len: 61 }, // 仲通り延長北側 z=173 .. 青山一丁目 z=234
       { cz: 309, len: 86 }, // 青山一丁目 z=266 .. 内堀通り南側 z=352
-      { cz: 456, len: 156 }, // 内堀通り北側 z=378 .. 信濃町方面 z=534
+      { cz: 473.5, len: 121 }, // 六本木通り北側 z=413 .. 信濃町方面 z=534
     ]) {
       addRoadSegment(
         {
@@ -1046,7 +1157,7 @@ export class TokyoStationMap {
           hasManholes: true,
           // Why hasTrafficLights: false:
           // 直線板道路の自動信号機配置は、スプライン道路である国道246号連絡路（nav-road-route246: z=98, x=-371.4）
-          // や宮益坂（nav-road-shibuya-miyamasuzaka: z=235）の走行車線内に信号柱コライダーを突き刺し
+          // や宮益坂（nav-road-shibuya-miyamasuzaka）の走行車線内に信号柱コライダーを突き刺し
           // 「見えない壁」を発生させるため無効化する。
           hasTrafficLights: false,
           speedLimitSign: 50,
@@ -1056,6 +1167,11 @@ export class TokyoStationMap {
       );
     }
     addIntersectionPadAndMarkings(-380, 98, 28, 40, 2, 2, false, {
+      hasCenterDiamond: false,
+      hasGuideDots: false,
+      hasCornerSidewalks: false,
+    });
+    addIntersectionPadAndMarkings(-380, 400, 28, 26, 2, 2, false, {
       hasCenterDiamond: false,
       hasGuideDots: false,
       hasCornerSidewalks: false,
@@ -1410,18 +1526,20 @@ export class TokyoStationMap {
         medianWidth = 1.4;
       } else if (id === "nav-road-shibuya-tamagawa-west" || id === "nav-road-uchibori-dori") {
         medianWidth = 1.2;
-      } else if (id === "nav-road-route246") {
+      } else if (id === "nav-road-route246" || id === "nav-road-shibuya-roppongi-dori") {
         medianWidth = 1.0;
       }
 
+      const isDoubleYellowCenter = id === "nav-road-shibuya-miyamasuzaka";
       const halfWidth = lanesPerDir * laneWidth + shoulderWidth + medianWidth * 0.5;
-      const sidewalkWidth =
-        isScrambleLink || isCenterGai
-          ? 0
-          : isInokashiraOrgan
-            ? 2.2
-            : isSakurazakaLoop || isHikarieAccess
-              ? 2.0
+      const sidewalkWidth = isCenterGai
+        ? 0
+        : isInokashiraOrgan
+          ? 2.2
+          : isSakurazakaLoop || isHikarieAccess
+            ? 2.0
+            : id === "nav-road-meiji-dori"
+              ? 5.0
               : 3.2;
 
       return {
@@ -1431,6 +1549,7 @@ export class TokyoStationMap {
         medianWidth,
         halfWidth,
         sidewalkWidth,
+        isDoubleYellowCenter,
         isScrambleLink,
         isCenterGai,
         isHikarieAccess,
@@ -1485,6 +1604,7 @@ export class TokyoStationMap {
       const curvedCorridor = desc.corridor;
       const spec = desc.spec;
       const corridorBaseY = 0.011 + corridorIdx * 0.00012;
+      const isShibuyaCorridor = curvedCorridor.points.some((p) => p.x < -395);
       const isDogenzaka = curvedCorridor.id === "nav-road-shibuya-dogenzaka";
       const isArterialCategory = curvedCorridor.category !== "local_street";
 
@@ -1495,100 +1615,136 @@ export class TokyoStationMap {
       const skipEndCrosswalk = false;
 
       if (curvedCorridor.id === "nav-road-meiji-dori") {
-        medianExclusionZones = [{ x: -750, z: 102, radius: 22 }];
-        startTrimMeters = 0.0;
+        medianExclusionZones = [{ x: -762.8, z: 435.5, radius: 24 }];
+        startTrimMeters = 18.0;
         skipStartCrosswalk = true;
       } else if (curvedCorridor.id === "nav-road-meiji-dori-ebisu-curve") {
         startTrimMeters = 0.0;
         skipStartCrosswalk = true;
+        medianExclusionZones = [{ x: -457.3, z: 725.0, radius: 18 }];
       } else if (curvedCorridor.id === "nav-road-meiji-dori-harajuku-curve") {
-        startTrimMeters = 22.0;
-        medianExclusionZones = [
-          { x: -756, z: 354, radius: 22 },
-          { x: -762, z: 420, radius: 22 },
-          { x: -750, z: 430, radius: 22 },
-        ];
+        startTrimMeters = 20.0;
+        medianExclusionZones = [{ x: -841.2, z: -61.2, radius: 18 }];
       } else if (curvedCorridor.id === "nav-road-yamate-dori") {
-        medianExclusionZones = [{ x: -1350, z: 150, radius: 26 }];
+        medianExclusionZones = [{ x: -1625.0, z: 740.0, radius: 26 }];
+      } else if (curvedCorridor.id === "nav-road-shibuya-scramble") {
+        startTrimMeters = 18.0;
+        endTrimMeters = 18.0;
+        medianExclusionZones = [
+          { x: -1159.4, z: 272.4, radius: 18 },
+          { x: -990.7, z: 275.8, radius: 24 },
+          { x: -818.4, z: 245.8, radius: 18 },
+        ];
       } else if (curvedCorridor.id === "nav-road-shibuya-tamagawa-west") {
         startTrimMeters = 18.0;
         medianExclusionZones = [
-          { x: -750, z: 102, radius: 22 },
-          { x: -855, z: 95, radius: 22 },
-          { x: -940, z: 115, radius: 22 },
-          { x: -1080, z: 140, radius: 46 },
-          { x: -1250, z: 150, radius: 22 },
-          { x: -1350, z: 150, radius: 24 },
+          { x: -762.8, z: 435.5, radius: 24 },
+          { x: -974.8, z: 519.7, radius: 15 },
+          { x: -1177.4, z: 600.6, radius: 15 },
+          { x: -1440.0, z: 675.0, radius: 24 },
+          { x: -1530.0, z: 705.0, radius: 16 },
+          { x: -1625.0, z: 740.0, radius: 24 },
         ];
       } else if (curvedCorridor.id === "nav-road-route246") {
-        startTrimMeters = 16.0;
+        startTrimMeters = 18.0;
         medianExclusionZones = [
-          { x: -750, z: 102, radius: 28 },
-          { x: -380, z: 98, radius: 22 },
+          { x: -762.8, z: 435.5, radius: 24 },
+          { x: -672.0, z: 413.0, radius: 10 },
+          { x: -501.1, z: 194.8, radius: 20 },
+          { x: -380.0, z: 98.0, radius: 22 },
         ];
-      } else if (curvedCorridor.id === "nav-road-shibuya-miyamasuzaka") {
+      } else if (curvedCorridor.id === "nav-road-shibuya-roppongi-dori") {
+        startTrimMeters = 18.0;
         endTrimMeters = 18.0;
         medianExclusionZones = [
-          { x: -729, z: 248, radius: 12 },
-          { x: -380, z: 250, radius: 18 },
+          { x: -762.8, z: 435.5, radius: 24 },
+          { x: -380.0, z: 400.0, radius: 20 },
+        ];
+      } else if (curvedCorridor.id === "nav-road-shibuya-miyamasuzaka") {
+        startTrimMeters = 18.0;
+        endTrimMeters = 18.0;
+        medianExclusionZones = [
+          { x: -818.4, z: 245.8, radius: 20 },
+          { x: -715.0, z: 229.0, radius: 12 },
+          { x: -501.1, z: 194.8, radius: 20 },
         ];
       } else if (isDogenzaka) {
-        startTrimMeters = 8.0;
+        startTrimMeters = 10.0;
         medianExclusionZones = [
-          { x: -837, z: 250, radius: 9.0 },
-          { x: -1080, z: 140, radius: 46 },
+          { x: -1159.4, z: 272.4, radius: 14 },
+          { x: -1440.0, z: 675.0, radius: 24 },
         ];
       } else if (curvedCorridor.id === "nav-road-shibuya-shinsen-nakadori") {
-        medianExclusionZones = [{ x: -1080, z: 140, radius: 46 }];
+        medianExclusionZones = [
+          { x: -1440.0, z: 675.0, radius: 22 },
+          { x: -1445.0, z: 75.0, radius: 16 },
+        ];
       } else if (curvedCorridor.id === "nav-road-shibuya-koen-dori") {
-        startTrimMeters = 12.5;
+        startTrimMeters = 16.0;
         skipStartCrosswalk = true;
         medianExclusionZones = [
-          { x: -791, z: 250, radius: 13.0 },
-          { x: -799, z: 356, radius: 17.5 },
-          { x: -805, z: 440, radius: 13.0 },
+          { x: -990.7, z: 275.8, radius: 24 },
+          { x: -981.6, z: 185.0, radius: 14 },
+          { x: -1108.1, z: -43.6, radius: 16 },
+          { x: -1165.0, z: -120.0, radius: 15 },
         ];
       } else if (curvedCorridor.id === "nav-road-shibuya-jinnan-cross") {
         medianExclusionZones = [
-          { x: -750, z: 430, radius: 22 },
-          { x: -762, z: 420, radius: 22 },
-          { x: -805, z: 440, radius: 13.5 },
+          { x: -841.2, z: -61.2, radius: 18 },
+          { x: -1165.0, z: -120.0, radius: 16 },
         ];
       } else if (curvedCorridor.id === "nav-road-shibuya-bunkamura-dori") {
-        startTrimMeters = 8.0;
+        startTrimMeters = 10.0;
         medianExclusionZones = [
-          { x: -838, z: 252, radius: 9.0 },
-          { x: -875, z: 320, radius: 16 },
-          { x: -940, z: 345, radius: 18 },
+          { x: -1159.4, z: 272.4, radius: 14 },
+          { x: -1325.0, z: 151.3, radius: 18 },
+          { x: -1445.0, z: 75.0, radius: 16 },
         ];
       } else if (spec.isCenterGai) {
         startTrimMeters = 8.0;
         endTrimMeters = 15.0;
         medianExclusionZones = [
-          { x: -875, z: 320, radius: 15 },
-          { x: -940, z: 345, radius: 18 },
+          { x: -1155.0, z: 128.0, radius: 15 },
+          { x: -1325.0, z: 151.3, radius: 18 },
         ];
       } else if (spec.isInokashiraOrgan) {
         startTrimMeters = 11.0;
-        endTrimMeters = 22.0;
-        medianExclusionZones = [{ x: -798, z: 360, radius: 16 }];
+        endTrimMeters = 18.0;
+        medianExclusionZones = [
+          { x: -1155.0, z: 128.0, radius: 14 },
+          { x: -1108.1, z: -43.6, radius: 16 },
+        ];
       } else if (spec.isSakurazakaLoop) {
         medianExclusionZones = [
-          { x: -855, z: 95, radius: 22 },
-          { x: -940, z: 115, radius: 24 },
+          { x: -974.8, z: 519.7, radius: 20 },
+          { x: -1177.4, z: 600.6, radius: 20 },
         ];
         endTrimMeters = 18.0;
+      } else if (spec.isHikarieAccess) {
+        startTrimMeters = 10.0;
+        endTrimMeters = 14.0;
+        medianExclusionZones = [{ x: -672.0, z: 413.0, radius: 14 }];
       } else if (curvedCorridor.id === "nav-road-uchibori-dori") {
         medianExclusionZones = [{ x: 156, z: 379, radius: 14 }];
       }
 
-      const markingExclusionZones: Array<{ x: number; z: number; radius: number }> = [
-        ...(medianExclusionZones ?? []),
-        { x: -815, z: 248, radius: 26 },
-        { x: -750, z: 248, radius: 18 },
-      ];
+      const isTamagawaWest = curvedCorridor.id === "nav-road-shibuya-tamagawa-west";
+      const markingExclusionZones: Array<{ x: number; z: number; radius: number }> = isTamagawaWest
+        ? [
+            { x: -762.8, z: 435.5, radius: 22 },
+            { x: -974.8, z: 519.7, radius: 8 },
+            { x: -1177.4, z: 600.6, radius: 8 },
+            { x: -1440.0, z: 675.0, radius: 22 },
+            { x: -1625.0, z: 740.0, radius: 22 },
+          ]
+        : [
+            ...(medianExclusionZones ?? []),
+            { x: -990.7, z: 275.8, radius: 26 },
+            { x: -818.4, z: 245.8, radius: 18 },
+            { x: -762.8, z: 435.5, radius: 20 },
+          ];
 
-      // 明治通り本線と恵比寿カーブは (-750, -210) で交差点なく直列・頭合わせで連続接続するため相互除外から外す
+      // 明治通り本線 (-457.3, 725.0) と恵比寿カーブは直列接続のため相互除外から外す
       const sidewalkExclusionCorridors = corridorDescriptors
         .filter((other) => {
           if (other.id === curvedCorridor.id) {
@@ -1604,11 +1760,12 @@ export class TokyoStationMap {
         .map((other) => other.exclusionCorridor);
 
       const sidewalkExclusionZones: Array<{ x: number; z: number; radius: number }> = [
-        { x: -847, z: 250, radius: 13 }, // SHIBUYA109前 Y字路三角広場
+        { x: -1159.4, z: 272.4, radius: 14 }, // SHIBUYA109前 Y字路
         ...(curvedCorridor.id === "nav-road-shibuya-koen-dori" ||
         curvedCorridor.id === "nav-road-shibuya-bunkamura-dori" ||
-        isDogenzaka
-          ? [{ x: -815, z: 248, radius: 25 }]
+        isDogenzaka ||
+        spec.isScrambleLink
+          ? [{ x: -990.7, z: 275.8, radius: 23 }]
           : []),
       ];
 
@@ -1633,11 +1790,14 @@ export class TokyoStationMap {
             curvedCorridor.id === "nav-road-uchibori-dori" ? "granite_slab" : "interlocking_brick",
           curbHeight: 0.15,
           length: 120,
-          hasCenterLine: !spec.isScrambleLink && !spec.isCenterGai,
-          hasShoulderLines: !spec.isScrambleLink && !spec.isCenterGai,
+          elevationSampler: isShibuyaCorridor ? sampleShibuyaTerrainY : undefined,
+          skipRoadCollider: isShibuyaCorridor,
+          hasDoubleYellowCenterLine: spec.isDoubleYellowCenter,
+          hasCenterLine: !spec.isCenterGai,
+          hasShoulderLines: !spec.isCenterGai,
           hasStopLines: !spec.isScrambleLink && !spec.isCenterGai,
           hasYellowCenterLine: spec.lanesPerDir === 1 && isArterialCategory && !spec.isScrambleLink,
-          hasWhiteDashedLines: spec.lanesPerDir >= 2 && !spec.isScrambleLink,
+          hasWhiteDashedLines: spec.lanesPerDir >= 2,
           hasCrosswalk: isArterialCategory && !spec.isScrambleLink && !spec.isCenterGai,
           hasGuardrails:
             isArterialCategory &&
@@ -1770,6 +1930,7 @@ export class TokyoStationMap {
 
       const armCount = [arms.north, arms.south, arms.east, arms.west].filter(Boolean).length;
       const shouldBuildCorners = spec.hasCornerSidewalks ?? armCount >= 2;
+      const isShibuyaIntersection = spec.ix < -395;
       const interRes = this.roadBuilder.buildIntersection(
         {
           x: spec.ix,
@@ -1788,6 +1949,8 @@ export class TokyoStationMap {
           arms: armCount > 0 ? arms : undefined,
           hasCornerSidewalks: shouldBuildCorners,
           sidewalkPavingStyle: "granite_slab",
+          elevationSampler: isShibuyaIntersection ? sampleShibuyaTerrainY : undefined,
+          skipRoadCollider: isShibuyaIntersection,
         },
         world,
         rapier,
@@ -2497,14 +2660,15 @@ export class TokyoStationMap {
    *    および周辺の渋谷スクランブルスクエア・渋谷ヒカリエ・渋谷サクラステージ・渋谷フクラスを構築する。
    */
   private buildShibuyaStreamDistrict(world: RAPIER.World, rapier: typeof RAPIER): void {
-    const streamCenterX = -695.0;
-    const streamCenterZ = -15.0;
+    const streamCenterX = -750.0;
+    const streamCenterZ = 527.6;
+    const streamGroundY = sampleShibuyaTerrainY(streamCenterX, streamCenterZ);
 
     // 1. プロシージャル初期フォールバック（GLB非同期ロード前やヘッドレス単体テスト用）
     const fallbackStreamGroup = new THREE.Group();
     fallbackStreamGroup.name = "ShibuyaStreamProceduralFallback";
-    fallbackStreamGroup.position.set(streamCenterX, 0, streamCenterZ);
-    fallbackStreamGroup.rotation.y = -Math.PI / 2;
+    fallbackStreamGroup.position.set(streamCenterX, streamGroundY, streamCenterZ);
+    fallbackStreamGroup.rotation.y = Math.PI * 0.25;
     fallbackStreamGroup.userData.isLargeStructure = true;
     this.proceduralShibuyaStreamGroup = fallbackStreamGroup;
 
@@ -2627,61 +2791,141 @@ export class TokyoStationMap {
 
     this.group.add(fallbackStreamGroup);
 
-    // 渋谷ストリーム本体・大階段・広場案内モニュメントの Rapier 物理コライダー
+    // 渋谷ストリーム本体・大階段・広場案内モニュメントの Rapier 物理コライダー（3D地形接地）
     const streamBody = world.createRigidBody(
-      rapier.RigidBodyDesc.fixed().setTranslation(streamCenterX, 90, streamCenterZ),
+      rapier.RigidBodyDesc.fixed().setTranslation(streamCenterX, streamGroundY + 90, streamCenterZ),
     );
     const streamCol = rapier.ColliderDesc.cuboid(21, 90, 27.5).setFriction(0.5).setRestitution(0.1);
     const streamColInstance = world.createCollider(streamCol, streamBody);
     this.registerCollider(streamColInstance, true);
     this.proceduralGlbOverlappingColliders.push(streamColInstance);
 
-    // 稲荷橋広場の大階段（Grand Staircase: worldX = -729.8..-716.0, worldZ = -8.3..+2.3）
+    const streamFoundationSkirt = new THREE.Mesh(
+      new THREE.BoxGeometry(59.0, 4.0, 43.0),
+      darkFrameMat,
+    );
+    streamFoundationSkirt.position.set(0, -2.0, 6);
+    fallbackStreamGroup.add(streamFoundationSkirt);
+
+    // 稲荷橋広場の大階段（渋谷川側東プロムナード接点）
     const grandStairsCol = rapier.ColliderDesc.cuboid(6.9, 7.25, 5.3)
-      .setTranslation(-27.9, -82.75, 12.0)
+      .setTranslation(20.0, -82.75, -18.0)
       .setFriction(0.6)
       .setRestitution(0.05);
     const grandStairsColInstance = world.createCollider(grandStairsCol, streamBody);
     this.registerCollider(grandStairsColInstance, true);
     this.proceduralGlbOverlappingColliders.push(grandStairsColInstance);
 
-    // 稲荷橋広場の路面アイレベル渋谷ストリーム案内モニュメントサイン（worldX = -726.2, worldZ = -21.0）
+    // 稲荷橋広場の案内モニュメントサイン
     const monolithSignCol = rapier.ColliderDesc.cuboid(0.8, 2.1, 4.4)
-      .setTranslation(-31.2, -87.9, -6.0)
+      .setTranslation(24.0, -87.9, -4.0)
       .setFriction(0.5)
       .setRestitution(0.1);
     const monolithSignColInstance = world.createCollider(monolithSignCol, streamBody);
     this.registerCollider(monolithSignColInstance, true);
     this.proceduralGlbOverlappingColliders.push(monolithSignColInstance);
 
-    // 2. 稲荷橋広場（Inaribashi Plaza）石畳＆大階段前プロムナード（x = -736..-712, z = -52..+76）
-    // Why not z = -140..+75 まで延ばすか: 南側（z = -195..-55）は渋谷川の開渠区間であり、
-    // 広場メッシュが水路の上を覆うと水面が隠れてしまうため、大階段前〜国道246号側（中心 z = 12, 長さ 128m）に配置する
+    // 2. 稲荷橋広場（Inaribashi Plaza）石畳＆大階段前プロムナード（渋谷ストリームと明治通りの間）
     const inaribashiPlazaMat = new PuddleMaterial({
-      baseColor: 0x64748b,
+      baseColor: 0x8f8d87,
       baseRoughness: 0.68,
       baseMetalness: 0.1,
       puddleThreshold: 0.44,
     });
     this.puddleMaterials.push(inaribashiPlazaMat);
-    const inaribashiGeo = new THREE.PlaneGeometry(24, 128);
+    const inaribashiCenterX = -720.0;
+    const inaribashiCenterZ = 516.0;
+    const inaribashiGeo = new THREE.PlaneGeometry(24, 64, 4, 8);
     inaribashiGeo.rotateX(-Math.PI / 2);
+    inaribashiGeo.rotateY(-0.74);
+    const inaribashiPosAttr = inaribashiGeo.getAttribute("position");
+    for (let i = 0; i < inaribashiPosAttr.count; i++) {
+      const lx = inaribashiPosAttr.getX(i);
+      const lz = inaribashiPosAttr.getZ(i);
+      const gy = sampleShibuyaTerrainY(inaribashiCenterX + lx, inaribashiCenterZ + lz);
+      inaribashiPosAttr.setY(i, inaribashiPosAttr.getY(i) + (gy - streamGroundY));
+    }
+    inaribashiPosAttr.needsUpdate = true;
+    inaribashiGeo.computeVertexNormals();
     const inaribashiMesh = new THREE.Mesh(inaribashiGeo, inaribashiPlazaMat);
     inaribashiMesh.name = "ShibuyaInaribashiPlaza";
-    inaribashiMesh.position.set(-724, 0.022, 12);
+    inaribashiMesh.position.set(inaribashiCenterX, streamGroundY + 0.022, inaribashiCenterZ);
     inaribashiMesh.userData.isLargeStructure = true;
     inaribashiMesh.receiveShadow = true;
     this.group.add(inaribashiMesh);
 
-    // 3. 渋谷川（Shibuya River）清流復活水路＆親水護岸（x = -727.5, z = -195..-55）
-    const riverChannelLength = 140;
+    // 3. 渋谷川（Shibuya River）曲線清流復活水路＆親水護岸（渋谷ストリーム東側 -> 並木橋・渋谷橋南東方向）
     const riverChannelWidth = 7.6;
-    const riverCenterX = -727.5;
-    const riverCenterZ = -125.0;
+    const riverSpline = new THREE.CatmullRomCurve3(
+      [
+        new THREE.Vector3(-720.0, 0, 522.0),
+        new THREE.Vector3(-675.0, 0, 566.0),
+        new THREE.Vector3(-598.0, 0, 644.0),
+        new THREE.Vector3(-522.0, 0, 738.0),
+        new THREE.Vector3(-476.0, 0, 868.0),
+      ],
+      false,
+      "centripetal",
+      0.5,
+    );
+    const riverRefPt = riverSpline.getPointAt(0);
+    const riverRefY = 0;
 
-    // 水路底面のダーク石材河床メッシュ（地面 y = -0.01 より上、水面 y = 0.18 より下の y = 0.04 に敷設）
-    const riverBedGeo = new THREE.PlaneGeometry(riverChannelWidth + 0.4, riverChannelLength);
-    riverBedGeo.rotateX(-Math.PI / 2);
+    const buildRiverChannelGeometry = (
+      halfW: number,
+      yOffset: number,
+      segs: number,
+    ): THREE.BufferGeometry => {
+      const positions = new Float32Array((segs + 1) * 2 * 3);
+      const uvs = new Float32Array((segs + 1) * 2 * 2);
+      const indices: number[] = [];
+      let arcLen = 0;
+      let prevPt = riverSpline.getPointAt(0);
+      for (let i = 0; i <= segs; i++) {
+        const u = i / segs;
+        const p = riverSpline.getPointAt(u);
+        if (i > 0) {
+          arcLen += p.distanceTo(prevPt);
+          prevPt = p;
+        }
+        const t = riverSpline.getTangentAt(u).normalize();
+        const nX = t.z;
+        const nZ = -t.x;
+        const lx = p.x - nX * halfW;
+        const lz = p.z - nZ * halfW;
+        const rx = p.x + nX * halfW;
+        const rz = p.z + nZ * halfW;
+        const ly = sampleShibuyaTerrainY(lx, lz) - riverRefY + yOffset;
+        const ry = sampleShibuyaTerrainY(rx, rz) - riverRefY + yOffset;
+        const vIdx = i * 6;
+        positions[vIdx] = lx - riverRefPt.x;
+        positions[vIdx + 1] = ly;
+        positions[vIdx + 2] = lz - riverRefPt.z;
+        positions[vIdx + 3] = rx - riverRefPt.x;
+        positions[vIdx + 4] = ry;
+        positions[vIdx + 5] = rz - riverRefPt.z;
+        const uvIdx = i * 4;
+        uvs[uvIdx] = 0;
+        uvs[uvIdx + 1] = arcLen * 0.1;
+        uvs[uvIdx + 2] = 1;
+        uvs[uvIdx + 3] = arcLen * 0.1;
+        if (i < segs) {
+          const a = i * 2;
+          const b = a + 1;
+          const c = a + 2;
+          const d = a + 3;
+          indices.push(a, c, b, b, c, d);
+        }
+      }
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geom.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+      geom.setIndex(indices);
+      geom.computeVertexNormals();
+      return geom;
+    };
+
+    const riverBedGeo = buildRiverChannelGeometry(riverChannelWidth * 0.5 + 0.2, -0.02, 48);
     const riverBedMat = new THREE.MeshStandardMaterial({
       color: 0x0f172a,
       roughness: 0.88,
@@ -2690,14 +2934,12 @@ export class TokyoStationMap {
     this.applyArchitecture3DTexture(riverBedMat, "moat");
     const riverBedMesh = new THREE.Mesh(riverBedGeo, riverBedMat);
     riverBedMesh.name = "ShibuyaRiverBed";
-    riverBedMesh.position.set(riverCenterX, 0.04, riverCenterZ);
+    riverBedMesh.position.set(riverRefPt.x, 0.04, riverRefPt.z);
     riverBedMesh.userData.isLargeStructure = true;
     riverBedMesh.receiveShadow = true;
     this.group.add(riverBedMesh);
 
-    // 親水水路の3Dコースティクス水面（地面 y = -0.01・河床 y = 0.04 より上、両岸護岸パラペット上面 y = 0.90m の内側 y = 0.18）
-    const riverWaterGeo = new THREE.PlaneGeometry(riverChannelWidth, riverChannelLength, 16, 48);
-    riverWaterGeo.rotateX(-Math.PI / 2);
+    const riverWaterGeo = buildRiverChannelGeometry(riverChannelWidth * 0.5, -0.02, 64);
     const riverWaterMat = new WaterSurfaceMaterial({
       shallowColor: 0x0ea5e9,
       deepColor: 0x082f49,
@@ -2707,40 +2949,46 @@ export class TokyoStationMap {
     this.waterMaterials.push(riverWaterMat);
     const riverWaterMesh = new THREE.Mesh(riverWaterGeo, riverWaterMat);
     riverWaterMesh.name = "13113-wtr-shibuya-river";
-    riverWaterMesh.position.set(riverCenterX, 0.18, riverCenterZ);
+    riverWaterMesh.position.set(riverRefPt.x, 0.18, riverRefPt.z);
     riverWaterMesh.userData.isLargeStructure = true;
     this.group.add(riverWaterMesh);
 
-    // 渋谷川の両岸コンクリート護岸パラペット（杉板本実型枠コンクリート 3D テクスチャ、上面 y = 0.90m）
-    // Why z = -95（稲荷橋通り）前後で北側 (z = -84..-55) と南側 (z = -195..-106) の2区間に分割するか:
-    // 1本の連続パラペット壁で生成すると、稲荷橋通り（z = -95）で渋谷川を東西に横断する車道が護岸コライダーで塞がれてしまうため、
-    // 橋梁開口部（z ∈ [-106, -84]）を空けて車両がスムーズに橋を渡れるようにする。
+    // 渋谷川の両岸コンクリート護岸パラペット（ニュートラルコンクリート・地形追従セグメント）
     const riverWallMat = new THREE.MeshStandardMaterial({
-      color: 0x94a3b8,
+      color: 0x989690,
       roughness: 0.78,
       metalness: 0.08,
     });
     this.applyArchitecture3DTexture(riverWallMat, "white_granite");
-    const riverWallBody = world.createRigidBody(
-      rapier.RigidBodyDesc.fixed().setTranslation(riverCenterX, 0.2, 0),
-    );
-    for (const wallSpan of [
-      { cz: -150.5, len: 89 }, // z = -195 .. -106（稲荷橋南側〜並木橋手前）
-      { cz: -69.5, len: 29 }, // z = -84 .. -55（稲荷橋北側〜稲荷橋広場南端）
-    ]) {
-      const sideWallGeo = new THREE.BoxGeometry(0.65, 1.3, wallSpan.len);
-      for (const sideOffset of [-riverChannelWidth / 2 - 0.32, riverChannelWidth / 2 + 0.32]) {
-        const wallMesh = new THREE.Mesh(sideWallGeo, riverWallMat);
-        wallMesh.position.set(riverCenterX + sideOffset, 0.25, wallSpan.cz);
+    const riverWallCount = 16;
+    const riverTotalLen = riverSpline.getLength();
+    const wallChordLen = riverTotalLen / riverWallCount;
+    for (let wi = 0; wi < riverWallCount; wi++) {
+      const uMid = (wi + 0.5) / riverWallCount;
+      const midPt = riverSpline.getPointAt(uMid);
+      const tan = riverSpline.getTangentAt(uMid).normalize();
+      const yaw = Math.atan2(tan.x, tan.z);
+      const wallGeo = new THREE.BoxGeometry(0.65, 1.4, wallChordLen + 0.6);
+      for (const sideSign of [-1, 1]) {
+        const latOff = sideSign * (riverChannelWidth * 0.5 + 0.32);
+        const wx = midPt.x + tan.z * latOff;
+        const wz = midPt.z - tan.x * latOff;
+        const wy = sampleShibuyaTerrainY(wx, wz);
+        const wallMesh = new THREE.Mesh(wallGeo, riverWallMat);
+        wallMesh.position.set(wx, wy + 0.3, wz);
+        wallMesh.rotation.y = yaw;
         wallMesh.userData.isLargeStructure = true;
         wallMesh.castShadow = true;
         wallMesh.receiveShadow = true;
         this.group.add(wallMesh);
 
-        const wallCol = rapier.ColliderDesc.cuboid(0.35, 0.65, wallSpan.len / 2)
-          .setTranslation(sideOffset, 0, wallSpan.cz)
-          .setFriction(0.5);
-        this.registerCollider(world.createCollider(wallCol, riverWallBody), true);
+        const wallBody = world.createRigidBody(
+          rapier.RigidBodyDesc.fixed()
+            .setTranslation(wx, wy + 0.3, wz)
+            .setRotation({ x: 0, y: Math.sin(yaw * 0.5), z: 0, w: Math.cos(yaw * 0.5) }),
+        );
+        const wallCol = rapier.ColliderDesc.cuboid(0.35, 0.7, wallChordLen * 0.5).setFriction(0.5);
+        this.registerCollider(world.createCollider(wallCol, wallBody), true);
       }
     }
 
@@ -2774,6 +3022,7 @@ export class TokyoStationMap {
       }
 
       const bGroup = new THREE.Group();
+      const bTerrainY = sampleShibuyaTerrainY(b.x, b.z);
       bGroup.name = b.buildingId;
       bGroup.userData = {
         buildingId: b.buildingId,
@@ -2787,13 +3036,13 @@ export class TokyoStationMap {
         isLargeStructure: true,
         isChiyodaOtemachiOverlap: b.buildingId.startsWith("13101-") && b.x < -280,
       };
-      bGroup.position.set(b.x, b.h / 2, b.z);
+      bGroup.position.set(b.x, bTerrainY + b.h / 2, b.z);
 
       const podiumHeight = Math.min(b.podiumHeight, b.h * 0.45);
       const crownHeight = Math.min(10, Math.max(5, b.h * 0.07));
       const towerHeight = Math.max(12, b.h - podiumHeight - crownHeight);
 
-      // 1. 低層ポディウム（基壇部: 中遠景 LOD で 1F 店舗外装が非表示になっても 7.5m 浮きが生じないよう全高一体基壇を接地）
+      // 1. 低層ポディウム（基壇部 + 傾斜地密着スカート -3.5m）
       const storefrontHeight = Math.min(7.5, podiumHeight * 0.48);
 
       const baseGeo = new THREE.BoxGeometry(b.w, podiumHeight, b.d);
@@ -2823,6 +3072,11 @@ export class TokyoStationMap {
       baseMesh.castShadow = true;
       baseMesh.receiveShadow = true;
       bGroup.add(baseMesh);
+
+      const skirtMesh = new THREE.Mesh(new THREE.BoxGeometry(b.w, 3.5, b.d), baseMat);
+      skirtMesh.position.y = -b.h / 2 - 1.75;
+      skirtMesh.receiveShadow = true;
+      bGroup.add(skirtMesh);
 
       // 1b. 低層1F〜2F 渋谷商業街区の路面ショーウィンドウ・店舗ファサード（ストリートビュー実写テクスチャ）
       const storefrontGeo = new THREE.BoxGeometry(b.w * 1.008, storefrontHeight, b.d * 1.008);
@@ -3307,7 +3561,7 @@ export class TokyoStationMap {
       this.plateauBuildingGroups.push(bGroup);
 
       const bBody = world.createRigidBody(
-        rapier.RigidBodyDesc.fixed().setTranslation(b.x, b.h / 2, b.z),
+        rapier.RigidBodyDesc.fixed().setTranslation(b.x, bTerrainY + b.h / 2, b.z),
       );
       const bCol = rapier.ColliderDesc.cuboid(b.w / 2, b.h / 2, b.d / 2)
         .setFriction(0.5)
@@ -3344,16 +3598,162 @@ export class TokyoStationMap {
   }
 
   /**
-   * 首都高速3号渋谷線高架橋（国道246号・玉川通り／青山通り上空 y=11.4m..17.1m）および
-   * 渋谷駅東口歩道橋・JR山手線・東京メトロ銀座線高架橋のプロシージャル構造物と Rapier 橋脚コライダーを構築する。
+   * 任意の 3D 曲線サンプル列に沿って横断面を押し出したボックスリボンジオメトリを生成する。
+   * How: 各サンプル点の XZ 接線に直交する水平右方向ベクトル `right` を使い、Frenet ツイストなしで
+   * 上下面・左右側面・始終端キャップの 4 面閉鎖ジオメトリを構築する。
+   */
+  private buildCurvedBoxRibbonGeometry(
+    samples: ReadonlyArray<{ pos: THREE.Vector3; right: THREE.Vector3; arcLen: number }>,
+    width: number,
+    yBottomOffset: number,
+    yTopOffset: number,
+    uvScale = 12,
+  ): THREE.BufferGeometry {
+    const halfW = width * 0.5;
+    const positions: number[] = [];
+    const normals: number[] = [];
+    const uvs: number[] = [];
+    const indices: number[] = [];
+
+    // 1 セグメントあたり 4 面（上・下・右・左）をフラット/スムーズ法線分離で構築する
+    const addQuadFace = (
+      p0: THREE.Vector3,
+      p1: THREE.Vector3,
+      p2: THREE.Vector3,
+      p3: THREE.Vector3,
+      nx: number,
+      ny: number,
+      nz: number,
+      u0: number,
+      u1: number,
+      vWidth: number,
+    ): void => {
+      const base = positions.length / 3;
+      positions.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z);
+      for (let k = 0; k < 4; k++) {
+        normals.push(nx, ny, nz);
+      }
+      uvs.push(u0, 0, u1, 0, u1, vWidth, u0, vWidth);
+      indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    };
+
+    const pLeftBotA = new THREE.Vector3();
+    const pRightBotA = new THREE.Vector3();
+    const pLeftTopA = new THREE.Vector3();
+    const pRightTopA = new THREE.Vector3();
+    const pLeftBotB = new THREE.Vector3();
+    const pRightBotB = new THREE.Vector3();
+    const pLeftTopB = new THREE.Vector3();
+    const pRightTopB = new THREE.Vector3();
+
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = samples[i];
+      const b = samples[i + 1];
+      pLeftBotA.set(
+        a.pos.x - a.right.x * halfW,
+        a.pos.y + yBottomOffset,
+        a.pos.z - a.right.z * halfW,
+      );
+      pRightBotA.set(
+        a.pos.x + a.right.x * halfW,
+        a.pos.y + yBottomOffset,
+        a.pos.z + a.right.z * halfW,
+      );
+      pLeftTopA.set(a.pos.x - a.right.x * halfW, a.pos.y + yTopOffset, a.pos.z - a.right.z * halfW);
+      pRightTopA.set(
+        a.pos.x + a.right.x * halfW,
+        a.pos.y + yTopOffset,
+        a.pos.z + a.right.z * halfW,
+      );
+
+      pLeftBotB.set(
+        b.pos.x - b.right.x * halfW,
+        b.pos.y + yBottomOffset,
+        b.pos.z - b.right.z * halfW,
+      );
+      pRightBotB.set(
+        b.pos.x + b.right.x * halfW,
+        b.pos.y + yBottomOffset,
+        b.pos.z + b.right.z * halfW,
+      );
+      pLeftTopB.set(b.pos.x - b.right.x * halfW, b.pos.y + yTopOffset, b.pos.z - b.right.z * halfW);
+      pRightTopB.set(
+        b.pos.x + b.right.x * halfW,
+        b.pos.y + yTopOffset,
+        b.pos.z + b.right.z * halfW,
+      );
+
+      const u0 = a.arcLen / uvScale;
+      const u1 = b.arcLen / uvScale;
+      const hUv = (yTopOffset - yBottomOffset) / uvScale;
+      const wUv = width / uvScale;
+
+      // 上面 (+Y)
+      addQuadFace(pLeftTopA, pLeftTopB, pRightTopB, pRightTopA, 0, 1, 0, u0, u1, wUv);
+      // 下面 (-Y)
+      addQuadFace(pRightBotA, pRightBotB, pLeftBotB, pLeftBotA, 0, -1, 0, u0, u1, wUv);
+      // 右側面 (+right)
+      const mrNx = (a.right.x + b.right.x) * 0.5;
+      const mrNz = (a.right.z + b.right.z) * 0.5;
+      addQuadFace(pRightBotA, pRightBotB, pRightTopB, pRightTopA, mrNx, 0, mrNz, u0, u1, hUv);
+      // 左側面 (-right)
+      addQuadFace(pLeftTopA, pLeftTopB, pLeftBotB, pLeftBotA, -mrNx, 0, -mrNz, u0, u1, hUv);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  /**
+   * 橋脚などの地上構造物中心 `(x, z)` が、すべてのオープンデータ湾曲道路車道から安全離隔距離を保っているか判定する。
+   */
+  private isPointClearOfRoadCorridors(
+    x: number,
+    z: number,
+    extraMarginMeters: number,
+    corridors: ReadonlyArray<{
+      points: ReadonlyArray<{ x: number; z: number }>;
+      widthMeters: number;
+    }>,
+  ): boolean {
+    for (const corridor of corridors) {
+      const halfRoad = corridor.widthMeters * 0.5 + extraMarginMeters;
+      const minSq = halfRoad * halfRoad;
+      for (let i = 0; i < corridor.points.length - 1; i++) {
+        const a = corridor.points[i];
+        const b = corridor.points[i + 1];
+        const abx = b.x - a.x;
+        const abz = b.z - a.z;
+        const abLenSq = abx * abx + abz * abz;
+        const rawT = abLenSq > 1e-6 ? ((x - a.x) * abx + (z - a.z) * abz) / abLenSq : 0;
+        const clampedT = Math.max(0, Math.min(1, rawT));
+        const cx = a.x + abx * clampedT;
+        const cz = a.z + abz * clampedT;
+        const dx = x - cx;
+        const dz = z - cz;
+        const isTooClose = dx * dx + dz * dz < minSq;
+        if (isTooClose) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  /**
+   * 首都高速3号渋谷線高架橋（玉川通り〜渋谷駅〜六本木通り曲線追従）および
+   * 渋谷駅東口歩道橋・JR山手線高架橋・ガード下構造物（NNE-SSW 実軸追従）と Rapier 橋脚コライダーを構築する。
    * How:
-   * - `shibuya_stream.glb` ロード前やヘッドレス単体テスト、および遠距離 LOD 時にも首都高高架橋・緑案内標識・
-   *   渋谷駅東口歩道橋・JR/銀座線高架橋が途切れず立体的に存在するよう構築する。
-   * - 渋谷駅コア区間（`x = -865 .. -575`）のプロシージャル高架・歩道橋・鉄道高架は `proceduralShutokoCoreMeshes` に登録し、
-   *   `shibuya_stream.glb` が近距離 LOD0 で表示されている間は非表示に切り替えることで同一座標での Z-fighting と二重ドローコールを防止する。
-   * - 青山通り東側区間（`x = -575 .. -265`）は GLB 範囲外のため常時連続描画し、GLB の東端（`x = -575`）とシームレスに接続する。
-   * - 橋脚コライダーはすべて国道246号（車道 z = 86..104）および明治通り（車道 x = -762..-738）の外側歩道上にのみ配置し、
-   *   走行車線を一切阻害しない。
+   * - 旧直線高架（z=95固定）を廃止し、実 1:1 座標の玉川通り（神泉 `(-1625,740)` 〜 渋谷駅東口 `(-762.8,435.5)`）
+   *   から六本木通り（`(-380,400)`）へ連なる `CatmullRomCurve3` に沿って連続高架桁・床版・遮音壁・緑案内標識を押し出す。
+   * - JR山手線ガード下高架は実 NNE-SSW 鉄道軸 `[(-925,-120), (-895,260), (-855,466), (-815,680)]` へ配置し、
+   *   スクランブル交差点東側（`(-895,260)`）と玉川通りガード（`(-855,466)`）の両方で車道・歩道を完全にクリアする。
+   * - 橋脚はすべて `getOpenDataCurvedRoadCorridors()` に対して歩道外縁クリアランスを検証し、地形標高 `sampleShibuyaTerrainY - 2.0m` まで接地する。
    */
   private buildShutokoRoute3AndShibuyaOverpass(
     world: RAPIER.World,
@@ -3363,23 +3763,19 @@ export class TokyoStationMap {
   ): void {
     const viaductGroup = new THREE.Group();
     viaductGroup.name = "ShutokoRoute3ViaductGroup";
-    viaductGroup.position.set(-720, 0, 95);
+    viaductGroup.position.set(0, 0, 0);
     viaductGroup.userData = {
       isLargeStructure: true,
       isRoadInfrastructure: true,
       routeCode: "首都高速3号渋谷線",
     };
+    // 連続湾曲高架橋は GLB 範囲外まで一体連続描画するため非表示対象に含めない
     this.proceduralShutokoCoreMeshes = [];
 
-    const registerCoreFallbackMesh = (mesh: THREE.Mesh): void => {
-      viaductGroup.add(mesh);
-      this.proceduralShutokoCoreMeshes.push(mesh);
-    };
-
     const concretePierMat = new THREE.MeshStandardMaterial({
-      color: 0x94a3b8,
-      roughness: 0.76,
-      metalness: 0.08,
+      color: 0x9c9a94,
+      roughness: 0.78,
+      metalness: 0.06,
     });
     this.applyArchitecture3DTexture(concretePierMat, "white_granite");
 
@@ -3400,245 +3796,295 @@ export class TokyoStationMap {
     this.applyArchitecture3DTexture(shutokoGreenSignMat, "anodized_metal");
 
     const underpassLightMat = new THREE.MeshStandardMaterial({
-      color: 0xfde68a,
-      emissive: 0xf59e0b,
-      emissiveIntensity: this.isNightActive ? 1.45 : 0.18,
-      roughness: 0.2,
+      color: 0xf5f5f4,
+      emissive: new THREE.Color(0xffe6bd),
+      emissiveIntensity: this.isNightActive ? 1.35 : 0.22,
+      roughness: 0.22,
     });
     this.shibuyaStreamEmissiveEntries.push({
       material: underpassLightMat,
-      dayIntensity: 0.18,
-      nightIntensity: 1.45,
+      dayIntensity: 0.22,
+      nightIntensity: 1.35,
+    });
+    const underpassHousingMat = new THREE.MeshStandardMaterial({
+      color: 0x33373d,
+      roughness: 0.5,
+      metalness: 0.55,
     });
 
-    const deckWidthZ = 21.6;
+    const corridors = getOpenDataCurvedRoadCorridors();
+    const deckWidth = 21.6;
 
-    // 1A. 渋谷駅コア区間（x = -865 .. -575, 長さ 290m: GLB 内の ShutokoRoute3_Viaduct と一致するプロシージャル Proxy 区間）
-    const coreSpanLenX = 290;
-    const coreSpanCenterX = 0; // viaductGroup (-720) 基準で -145..+145 -> worldX = -865..-575
+    // 1. 首都高速3号渋谷線 曲線センターライン（神泉町 -> 玉川通り -> 渋谷駅南側上空 -> 六本木通り）
+    const shutokoCurve = new THREE.CatmullRomCurve3(
+      [
+        new THREE.Vector3(-1625, 0, 740),
+        new THREE.Vector3(-1530, 0, 705),
+        new THREE.Vector3(-1440, 0, 675),
+        new THREE.Vector3(-1346.6, 0, 654.1),
+        new THREE.Vector3(-1267.8, 0, 634.6),
+        new THREE.Vector3(-1177.4, 0, 600.6),
+        new THREE.Vector3(-1091.2, 0, 565.1),
+        new THREE.Vector3(-974.8, 0, 519.7),
+        new THREE.Vector3(-901.4, 0, 488.7),
+        new THREE.Vector3(-841.3, 0, 464),
+        new THREE.Vector3(-762.8, 0, 435.5),
+        new THREE.Vector3(-661, 0, 422.1),
+        new THREE.Vector3(-611.9, 0, 436.5),
+        new THREE.Vector3(-484.3, 0, 428.3),
+        new THREE.Vector3(-380, 0, 400),
+      ],
+      false,
+      "catmullrom",
+      0.35,
+    );
+
+    const sampleCurveWithElevation = (
+      curve: THREE.CatmullRomCurve3,
+      steps: number,
+      clearanceFn: (x: number, z: number) => number,
+    ): Array<{
+      pos: THREE.Vector3;
+      right: THREE.Vector3;
+      arcLen: number;
+      tangent: THREE.Vector3;
+    }> => {
+      const out: Array<{
+        pos: THREE.Vector3;
+        right: THREE.Vector3;
+        arcLen: number;
+        tangent: THREE.Vector3;
+      }> = [];
+      let arcLen = 0;
+      let prevPos: THREE.Vector3 | null = null;
+      for (let i = 0; i <= steps; i++) {
+        const u = i / steps;
+        const pt = curve.getPointAt(u);
+        const tan = curve.getTangentAt(u);
+        const hTan = new THREE.Vector3(tan.x, 0, tan.z).normalize();
+        const right = new THREE.Vector3(-hTan.z, 0, hTan.x).normalize();
+        const yBase = clearanceFn(pt.x, pt.z);
+        const worldPos = new THREE.Vector3(pt.x, yBase, pt.z);
+        if (prevPos !== null) {
+          arcLen += worldPos.distanceTo(prevPos);
+        }
+        prevPos = worldPos;
+        out.push({ pos: worldPos, right, arcLen, tangent: hTan });
+      }
+      return out;
+    };
+
+    // JR山手線高架との交差部 (x ≈ -855) を余裕を持って跨ぐよう、駅周辺だけ滑らかに +3.6m せり上がる桁下高さプロファイル
+    const sampleShutokoUndersideY = (x: number, z: number): number => {
+      const terrainY = sampleShibuyaTerrainY(x, z);
+      const jrOverpassLift = 3.6 * Math.exp(-Math.pow((x - -852) / 115, 2));
+      return terrainY + 9.2 + jrOverpassLift;
+    };
+
+    const allSamples = sampleCurveWithElevation(shutokoCurve, 96, sampleShutokoUndersideY);
+    const splitIndex = Math.round(96 * 0.66); // x ≈ -763（渋谷駅東口）付近で西/コアと六本木東側を分割
+    const coreWestSamples = allSamples.slice(0, splitIndex + 1);
+    const eastSamples = allSamples.slice(splitIndex);
+
+    // 1A. 西〜渋谷駅コア連続箱桁・床版・遮音壁
     const steelGirderCore = new THREE.Mesh(
-      new THREE.BoxGeometry(coreSpanLenX, 1.8, deckWidthZ - 2.0),
+      this.buildCurvedBoxRibbonGeometry(coreWestSamples, deckWidth - 2.4, 0, 1.85),
       darkSteelMat,
     );
     steelGirderCore.name = "ShutokoSteelBoxGirder";
-    steelGirderCore.position.set(coreSpanCenterX, 12.3, 0);
     steelGirderCore.castShadow = true;
     steelGirderCore.receiveShadow = true;
-    registerCoreFallbackMesh(steelGirderCore);
+    viaductGroup.add(steelGirderCore);
 
     const concreteDeckCore = new THREE.Mesh(
-      new THREE.BoxGeometry(coreSpanLenX, 1.1, deckWidthZ),
+      this.buildCurvedBoxRibbonGeometry(coreWestSamples, deckWidth, 1.85, 2.95),
       concretePierMat,
     );
     concreteDeckCore.name = "ShutokoConcreteDeck";
-    concreteDeckCore.position.set(coreSpanCenterX, 13.65, 0);
     concreteDeckCore.castShadow = true;
     concreteDeckCore.receiveShadow = true;
-    registerCoreFallbackMesh(concreteDeckCore);
+    viaductGroup.add(concreteDeckCore);
 
-    for (const sideZ of [-deckWidthZ * 0.5 + 0.35, deckWidthZ * 0.5 - 0.35]) {
-      const soundWallCore = new THREE.Mesh(
-        new THREE.BoxGeometry(coreSpanLenX, 2.8, 0.55),
-        concretePierMat,
-      );
-      soundWallCore.name = "ShutokoSoundBarrierWall";
-      soundWallCore.position.set(coreSpanCenterX, 15.6, sideZ);
-      soundWallCore.castShadow = true;
-      registerCoreFallbackMesh(soundWallCore);
-    }
-
-    // 1B. 青山通り東側延長区間（x = -575 .. -265, 長さ 310m: GLB 範囲外のため常時表示して表参道方面まで連続させる）
-    const eastSpanLenX = 310;
-    const eastSpanCenterX = 300; // viaductGroup (-720) 基準で +145..+455 -> worldX = -575..-265
+    // 1B. 東側（六本木通り方面）連続箱桁・床版
     const steelGirderEast = new THREE.Mesh(
-      new THREE.BoxGeometry(eastSpanLenX, 1.8, deckWidthZ - 2.0),
+      this.buildCurvedBoxRibbonGeometry(eastSamples, deckWidth - 2.4, 0, 1.85),
       darkSteelMat,
     );
     steelGirderEast.name = "ShutokoSteelBoxGirderEast";
-    steelGirderEast.position.set(eastSpanCenterX, 12.3, 0);
     steelGirderEast.castShadow = true;
     steelGirderEast.receiveShadow = true;
     viaductGroup.add(steelGirderEast);
 
     const concreteDeckEast = new THREE.Mesh(
-      new THREE.BoxGeometry(eastSpanLenX, 1.1, deckWidthZ),
+      this.buildCurvedBoxRibbonGeometry(eastSamples, deckWidth, 1.85, 2.95),
       concretePierMat,
     );
     concreteDeckEast.name = "ShutokoConcreteDeckEast";
-    concreteDeckEast.position.set(eastSpanCenterX, 13.65, 0);
     concreteDeckEast.castShadow = true;
     concreteDeckEast.receiveShadow = true;
     viaductGroup.add(concreteDeckEast);
 
-    for (const sideZ of [-deckWidthZ * 0.5 + 0.35, deckWidthZ * 0.5 - 0.35]) {
-      const soundWallEast = new THREE.Mesh(
-        new THREE.BoxGeometry(eastSpanLenX, 2.8, 0.55),
+    // 遮音壁（全線左右エッジ）
+    for (const sideSign of [-1, 1]) {
+      const wallSamples = allSamples.map((s) => ({
+        pos: new THREE.Vector3(
+          s.pos.x + s.right.x * (sideSign * (deckWidth * 0.5 - 0.35)),
+          s.pos.y,
+          s.pos.z + s.right.z * (sideSign * (deckWidth * 0.5 - 0.35)),
+        ),
+        right: s.right,
+        arcLen: s.arcLen,
+      }));
+      const soundWall = new THREE.Mesh(
+        this.buildCurvedBoxRibbonGeometry(wallSamples, 0.55, 2.95, 5.75),
         concretePierMat,
       );
-      soundWallEast.name = "ShutokoSoundBarrierWallEast";
-      soundWallEast.position.set(eastSpanCenterX, 15.6, sideZ);
-      soundWallEast.castShadow = true;
-      viaductGroup.add(soundWallEast);
+      soundWall.name = "ShutokoSoundBarrierWall";
+      soundWall.castShadow = true;
+      viaductGroup.add(soundWall);
     }
 
-    // 1C. 玉川通り西側延長区間（x = -1250 .. -865, 長さ 385m: セルリアンタワー前〜道玄坂上〜神泉町交差点）
-    const westSpanLenX = 385;
-    const westSpanCenterX = -337.5; // viaductGroup (-720) 基準で -530..-145 -> worldX = -1250..-865
-    const steelGirderWest = new THREE.Mesh(
-      new THREE.BoxGeometry(westSpanLenX, 1.8, deckWidthZ - 2.0),
-      darkSteelMat,
-    );
-    steelGirderWest.name = "ShutokoSteelBoxGirderWest";
-    steelGirderWest.position.set(westSpanCenterX, 12.3, 0);
-    steelGirderWest.castShadow = true;
-    steelGirderWest.receiveShadow = true;
-    viaductGroup.add(steelGirderWest);
+    // 緑案内標識（曲線接線に揃えて配置）
+    const signFractions = [0.18, 0.36, 0.52, 0.62, 0.78, 0.9];
+    for (const u of signFractions) {
+      const pt = shutokoCurve.getPointAt(u);
+      const tan = shutokoCurve.getTangentAt(u);
+      const hTan = new THREE.Vector3(tan.x, 0, tan.z).normalize();
+      const right = new THREE.Vector3(-hTan.z, 0, hTan.x).normalize();
+      const baseY = sampleShutokoUndersideY(pt.x, pt.z);
+      const yaw = Math.atan2(-hTan.z, hTan.x);
 
-    const concreteDeckWest = new THREE.Mesh(
-      new THREE.BoxGeometry(westSpanLenX, 1.1, deckWidthZ),
-      concretePierMat,
-    );
-    concreteDeckWest.name = "ShutokoConcreteDeckWest";
-    concreteDeckWest.position.set(westSpanCenterX, 13.65, 0);
-    concreteDeckWest.castShadow = true;
-    concreteDeckWest.receiveShadow = true;
-    viaductGroup.add(concreteDeckWest);
-
-    for (const sideZ of [-deckWidthZ * 0.5 + 0.35, deckWidthZ * 0.5 - 0.35]) {
-      const soundWallWest = new THREE.Mesh(
-        new THREE.BoxGeometry(westSpanLenX, 2.8, 0.55),
-        concretePierMat,
-      );
-      soundWallWest.name = "ShutokoSoundBarrierWallWest";
-      soundWallWest.position.set(westSpanCenterX, 15.6, sideZ);
-      soundWallWest.castShadow = true;
-      viaductGroup.add(soundWallWest);
-    }
-
-    // 首都高3号渋谷線の緑案内標識パネル（signX < 145 && signX > -145 は渋谷コア区間、その他は東西延長区間）
-    for (const signX of [-450, -280, -30, 0, 42, 160]) {
-      const isCoreSign = signX < 145 && signX > -145;
-      const greenSignBoard = new THREE.Mesh(
-        new THREE.BoxGeometry(13.5, 2.3, 0.45),
-        shutokoGreenSignMat,
-      );
-      greenSignBoard.name = "ShutokoRoute3GreenSign";
-      greenSignBoard.position.set(signX, 15.8, -deckWidthZ * 0.5 - 0.35);
-      if (isCoreSign) {
-        registerCoreFallbackMesh(greenSignBoard);
-      } else {
-        viaductGroup.add(greenSignBoard);
-      }
-
-      const greenSignBoardNorth = new THREE.Mesh(
-        new THREE.BoxGeometry(13.5, 2.3, 0.45),
-        shutokoGreenSignMat,
-      );
-      greenSignBoardNorth.position.set(signX, 15.8, deckWidthZ * 0.5 + 0.35);
-      if (isCoreSign) {
-        registerCoreFallbackMesh(greenSignBoardNorth);
-      } else {
-        viaductGroup.add(greenSignBoardNorth);
+      for (const sideSign of [-1, 1]) {
+        const board = new THREE.Mesh(new THREE.BoxGeometry(13.5, 2.3, 0.45), shutokoGreenSignMat);
+        board.name = "ShutokoRoute3GreenSign";
+        board.position.set(
+          pt.x + right.x * (sideSign * (deckWidth * 0.5 + 0.35)),
+          baseY + 4.45,
+          pt.z + right.z * (sideSign * (deckWidth * 0.5 + 0.35)),
+        );
+        board.rotation.y = yaw;
+        viaductGroup.add(board);
       }
     }
 
-    // 高架下アンバーナトリウム道路照明列（神泉町 x=-1250 〜 青山通り x=-265 全域）
-    for (let lx = -510; lx <= 420; lx += 30) {
-      const underLight = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.25, 8.0), underpassLightMat);
-      underLight.position.set(lx, 11.35, 0);
+    // 高架下スリム温白色リセス線形照明（ダークアルミ枠付き・40m 間隔）
+    const shutokoLightHousingGeo = new THREE.BoxGeometry(0.56, 0.12, 3.4);
+    const shutokoLightLensGeo = new THREE.BoxGeometry(0.42, 0.09, 3.2);
+    for (let i = 2; i < allSamples.length - 1; i += 3) {
+      const s = allSamples[i];
+      const yaw = Math.atan2(-s.tangent.z, s.tangent.x);
+      const housing = new THREE.Mesh(shutokoLightHousingGeo, underpassHousingMat);
+      housing.position.set(s.pos.x, s.pos.y - 0.06, s.pos.z);
+      housing.rotation.y = yaw;
+      housing.userData.lodDetailTier = "medium";
+      viaductGroup.add(housing);
+
+      const underLight = new THREE.Mesh(shutokoLightLensGeo, underpassLightMat);
+      underLight.position.set(s.pos.x, s.pos.y - 0.09, s.pos.z);
+      underLight.rotation.y = yaw;
       underLight.userData.lodDetailTier = "medium";
-      const isCoreLight = lx <= 140 && lx >= -140;
-      if (isCoreLight) {
-        registerCoreFallbackMesh(underLight);
-      } else {
-        viaductGroup.add(underLight);
-      }
+      viaductGroup.add(underLight);
     }
 
-    // 首都高ラーメン橋脚＆Rapier物理コライダー（国道246号の歩道外縁・ヒカリエ連絡路西側歩道を回避して車道を完全クリア）
-    // -830..-618 は GLB 内橋脚座標（by = -135, -87, -40.5, +23, +77 -> worldX = -830, -782, -735.5, -672, -618）と完全一致
-    // 西側は神泉町（-1230）、東側は青山通り（-360）まで完全架橋
-    const pierWorldXList = [
-      -1230, -1150, -1070, -990, -910, -830, -782, -735.5, -672, -618, -540, -450, -360,
-    ];
+    // 1C. 首都高ラーメン橋脚＆Rapier物理コライダー（全交差点・車道から 3.2m 以上外側の歩道に安全配置）
     const shutokoPierBody = world.createRigidBody(
-      rapier.RigidBodyDesc.fixed().setTranslation(-720, 0, 95),
+      rapier.RigidBodyDesc.fixed().setTranslation(0, 0, 0),
     );
-    for (const worldX of pierWorldXList) {
-      const localX = worldX - -720;
-      const isCorePier = worldX >= -865 && worldX <= -575;
+    const pierStep = 5; // 約 68m 間隔
+    for (let idx = 3; idx < allSamples.length - 2; idx += pierStep) {
+      const s = allSamples[idx];
+      let chosenSideDist: number | null = null;
+      let chosenForwardOffset = 0;
 
-      // 国道246号・玉川通りの車道カーブ（worldX <= -850 では z=108..115、worldX >= -735 では z=102..117）を跨ぐ安全な歩道クリアランス
-      // Why not worldX = -728: -728 はヒカリエ連絡路（x=-727.5±5.0）西端へ干渉するため明治通り東歩道（-735.5）へ寄せる。
-      let northLocalZ = 14.5;
-      let southLocalZ = -14.5;
-      if (worldX === -910) {
-        northLocalZ = 28.0; // 玉川通り北側歩道（worldZ = 123）
-        southLocalZ = -14.5; // 玉川通り南側歩道（worldZ = 80.5）
-      } else if (worldX === -672) {
-        northLocalZ = 24.5; // 国道246号北側歩道・ヒカリエ南端（z=124）手前（worldZ = 119.5）
-        southLocalZ = -14.5; // 国道246号南側歩道（worldZ = 80.5）
-      } else if (worldX === -618 || worldX === -540 || worldX === -450 || worldX === -360) {
-        northLocalZ = 28.0; // 国道246号東口〜青山通り北側歩道（worldZ = 123）
-        southLocalZ = -14.5; // 国道246号東口〜青山通り南側歩道（worldZ = 80.5）
-      } else if (isCorePier) {
-        northLocalZ = 26.0;
-        southLocalZ = -14.5;
+      // まず標準オフセット ±15.5m -> 広幅員交差点跨ぎ用に ±21.5m、さらに前後方向微調整で完全クリア位置を探索
+      outerSearch: for (const forwardShift of [0, 10, -10, 18, -18]) {
+        for (const sideDist of [15.5, 18.0, 21.5, 25.0]) {
+          const cx = s.pos.x + s.tangent.x * forwardShift;
+          const cz = s.pos.z + s.tangent.z * forwardShift;
+          const sx = cx - s.right.x * sideDist;
+          const sz = cz - s.right.z * sideDist;
+          const nx = cx + s.right.x * sideDist;
+          const nz = cz + s.right.z * sideDist;
+          const areBothClear =
+            this.isPointClearOfRoadCorridors(sx, sz, 3.2, corridors) &&
+            this.isPointClearOfRoadCorridors(nx, nz, 3.2, corridors);
+          if (areBothClear) {
+            chosenSideDist = sideDist;
+            chosenForwardOffset = forwardShift;
+            break outerSearch;
+          }
+        }
       }
 
-      const beamSpan = northLocalZ - southLocalZ + 2.8;
-      const beamCenterZ = (northLocalZ + southLocalZ) * 0.5;
-      const crossBeam = new THREE.Mesh(new THREE.BoxGeometry(2.8, 1.7, beamSpan), concretePierMat);
-      crossBeam.position.set(localX, 10.65, beamCenterZ);
+      if (chosenSideDist === null) {
+        continue;
+      }
+
+      const centerX = s.pos.x + s.tangent.x * chosenForwardOffset;
+      const centerZ = s.pos.z + s.tangent.z * chosenForwardOffset;
+      const undersideY = sampleShutokoUndersideY(centerX, centerZ);
+      const beamHeight = 1.6;
+      const beamCenterY = undersideY - beamHeight * 0.5;
+      const beamSpan = chosenSideDist * 2 + 2.8;
+      const yaw = Math.atan2(-s.tangent.z, s.tangent.x);
+
+      const crossBeam = new THREE.Mesh(
+        new THREE.BoxGeometry(2.8, beamHeight, beamSpan),
+        concretePierMat,
+      );
+      crossBeam.position.set(centerX, beamCenterY, centerZ);
+      crossBeam.rotation.y = yaw;
       crossBeam.castShadow = true;
-      if (isCorePier) {
-        registerCoreFallbackMesh(crossBeam);
-      } else {
-        viaductGroup.add(crossBeam);
-      }
+      viaductGroup.add(crossBeam);
 
-      for (const localZ of [southLocalZ, northLocalZ]) {
-        const pierColMesh = new THREE.Mesh(new THREE.BoxGeometry(2.5, 10.6, 2.5), concretePierMat);
-        pierColMesh.position.set(localX, 5.3, localZ);
+      for (const sideSign of [-1, 1]) {
+        const px = centerX + s.right.x * (sideSign * chosenSideDist);
+        const pz = centerZ + s.right.z * (sideSign * chosenSideDist);
+        const groundY = sampleShibuyaTerrainY(px, pz);
+        const pierBottomY = groundY - 2.0;
+        const pierTopY = beamCenterY - beamHeight * 0.4;
+        const pierHeight = Math.max(2.0, pierTopY - pierBottomY);
+        const pierMidY = (pierBottomY + pierTopY) * 0.5;
+
+        const pierColMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(2.4, pierHeight, 2.4),
+          concretePierMat,
+        );
+        pierColMesh.position.set(px, pierMidY, pz);
+        pierColMesh.rotation.y = yaw;
         pierColMesh.castShadow = true;
         pierColMesh.receiveShadow = true;
-        if (isCorePier) {
-          registerCoreFallbackMesh(pierColMesh);
-        } else {
-          viaductGroup.add(pierColMesh);
-        }
+        viaductGroup.add(pierColMesh);
 
-        const pierCol = rapier.ColliderDesc.cuboid(1.25, 5.3, 1.25)
-          .setTranslation(localX, 5.3, localZ)
+        const pierCol = rapier.ColliderDesc.cuboid(1.2, pierHeight * 0.5, 1.2)
+          .setTranslation(px, pierMidY, pz)
           .setFriction(0.6);
         const pierColInstance = world.createCollider(pierCol, shutokoPierBody);
         this.registerCollider(pierColInstance, true);
-        if (isCorePier) {
-          this.proceduralGlbOverlappingColliders.push(pierColInstance);
-        }
       }
     }
 
-    // 渋谷駅東口歩道橋（ペデストリアンデッキ）＆ JR山手線・東京メトロ銀座線高架橋（プロシージャル Proxy 構造）
-    const eastDeckCrossSouth = new THREE.Mesh(new THREE.BoxGeometry(54, 1.1, 5.6), whitePanelMat);
+    // 2. 渋谷駅東口歩道橋＆東京メトロ銀座線・東急東横線跡ヴォールト屋根（実座標明治通り・東口上空）
+    const eastDeckTerrainY = sampleShibuyaTerrainY(-762.8, 435.5);
+    const eastDeckCrossSouth = new THREE.Mesh(new THREE.BoxGeometry(5.6, 1.1, 46), whitePanelMat);
     eastDeckCrossSouth.name = "ShibuyaEastPedestrianDeckBridge";
-    eastDeckCrossSouth.position.set(-29, 7.8, -24); // worldX = -749, worldZ = 71
-    registerCoreFallbackMesh(eastDeckCrossSouth);
+    eastDeckCrossSouth.position.set(-775, eastDeckTerrainY + 7.2, 438);
+    eastDeckCrossSouth.rotation.y = 0.34;
+    viaductGroup.add(eastDeckCrossSouth);
 
-    const ginzaLineRoof = new THREE.Mesh(new THREE.BoxGeometry(92, 3.6, 15.2), whitePanelMat);
+    const ginzaTerrainY = sampleShibuyaTerrainY(-818.4, 295);
+    const ginzaLineRoof = new THREE.Mesh(new THREE.BoxGeometry(84, 3.6, 15.2), whitePanelMat);
     ginzaLineRoof.name = "ShibuyaGinzaLineStationVault";
-    ginzaLineRoof.position.set(-30, 17.2, 48); // worldX = -750, worldZ = 143
-    registerCoreFallbackMesh(ginzaLineRoof);
+    ginzaLineRoof.position.set(-835, ginzaTerrainY + 14.8, 315);
+    ginzaLineRoof.rotation.y = 0.2;
+    viaductGroup.add(ginzaLineRoof);
 
     // openWorldStreaming テスト検証用プロキシ（ShutokoRoute3ViaductGroup 内）
     const jrOverpassProxy = new THREE.Object3D();
     jrOverpassProxy.name = "ShibuyaJrYamanoteOverpass";
     viaductGroup.add(jrOverpassProxy);
 
-    // 4. JR渋谷駅ガード下・鉄道高架橋（山手線・埼京線・湘南新宿ライン）常時表示リアル造形群
-    // Why registerCoreFallbackMesh から外して独立グループとして常時表示するか:
-    // PLATEAU 3D 都市モデル GLB には JR 鉄道高架橋桁が含まれておらず、フォールバック扱いだと
-    // GLB ロード時に高架線が丸ごと消失してスクランブル交差点〜宮益坂間の上空が虚空になるため。
+    // 3. JR渋谷駅ガード下・鉄道高架橋（山手線・埼京線・湘南新宿ライン: 実 NNE-SSW 鉄道軸）
     const jrGuardGroup = new THREE.Group();
     jrGuardGroup.name = "RoadInfra_ShibuyaJrGuardUnderpassGroup";
 
@@ -3656,120 +4102,115 @@ export class TokyoStationMap {
     });
     this.applyArchitecture3DTexture(jrRibMat, "anodized_metal");
 
-    // ガード下専用トンネル照明マテリアル（昼間も日陰のガード天井蛍光灯を常時点灯して立体感と視認性を確保）
     const jrUnderpassLightMat = new THREE.MeshStandardMaterial({
-      color: 0xfef9c3,
-      emissive: new THREE.Color(0xfde047),
-      emissiveIntensity: this.isNightActive ? 2.2 : 1.45,
-      roughness: 0.18,
+      color: 0xf8fafc,
+      emissive: new THREE.Color(0xfff4db),
+      emissiveIntensity: this.isNightActive ? 1.55 : 0.32,
+      roughness: 0.22,
     });
     this.shibuyaStreamEmissiveEntries.push({
       material: jrUnderpassLightMat,
-      dayIntensity: 1.45,
-      nightIntensity: 2.2,
+      dayIntensity: 0.32,
+      nightIntensity: 1.55,
     });
 
-    // プレートガーダー主桁:
-    // - 駅ホーム・ガード下本線 (z = 155 .. 272, 幅 18.4m, x = -776.0)
-    // - 北側山手線・埼京線 4線高架 (z = 272 .. 346, 幅 10.5m, x = -769.2)
-    //   ※北側高架を東側へ絞ることで MAGNET by SHIBUYA109 (x ∈ [-784.0, -775.6]) との重なりを完全解消
-    const girderGeo = new THREE.BoxGeometry(18.4, 3.5, 117);
-    const girderMesh = new THREE.Mesh(girderGeo, jrGreenSteelMat);
-    girderMesh.name = "RoadInfra_JrGuardGirder";
-    girderMesh.position.set(-776.0, 6.45, 213.5);
-    girderMesh.castShadow = true;
-    girderMesh.receiveShadow = true;
-    jrGuardGroup.add(girderMesh);
+    const jrCurve = new THREE.CatmullRomCurve3(
+      [
+        new THREE.Vector3(-925, 0, -120),
+        new THREE.Vector3(-905, 0, 120),
+        new THREE.Vector3(-895, 0, 260.2), // スクランブル交差点〜宮益坂下間 ガード下
+        new THREE.Vector3(-870, 0, 391), // スクランブルスクエア西側接線
+        new THREE.Vector3(-855, 0, 466), // 玉川通りガード下
+        new THREE.Vector3(-835, 0, 565),
+        new THREE.Vector3(-815, 0, 680),
+      ],
+      false,
+      "catmullrom",
+      0.35,
+    );
+    const sampleJrUndersideY = (x: number, z: number): number => sampleShibuyaTerrainY(x, z) + 5.4;
+    const jrSamples = sampleCurveWithElevation(jrCurve, 72, sampleJrUndersideY);
+    const jrWidth = 14.5;
 
-    const northGirderMesh = new THREE.Mesh(new THREE.BoxGeometry(10.5, 3.5, 74), jrGreenSteelMat);
-    northGirderMesh.name = "RoadInfra_JrGuardGirderNorth";
-    northGirderMesh.position.set(-769.2, 6.45, 309.0);
-    northGirderMesh.castShadow = true;
-    northGirderMesh.receiveShadow = true;
-    jrGuardGroup.add(northGirderMesh);
+    const jrGirderMesh = new THREE.Mesh(
+      this.buildCurvedBoxRibbonGeometry(jrSamples, jrWidth, 0, 3.1),
+      jrGreenSteelMat,
+    );
+    jrGirderMesh.name = "RoadInfra_JrGuardGirder";
+    jrGirderMesh.castShadow = true;
+    jrGirderMesh.receiveShadow = true;
+    jrGuardGroup.add(jrGirderMesh);
 
-    // 桁側面の縦スティフナー補強リブ（z = 158 .. 270, 4m 間隔）
-    const ribGeo = new THREE.BoxGeometry(0.22, 3.5, 0.15);
-    for (let rz = 158; rz <= 270; rz += 4) {
-      const westRib = new THREE.Mesh(ribGeo, jrRibMat);
-      westRib.name = "RoadInfra_JrGuardStiffener_West";
-      westRib.position.set(-785.25, 6.45, rz);
-      westRib.castShadow = true;
-      jrGuardGroup.add(westRib);
+    const jrSlabMesh = new THREE.Mesh(
+      this.buildCurvedBoxRibbonGeometry(jrSamples, jrWidth + 0.8, 3.1, 3.65),
+      concretePierMat,
+    );
+    jrSlabMesh.name = "RoadInfra_JrGuardTrackSlab";
+    jrSlabMesh.castShadow = true;
+    jrSlabMesh.receiveShadow = true;
+    jrGuardGroup.add(jrSlabMesh);
 
-      const eastRib = new THREE.Mesh(ribGeo, jrRibMat);
-      eastRib.name = "RoadInfra_JrGuardStiffener_East";
-      eastRib.position.set(-766.75, 6.45, rz);
-      eastRib.castShadow = true;
-      jrGuardGroup.add(eastRib);
-    }
-
-    // 上部バラスト軌道スラブ（コンクリート）
-    const slabGeo = new THREE.BoxGeometry(19.2, 0.6, 118);
-    const slabMesh = new THREE.Mesh(slabGeo, concretePierMat);
-    slabMesh.name = "RoadInfra_JrGuardTrackSlab";
-    slabMesh.position.set(-776.0, 8.5, 214.0);
-    slabMesh.castShadow = true;
-    slabMesh.receiveShadow = true;
-    jrGuardGroup.add(slabMesh);
-
-    const northSlabMesh = new THREE.Mesh(new THREE.BoxGeometry(11.1, 0.6, 75), concretePierMat);
-    northSlabMesh.name = "RoadInfra_JrGuardTrackSlabNorth";
-    northSlabMesh.position.set(-769.2, 8.5, 309.5);
-    northSlabMesh.castShadow = true;
-    northSlabMesh.receiveShadow = true;
-    jrGuardGroup.add(northSlabMesh);
-
-    // 東西防音パラペット壁（コンクリート）
-    const parapetGeo = new THREE.BoxGeometry(0.4, 2.2, 118);
-    for (const wallX of [-785.8, -766.2]) {
-      const parapetMesh = new THREE.Mesh(parapetGeo, concretePierMat);
+    for (const sideSign of [-1, 1]) {
+      const parapetSamples = jrSamples.map((s) => ({
+        pos: new THREE.Vector3(
+          s.pos.x + s.right.x * (sideSign * (jrWidth * 0.5 + 0.15)),
+          s.pos.y,
+          s.pos.z + s.right.z * (sideSign * (jrWidth * 0.5 + 0.15)),
+        ),
+        right: s.right,
+        arcLen: s.arcLen,
+      }));
+      const parapetMesh = new THREE.Mesh(
+        this.buildCurvedBoxRibbonGeometry(parapetSamples, 0.4, 3.65, 5.15),
+        concretePierMat,
+      );
       parapetMesh.name = "RoadInfra_JrGuardParapet";
-      parapetMesh.position.set(wallX, 9.9, 214.0);
-      parapetMesh.castShadow = true;
-      parapetMesh.receiveShadow = true;
-      jrGuardGroup.add(parapetMesh);
-    }
-    const northParapetGeo = new THREE.BoxGeometry(0.4, 2.2, 75);
-    for (const wallX of [-774.6, -763.8]) {
-      const parapetMesh = new THREE.Mesh(northParapetGeo, concretePierMat);
-      parapetMesh.name = "RoadInfra_JrGuardParapetNorth";
-      parapetMesh.position.set(wallX, 9.9, 309.5);
       parapetMesh.castShadow = true;
       parapetMesh.receiveShadow = true;
       jrGuardGroup.add(parapetMesh);
     }
 
-    // 上部架線ビーム（門型トラス柱・梁: y = 8.8 .. 13.5m, 40m間隔）
-    const catenaryPillarGeo = new THREE.CylinderGeometry(0.14, 0.14, 4.4, 8);
-    const catenaryBeamGeo = new THREE.BoxGeometry(19.0, 0.28, 0.28);
-    for (const cz of [170, 210, 250]) {
-      for (const px of [-785.4, -766.6]) {
-        const pillar = new THREE.Mesh(catenaryPillarGeo, jrRibMat);
-        pillar.name = "RoadInfra_JrGuardCatenaryPillar";
-        pillar.position.set(px, 11.0, cz);
-        jrGuardGroup.add(pillar);
+    // 縦スティフナー補強リブ & 上部架線ビーム（首都高直下 z ∈ [432, 494] は高さ干渉回避のため架線ビームをスキップ）
+    const ribGeo = new THREE.BoxGeometry(0.22, 3.1, 0.18);
+    const catenaryPillarGeo = new THREE.CylinderGeometry(0.14, 0.14, 3.4, 8);
+    const catenaryBeamGeo = new THREE.BoxGeometry(jrWidth + 0.6, 0.26, 0.26);
+    for (let i = 2; i < jrSamples.length - 1; i += 2) {
+      const s = jrSamples[i];
+      const yaw = Math.atan2(-s.tangent.z, s.tangent.x);
+      for (const sideSign of [-1, 1]) {
+        const rib = new THREE.Mesh(ribGeo, jrRibMat);
+        rib.name =
+          sideSign < 0 ? "RoadInfra_JrGuardStiffener_West" : "RoadInfra_JrGuardStiffener_East";
+        rib.position.set(
+          s.pos.x + s.right.x * (sideSign * (jrWidth * 0.5 + 0.08)),
+          s.pos.y + 1.55,
+          s.pos.z + s.right.z * (sideSign * (jrWidth * 0.5 + 0.08)),
+        );
+        rib.rotation.y = yaw;
+        jrGuardGroup.add(rib);
       }
-      const beam = new THREE.Mesh(catenaryBeamGeo, jrRibMat);
-      beam.name = "RoadInfra_JrGuardCatenaryBeam";
-      beam.position.set(-776.0, 13.1, cz);
-      jrGuardGroup.add(beam);
-    }
-    const northCatenaryBeamGeo = new THREE.BoxGeometry(10.8, 0.28, 0.28);
-    for (const cz of [290, 330]) {
-      for (const px of [-774.2, -764.2]) {
-        const pillar = new THREE.Mesh(catenaryPillarGeo, jrRibMat);
-        pillar.name = "RoadInfra_JrGuardCatenaryPillarNorth";
-        pillar.position.set(px, 11.0, cz);
-        jrGuardGroup.add(pillar);
+
+      const isCatenaryInterval = i % 6 === 0 && (s.pos.z < 432 || s.pos.z > 494);
+      if (isCatenaryInterval) {
+        for (const sideSign of [-1, 1]) {
+          const pillar = new THREE.Mesh(catenaryPillarGeo, jrRibMat);
+          pillar.name = "RoadInfra_JrGuardCatenaryPillar";
+          pillar.position.set(
+            s.pos.x + s.right.x * (sideSign * (jrWidth * 0.5 - 0.1)),
+            s.pos.y + 5.3,
+            s.pos.z + s.right.z * (sideSign * (jrWidth * 0.5 - 0.1)),
+          );
+          jrGuardGroup.add(pillar);
+        }
+        const beam = new THREE.Mesh(catenaryBeamGeo, jrRibMat);
+        beam.name = "RoadInfra_JrGuardCatenaryBeam";
+        beam.position.set(s.pos.x, s.pos.y + 6.95, s.pos.z);
+        beam.rotation.y = yaw + Math.PI * 0.5;
+        jrGuardGroup.add(beam);
       }
-      const beam = new THREE.Mesh(northCatenaryBeamGeo, jrRibMat);
-      beam.name = "RoadInfra_JrGuardCatenaryBeamNorth";
-      beam.position.set(-769.2, 13.1, cz);
-      jrGuardGroup.add(beam);
     }
 
-    // ガード下東西の警戒ゼブラバー＆「高さ制限 4.5M」標識板＆JR渋谷駅ガード壁・駅名看板
+    // 警戒ゼブラバー・「高さ制限 4.5M」標識・駅名看板（ハチ公ガード下 & 玉川通りガード下の 2 箇所）
     const zebraTex = this.createJrGuardZebraTexture();
     const hasZebraTex = Boolean(zebraTex);
     const zebraMat = hasZebraTex
@@ -3781,11 +4222,7 @@ export class TokyoStationMap {
           roughness: 0.4,
           metalness: 0.1,
         })
-      : new THREE.MeshStandardMaterial({
-          color: 0xfacc15,
-          roughness: 0.4,
-          metalness: 0.1,
-        });
+      : new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.4, metalness: 0.1 });
 
     const clearanceTex = this.createJrGuardClearanceTexture();
     const hasClearanceTex = Boolean(clearanceTex);
@@ -3798,11 +4235,7 @@ export class TokyoStationMap {
           roughness: 0.35,
           metalness: 0.05,
         })
-      : new THREE.MeshStandardMaterial({
-          color: 0xffffff,
-          roughness: 0.4,
-          metalness: 0.05,
-        });
+      : new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, metalness: 0.05 });
     if (hasClearanceTex) {
       this.shibuyaStreamEmissiveEntries.push({
         material: clearanceMat,
@@ -3831,76 +4264,167 @@ export class TokyoStationMap {
       });
     }
 
-    const zebraGeo = new THREE.BoxGeometry(0.25, 0.35, 24.0);
-    const clearanceGeo = new THREE.BoxGeometry(0.08, 0.7, 3.2);
-    const jrStationSignGeo = new THREE.BoxGeometry(0.12, 1.35, 8.8);
-
-    for (const [faceX, signRotY] of [
-      [-785.35, 0],
-      [-766.65, Math.PI],
-    ]) {
-      const zebraMesh = new THREE.Mesh(zebraGeo, zebraMat);
-      zebraMesh.name = "RoadInfra_JrGuardZebraBeam";
-      zebraMesh.position.set(faceX, 5.0, 248.0);
-      zebraMesh.castShadow = true;
-      jrGuardGroup.add(zebraMesh);
-
-      const clearanceSign = new THREE.Mesh(clearanceGeo, clearanceMat);
-      clearanceSign.name = "RoadInfra_JrGuardClearanceSign";
-      clearanceSign.position.set(faceX, 5.55, 248.0);
-      clearanceSign.rotation.y = signRotY;
-      clearanceSign.castShadow = true;
-      jrGuardGroup.add(clearanceSign);
-
-      const stationSign = new THREE.Mesh(jrStationSignGeo, jrStationMat);
-      stationSign.name = "RoadInfra_JrGuardStationSign";
-      stationSign.position.set(faceX < -776 ? faceX - 0.05 : faceX + 0.05, 6.9, 248.0);
-      stationSign.rotation.y = signRotY;
-      jrGuardGroup.add(stationSign);
-    }
-
-    // ガード下天井照明ボックス（アンバー・昼白色蛍光灯 2列×3基, y = 4.75m）
-    const ceilingLightGeo = new THREE.BoxGeometry(2.4, 0.12, 0.45);
-    for (const lightZ of [243.5, 252.5]) {
-      for (const lightX of [-782.0, -776.0, -770.0]) {
-        const ceilingLight = new THREE.Mesh(ceilingLightGeo, jrUnderpassLightMat);
-        ceilingLight.name = "RoadInfra_JrGuardCeilingLight";
-        ceilingLight.position.set(lightX, 4.75, lightZ);
-        jrGuardGroup.add(ceilingLight);
-      }
-    }
-
-    // ガード下両側の白磁タイル化粧壁（橋脚列 z=228.0, 268.0 に整合して車道・歩道を一切侵食しない）
     const underpassWallMat = new THREE.MeshStandardMaterial({
-      color: 0xe2e8f0,
+      color: 0xe6e4de,
       roughness: 0.58,
       metalness: 0.05,
     });
     this.applyArchitecture3DTexture(underpassWallMat, "white_granite");
-    const underpassWallGeo = new THREE.BoxGeometry(17.5, 4.7, 1.8);
-    for (const wz of [228.0, 268.0]) {
-      const wallMesh = new THREE.Mesh(underpassWallGeo, underpassWallMat);
-      wallMesh.name = "RoadInfra_JrGuardUnderpassWall";
-      wallMesh.position.set(-776.0, 2.35, wz);
-      wallMesh.receiveShadow = true;
-      jrGuardGroup.add(wallMesh);
-    }
 
-    // 地上橋脚（ピア）: 車道（z ∈ [236.6, 259.4]）外側の歩道奥（z = 228.0, 268.0）にのみ安全配置
-    const pierGeo = new THREE.BoxGeometry(2.2, 4.7, 2.4);
-    for (const pz of [228.0, 268.0]) {
-      for (const px of [-783.0, -776.0, -769.0]) {
-        const pierMesh = new THREE.Mesh(pierGeo, concretePierMat);
-        pierMesh.name = "RoadInfra_JrGuardPier";
-        pierMesh.position.set(px, 2.35, pz);
-        pierMesh.castShadow = true;
-        pierMesh.receiveShadow = true;
-        jrGuardGroup.add(pierMesh);
+    const zebraGeo = new THREE.BoxGeometry(0.25, 0.35, 22.0);
+    const clearanceGeo = new THREE.BoxGeometry(0.08, 0.7, 3.2);
+    const jrStationSignGeo = new THREE.BoxGeometry(0.12, 1.35, 8.8);
+    const ceilingLightHousingGeo = new THREE.BoxGeometry(2.32, 0.1, 0.34);
+    const ceilingLightGeo = new THREE.BoxGeometry(2.2, 0.08, 0.26);
+    const undersideRibMat = new THREE.MeshStandardMaterial({
+      color: 0x36494e,
+      roughness: 0.48,
+      metalness: 0.65,
+    });
+    this.applyArchitecture3DTexture(undersideRibMat, "anodized_metal");
+    const undersideRibWebGeo = new THREE.BoxGeometry(jrWidth - 0.5, 0.26, 0.16);
+    const undersideRibFlangeGeo = new THREE.BoxGeometry(jrWidth - 0.5, 0.08, 0.36);
+
+    const underpassDadoMat = new THREE.MeshStandardMaterial({
+      color: 0x4b4e52,
+      roughness: 0.68,
+      metalness: 0.06,
+    });
+    this.applyArchitecture3DTexture(underpassDadoMat, "white_granite");
+    const jrCurveLen = Math.max(100, jrCurve.getLength());
+
+    const underpasses = [
+      { label: "scramble", u: 0.476, flankOffsets: [-16.5, 16.5] },
+      { label: "tamagawa", u: 0.735, flankOffsets: [-18.5, 18.5] },
+    ];
+    for (const up of underpasses) {
+      const pt = jrCurve.getPointAt(up.u);
+      const tan = jrCurve.getTangentAt(up.u);
+      const hTan = new THREE.Vector3(tan.x, 0, tan.z).normalize();
+      const right = new THREE.Vector3(-hTan.z, 0, hTan.x).normalize();
+      const baseY = sampleJrUndersideY(pt.x, pt.z);
+      const yaw = Math.atan2(-hTan.z, hTan.x) + Math.PI * 0.5;
+
+      // ガード下桁裏の横方向スチールI型リブ（約 3.2m 間隔）
+      for (let distM = -19.2; distM <= 19.2; distM += 3.2) {
+        const uRib = Math.min(0.98, Math.max(0.02, up.u + distM / jrCurveLen));
+        const rPt = jrCurve.getPointAt(uRib);
+        const rTan = jrCurve.getTangentAt(uRib);
+        const rHTan = new THREE.Vector3(rTan.x, 0, rTan.z).normalize();
+        const rYaw = Math.atan2(-rHTan.z, rHTan.x) + Math.PI * 0.5;
+        const rBaseY = sampleJrUndersideY(rPt.x, rPt.z);
+
+        const webMesh = new THREE.Mesh(undersideRibWebGeo, undersideRibMat);
+        webMesh.name = "RoadInfra_JrGuardUndersideRib";
+        webMesh.position.set(rPt.x, rBaseY - 0.13, rPt.z);
+        webMesh.rotation.y = rYaw;
+        jrGuardGroup.add(webMesh);
+
+        const flangeMesh = new THREE.Mesh(undersideRibFlangeGeo, undersideRibMat);
+        flangeMesh.name = "RoadInfra_JrGuardUndersideRibFlange";
+        flangeMesh.position.set(rPt.x, rBaseY - 0.24, rPt.z);
+        flangeMesh.rotation.y = rYaw;
+        jrGuardGroup.add(flangeMesh);
+      }
+
+      for (const sideSign of [-1, 1]) {
+        const faceOffset = sideSign * (jrWidth * 0.5 + 0.18);
+        const fx = pt.x + right.x * faceOffset;
+        const fz = pt.z + right.z * faceOffset;
+        const signRotY = sideSign < 0 ? yaw : yaw + Math.PI;
+
+        const zebraMesh = new THREE.Mesh(zebraGeo, zebraMat);
+        zebraMesh.name = "RoadInfra_JrGuardZebraBeam";
+        zebraMesh.position.set(fx, baseY - 0.18, fz);
+        zebraMesh.rotation.y = yaw;
+        jrGuardGroup.add(zebraMesh);
+
+        const clearanceSign = new THREE.Mesh(clearanceGeo, clearanceMat);
+        clearanceSign.name = "RoadInfra_JrGuardClearanceSign";
+        clearanceSign.position.set(fx, baseY + 0.38, fz);
+        clearanceSign.rotation.y = signRotY;
+        jrGuardGroup.add(clearanceSign);
+
+        const stationSign = new THREE.Mesh(jrStationSignGeo, jrStationMat);
+        stationSign.name = "RoadInfra_JrGuardStationSign";
+        stationSign.position.set(
+          fx + right.x * (sideSign * 0.08),
+          baseY + 1.65,
+          fz + right.z * (sideSign * 0.08),
+        );
+        stationSign.rotation.y = signRotY;
+        jrGuardGroup.add(stationSign);
+      }
+
+      for (const lz of [-4.5, 4.5]) {
+        for (const lx of [-4.5, 0, 4.5]) {
+          const cx = pt.x + right.x * lx + hTan.x * lz;
+          const cz = pt.z + right.z * lx + hTan.z * lz;
+          const lightHousing = new THREE.Mesh(ceilingLightHousingGeo, jrRibMat);
+          lightHousing.name = "RoadInfra_JrGuardCeilingLightHousing";
+          lightHousing.position.set(cx, baseY - 0.05, cz);
+          lightHousing.rotation.y = yaw;
+          jrGuardGroup.add(lightHousing);
+
+          const ceilingLight = new THREE.Mesh(ceilingLightGeo, jrUnderpassLightMat);
+          ceilingLight.name = "RoadInfra_JrGuardCeilingLight";
+          ceilingLight.position.set(cx, baseY - 0.09, cz);
+          ceilingLight.rotation.y = yaw;
+          jrGuardGroup.add(ceilingLight);
+        }
+      }
+
+      // 道路車道外側の歩道脇にのみ化粧壁・ダーク御影石腰壁・橋脚を安全配置
+      for (const sOffset of up.flankOffsets) {
+        const wx = pt.x + hTan.x * sOffset;
+        const wz = pt.z + hTan.z * sOffset;
+        const isWallClear = this.isPointClearOfRoadCorridors(wx, wz, 2.2, corridors);
+        if (!isWallClear) {
+          continue;
+        }
+        const groundY = sampleShibuyaTerrainY(wx, wz);
+        const wallH = Math.max(2.0, baseY - groundY + 1.5);
+        const wallMidY = groundY - 1.5 + wallH * 0.5;
+        const wallMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(jrWidth - 0.6, wallH, 1.8),
+          underpassWallMat,
+        );
+        wallMesh.name = "RoadInfra_JrGuardUnderpassWall";
+        wallMesh.position.set(wx, wallMidY, wz);
+        wallMesh.rotation.y = yaw;
+        wallMesh.receiveShadow = true;
+        jrGuardGroup.add(wallMesh);
+
+        const dadoH = Math.min(wallH, 2.75);
+        const dadoMidY = groundY - 1.5 + dadoH * 0.5;
+        const dadoMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(jrWidth - 0.52, dadoH, 1.92),
+          underpassDadoMat,
+        );
+        dadoMesh.name = "RoadInfra_JrGuardUnderpassDado";
+        dadoMesh.position.set(wx, dadoMidY, wz);
+        dadoMesh.rotation.y = yaw;
+        dadoMesh.receiveShadow = true;
+        jrGuardGroup.add(dadoMesh);
+
+        for (const pxOff of [-5.2, 0, 5.2]) {
+          const px = wx + right.x * pxOff;
+          const pz = wz + right.z * pxOff;
+          if (!this.isPointClearOfRoadCorridors(px, pz, 1.8, corridors)) {
+            continue;
+          }
+          const pierMesh = new THREE.Mesh(new THREE.BoxGeometry(2.0, wallH, 2.2), concretePierMat);
+          pierMesh.name = "RoadInfra_JrGuardPier";
+          pierMesh.position.set(px, wallMidY, pz);
+          pierMesh.rotation.y = yaw;
+          pierMesh.castShadow = true;
+          pierMesh.receiveShadow = true;
+          jrGuardGroup.add(pierMesh);
+        }
       }
     }
 
     this.group.add(jrGuardGroup);
-
     this.group.add(viaductGroup);
   }
 
@@ -3924,59 +4448,68 @@ export class TokyoStationMap {
   }
 
   /**
-   * 渋谷ハチ公前広場インフラ（忠犬ハチ公像・石畳舗装・植栽・ベンチ・照明灯・JR駅前キャノピー・歩行者平坦コライダー）を構築する
-   * How: スクランブル交差点南東（x = -795, z = 225）に石畳広場メッシュを敷設し、
-   * 象徴的なハチ公像モニュメント、緑化植栽、案内施設を配置して、スクランブル交差点と一体の歩行者・都市空間を再現する。
+   * 渋谷ハチ公前広場インフラ（忠犬ハチ公像・石畳舗装・植栽・ベンチ・照明灯・JR駅前キャノピー）を構築する
+   * How: スクランブル交差点南東の真位置（`(-984.4, terrainY + 0.023, 324.6)`）へ広場とハチ公像を配置し、
+   * 交差点北西（QFRONT・センター街側）へ向けて正対（`rotation.y = -2.35`）させる。
+   * Why not `plazaColDesc`: 渋谷エリア全体が連続 `ShibuyaTerrainMesh` trimesh で接地されているため、
+   * 旧平地矩形コライダーを残すと傾斜地で車両跳ね上がりの原因となる。
    */
   private buildHachikoPlazaInfrastructure(
     world: RAPIER.World,
     rapier: typeof RAPIER,
     groundBody: RAPIER.RigidBody,
   ): void {
+    const hachikoX = -984.4;
+    const hachikoZ = 324.6;
+    const hachikoBaseY = sampleShibuyaTerrainY(hachikoX, hachikoZ) + 0.023;
+    const localTerrainDelta = (lx: number, lz: number): number =>
+      sampleShibuyaTerrainY(hachikoX + lx, hachikoZ + lz) + 0.023 - hachikoBaseY;
+
     const plazaGroup = new THREE.Group();
     plazaGroup.name = "ShibuyaHachikoPlazaInfrastructure";
     plazaGroup.userData.isRoadInfrastructure = true;
-    plazaGroup.position.set(-795, 0.023, 225);
+    plazaGroup.position.set(hachikoX, hachikoBaseY, hachikoZ);
 
-    // 1. ハチ公前広場 石畳・タイル舗装（PuddleMaterial）
-    // Why z=226 以南に配置するか:
-    // スクランブル交差点車道パッド（z=248, 44m幅: z ∈ [226, 270]）および南側横断歩道（z=228.85）の南端外縁（z=226）に
-    // 歩道縁石・広場敷石の境界を厳密に揃えることで、車道への広場メッシュめり込みや、
-    // 車両通行帯上での Rapier 物理コライダー重複・段差バンプ跳ね上がりを防止する。
-    const plazaWidth = 38;
-    const plazaDepth = 28;
-    const plazaGeo = new THREE.PlaneGeometry(plazaWidth, plazaDepth, 8, 8);
+    // 1. ハチ公前広場 石畳・タイル舗装（PuddleMaterial、青みなしの中立ウォーム御影石）
+    const plazaWidth = 36;
+    const plazaDepth = 34;
+    const plazaCenterOffsetZ = 8; // z ∈ [315.6, 349.6]: スクランブル車道南端とJR高架西端の間の駅北西広場
+    const plazaGeo = new THREE.PlaneGeometry(plazaWidth, plazaDepth, 12, 12);
     plazaGeo.rotateX(-Math.PI / 2);
+    const plazaPosAttr = plazaGeo.getAttribute("position");
+    if (plazaPosAttr) {
+      for (let i = 0; i < plazaPosAttr.count; i++) {
+        const vx = plazaPosAttr.getX(i);
+        const vz = plazaPosAttr.getZ(i) + plazaCenterOffsetZ;
+        plazaPosAttr.setY(i, localTerrainDelta(vx, vz));
+      }
+      plazaPosAttr.needsUpdate = true;
+      plazaGeo.computeVertexNormals();
+    }
+
     const plazaMat = new PuddleMaterial({
-      baseColor: 0x5a6578,
-      baseRoughness: 0.68,
-      baseMetalness: 0.08,
+      baseColor: 0x8f8d87,
+      baseRoughness: 0.72,
+      baseMetalness: 0.05,
       puddleThreshold: 0.42,
     });
     this.puddleMaterials.push(plazaMat);
     const plazaMesh = new THREE.Mesh(plazaGeo, plazaMat);
     plazaMesh.name = "HachikoPlazaPavement";
     plazaMesh.userData.isRoadInfrastructure = true;
-    plazaMesh.position.set(0, 0, -13);
+    plazaMesh.position.set(0, 0, plazaCenterOffsetZ);
     plazaMesh.receiveShadow = true;
     plazaGroup.add(plazaMesh);
 
-    // 平坦路面コライダー（上面高さ y = 0.023 で段差なくスムーズに接続、z ∈ [198, 226] で車道と完全整合）
-    const plazaColDesc = rapier.ColliderDesc.cuboid(plazaWidth / 2, 0.25, plazaDepth / 2)
-      .setTranslation(-795, 0.523 - 0.25, 212)
-      .setFriction(0.85)
-      .setRestitution(0.02);
-    this.registerCollider(world.createCollider(plazaColDesc, groundBody), false);
-
-    // 2. 忠犬ハチ公像（Hachiko Bronze Statue & Monument Pedestal）
-    // スクランブル交差点正面を向く北西端（広場内相対座標: x = -7.0, z = -3.0 -> ワールド座標: x = -802, z = 222）
-    // 車道南縁 z=226 から 4m 南側、対角線横断歩道終点から約 13.5m 離れた歩行者広場内に正対配置
+    // 2. 忠犬ハチ公像（Hachiko Bronze Statue & Monument Pedestal: 広場中心 (0, 0, 0) に配置しスクランブル北西を向く）
     const monumentGroup = new THREE.Group();
     monumentGroup.name = "ShibuyaHachikoStatueMonument";
     monumentGroup.userData.isRoadInfrastructure = true;
-    monumentGroup.position.set(-7.0, 0, -3.0);
+    monumentGroup.position.set(0, 0, 0);
+    monumentGroup.rotation.y = -2.35;
+    this.proceduralHachikoStatueGroup = monumentGroup;
 
-    // 御影石の台座（明色白御影石ベース＋銘板）
+    // 御影石の台座（明色白御影石ベース＋傾斜接地用 -1.5m スカート＋銘板）
     const pedestalMat = new THREE.MeshStandardMaterial({
       color: 0xe7e5e4,
       emissive: new THREE.Color(0xd6d3d1),
@@ -3990,6 +4523,14 @@ export class TokyoStationMap {
       nightIntensity: 0.36,
     });
     this.applyArchitecture3DTexture(pedestalMat, "white_granite");
+
+    const skirtGeo = new THREE.BoxGeometry(1.54, 1.5, 1.74);
+    const skirtMesh = new THREE.Mesh(skirtGeo, pedestalMat);
+    skirtMesh.name = "HachikoStatuePlinthSkirt";
+    skirtMesh.position.set(0, -0.75, 0);
+    skirtMesh.receiveShadow = true;
+    monumentGroup.add(skirtMesh);
+
     const plinthGeo = new THREE.BoxGeometry(1.5, 0.22, 1.7);
     const plinthMesh = new THREE.Mesh(plinthGeo, pedestalMat);
     plinthMesh.name = "HachikoStatuePlinth";
@@ -4038,7 +4579,6 @@ export class TokyoStationMap {
       dayIntensity: 0.28,
       nightIntensity: 0.45,
     });
-    // 胴体
     const bodyGeo = new THREE.BoxGeometry(0.48, 0.44, 0.76);
     const bodyMesh = new THREE.Mesh(bodyGeo, bronzeMat);
     bodyMesh.name = "HachikoBronzeBody";
@@ -4047,7 +4587,6 @@ export class TokyoStationMap {
     bodyMesh.castShadow = true;
     monumentGroup.add(bodyMesh);
 
-    // 首・頭部
     const headGeo = new THREE.BoxGeometry(0.32, 0.32, 0.36);
     const headMesh = new THREE.Mesh(headGeo, bronzeMat);
     headMesh.name = "HachikoBronzeHead";
@@ -4055,7 +4594,6 @@ export class TokyoStationMap {
     headMesh.castShadow = true;
     monumentGroup.add(headMesh);
 
-    // 耳（特徴的な左耳の垂れと立ち耳）
     const earGeo = new THREE.ConeGeometry(0.08, 0.18, 4);
     const rightEar = new THREE.Mesh(earGeo, bronzeMat);
     rightEar.position.set(0.12, 1.82, 0.28);
@@ -4066,14 +4604,12 @@ export class TokyoStationMap {
     leftEar.rotation.z = 0.55;
     monumentGroup.add(leftEar);
 
-    // 巻き尾（Tail）
     const tailGeo = new THREE.CylinderGeometry(0.06, 0.05, 0.4, 6);
     const tailMesh = new THREE.Mesh(tailGeo, bronzeMat);
     tailMesh.position.set(0, 1.5, -0.42);
     tailMesh.rotation.x = -0.65;
     monumentGroup.add(tailMesh);
 
-    // 脚部（4本）
     const legGeo = new THREE.CylinderGeometry(0.08, 0.09, 0.45, 6);
     for (const [lx, lz] of [
       [0.16, 0.25],
@@ -4087,63 +4623,48 @@ export class TokyoStationMap {
     }
     plazaGroup.add(monumentGroup);
 
-    // 3. シンボル広場植栽（Raised Planters & Trees）
+    // 3. シンボル広場植栽（Raised Planters & Blender street_tree.glb イチョウ樹木へ統一）
     const planterMat = new THREE.MeshStandardMaterial({
-      color: 0x475569,
+      color: 0x57534e,
       roughness: 0.8,
-      metalness: 0.1,
-    });
-    const foliageMat = new THREE.MeshStandardMaterial({
-      color: 0x166534,
-      roughness: 0.85,
-      metalness: 0.05,
+      metalness: 0.08,
     });
     const planterPositions = [
-      { x: 5.0, z: -8.0 },
-      { x: -9.0, z: -16.0 },
-      { x: 8.0, z: -18.0 },
+      { x: 6.5, z: 10.0 },
+      { x: -10.5, z: 14.0 },
+      { x: 9.5, z: 18.0 },
     ];
     for (let i = 0; i < planterPositions.length; i++) {
       const p = planterPositions[i];
-      const planterBox = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.5, 4.2), planterMat);
+      const baseDeltaY = localTerrainDelta(p.x, p.z);
+      const planterBox = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.8, 4.2), planterMat);
       planterBox.name = `HachikoPlanter_${i}`;
-      planterBox.position.set(p.x, 0.25, p.z);
+      planterBox.position.set(p.x, baseDeltaY + 0.1, p.z);
       planterBox.receiveShadow = true;
       plazaGroup.add(planterBox);
 
-      // 広場のシンボル樹木（Foliage Crown）
-      const trunkMesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.22, 0.28, 4.0, 8),
-        new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.9 }),
-      );
-      trunkMesh.position.set(p.x, 2.5, p.z);
-      trunkMesh.castShadow = true;
-      plazaGroup.add(trunkMesh);
-
-      const foliageCrown = new THREE.Mesh(new THREE.DodecahedronGeometry(2.4, 1), foliageMat);
-      foliageCrown.name = `HachikoTreeFoliage_${i}`;
-      foliageCrown.position.set(p.x, 5.2, p.z);
-      foliageCrown.castShadow = true;
-      plazaGroup.add(foliageCrown);
+      // Why use createGinkgoTree instead of DodecahedronGeometry sphere:
+      // ロリポップ状の簡易球体木を廃止し、渋谷全域と同一の Blender GLB 街路樹へ統一するため。
+      this.createGinkgoTree(hachikoX + p.x, hachikoZ + p.z, 900 + i, world, rapier, groundBody);
     }
 
     // 4. 広場ベンチ（Plaza Park Benches）
     const benchWoodMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.65 });
     const benchLegMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b,
+      color: 0x27272a,
       roughness: 0.4,
       metalness: 0.8,
     });
     const benchPositions = [
-      { x: -3.0, z: -6.0, rotY: 0 },
-      { x: 2.0, z: -14.0, rotY: Math.PI / 2 },
-      { x: -5.0, z: -12.0, rotY: 0.4 },
+      { x: -4.5, z: 7.0, rotY: 0.2 },
+      { x: 4.5, z: 14.5, rotY: Math.PI / 2 },
+      { x: -6.0, z: 12.0, rotY: 0.5 },
     ];
     for (let i = 0; i < benchPositions.length; i++) {
       const b = benchPositions[i];
       const benchGroup = new THREE.Group();
       benchGroup.name = `HachikoBench_${i}`;
-      benchGroup.position.set(b.x, 0, b.z);
+      benchGroup.position.set(b.x, localTerrainDelta(b.x, b.z), b.z);
       benchGroup.rotation.y = b.rotY;
 
       const seat = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.08, 0.5), benchWoodMat);
@@ -4161,7 +4682,7 @@ export class TokyoStationMap {
 
     // 5. 広場LED照明灯（Plaza Warm LED Lampposts）
     const lampPoleMat = new THREE.MeshStandardMaterial({
-      color: 0x334155,
+      color: 0x383a3e,
       roughness: 0.35,
       metalness: 0.85,
     });
@@ -4177,53 +4698,256 @@ export class TokyoStationMap {
       nightIntensity: 2.2,
     });
     for (const [lx, lz] of [
-      [-12.0, -4.0],
-      [12.0, -12.0],
-      [-12.0, -20.0],
+      [-12.0, 4.0],
+      [12.0, 12.0],
+      [-12.0, 20.0],
     ]) {
+      const baseDeltaY = localTerrainDelta(lx, lz);
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 5.0, 8), lampPoleMat);
-      pole.position.set(lx, 2.5, lz);
+      pole.position.set(lx, baseDeltaY + 2.5, lz);
       pole.castShadow = true;
       plazaGroup.add(pole);
 
       const lampHead = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 12), lampLightMat);
       lampHead.name = "HachikoPlazaLamp";
-      lampHead.position.set(lx, 5.0, lz);
+      lampHead.position.set(lx, baseDeltaY + 5.0, lz);
       plazaGroup.add(lampHead);
     }
 
-    // 6. JR渋谷駅 ハチ公改札口キャノピー（Station Entrance Canopy）
+    // 6. JR渋谷駅 ハチ公改札口キャノピー（Station Entrance Canopy: 広場東端のJR側へ接地）
     const canopyMat = new THREE.MeshStandardMaterial({
-      color: 0x1e3a5f,
-      roughness: 0.3,
+      color: 0x36383c,
+      roughness: 0.32,
       metalness: 0.6,
     });
+    const canopyDeltaY = localTerrainDelta(13.0, 12.0);
     const canopyMesh = new THREE.Mesh(new THREE.BoxGeometry(10.0, 0.4, 5.0), canopyMat);
     canopyMesh.name = "ShibuyaStationHachikoEntranceCanopy";
-    canopyMesh.position.set(13.0, 4.2, -10.0);
+    canopyMesh.position.set(13.0, canopyDeltaY + 4.2, 12.0);
     canopyMesh.castShadow = true;
     plazaGroup.add(canopyMesh);
 
     for (const [cx, cz] of [
-      [8.5, -12.0],
-      [8.5, -8.0],
-      [17.5, -12.0],
-      [17.5, -8.0],
+      [8.5, 10.0],
+      [8.5, 14.0],
+      [17.5, 10.0],
+      [17.5, 14.0],
     ]) {
-      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 4.2, 8), lampPoleMat);
-      pillar.position.set(cx, 2.1, cz);
+      const colDeltaY = localTerrainDelta(cx, cz);
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 4.6, 8), lampPoleMat);
+      pillar.position.set(cx, colDeltaY + 2.1, cz);
       pillar.castShadow = true;
       plazaGroup.add(pillar);
     }
+
+    // 7. 渋谷駅前バスターミナル バス停シェルター（ハチ公口側 & 東口側）
+    const busShelterHachiko = this.createShibuyaBusShelter(
+      -972.5,
+      318.0,
+      0.28,
+      "ShibuyaBusTerminalShelter_Hachiko",
+      "渋谷駅ハチ公口 / Shibuya Sta. Hachiko",
+      "渋05  渋11  渋21  渋34  都01",
+      world,
+      rapier,
+      groundBody,
+    );
+    this.group.add(busShelterHachiko);
+
+    const busShelterEastExit = this.createShibuyaBusShelter(
+      -750.0,
+      398.0,
+      -2.55,
+      "ShibuyaBusTerminalShelter_EastExit",
+      "渋谷駅東口 / Shibuya Sta. East",
+      "都01  都06  田87  学03",
+      world,
+      rapier,
+      groundBody,
+    );
+    this.group.add(busShelterEastExit);
 
     this.group.add(plazaGroup);
   }
 
   /**
+   * 渋谷駅前バスターミナル向けの近代的ガラス庇バス停シェルター＋路線案内ライトボックス＋ベンチ＋丸型標柱を生成する。
+   */
+  private createShibuyaBusShelter(
+    x: number,
+    z: number,
+    rotY: number,
+    name: string,
+    stationLabel: string,
+    routesText: string,
+    world: RAPIER.World,
+    rapier: typeof RAPIER,
+    groundBody: RAPIER.RigidBody,
+  ): THREE.Group {
+    const shelterGroup = new THREE.Group();
+    shelterGroup.name = name;
+    shelterGroup.userData.isRoadInfrastructure = true;
+    const baseY = sampleShibuyaTerrainY(x, z);
+    shelterGroup.position.set(x, baseY, z);
+    shelterGroup.rotation.y = rotY;
+
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x2d3238,
+      roughness: 0.36,
+      metalness: 0.72,
+    });
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: 0xc8dff0,
+      roughness: 0.14,
+      metalness: 0.15,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+    });
+    const benchWoodMat = new THREE.MeshStandardMaterial({
+      color: 0x7c4a26,
+      roughness: 0.64,
+      metalness: 0.04,
+    });
+
+    // 支持柱（背面2本 + 接地スカート -0.6m）
+    const postGeo = new THREE.BoxGeometry(0.11, 3.15, 0.11);
+    for (const px of [-1.75, 1.15]) {
+      const post = new THREE.Mesh(postGeo, frameMat);
+      post.position.set(px, 0.975, -0.62);
+      post.castShadow = true;
+      shelterGroup.add(post);
+    }
+
+    // 片持ちガラス屋根庇＆スチール外枠
+    const roofFrame = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.1, 1.85), frameMat);
+    roofFrame.position.set(0, 2.58, 0.08);
+    roofFrame.castShadow = true;
+    shelterGroup.add(roofFrame);
+
+    const roofGlass = new THREE.Mesh(new THREE.BoxGeometry(3.96, 0.06, 1.62), glassMat);
+    roofGlass.position.set(0, 2.6, 0.08);
+    shelterGroup.add(roofGlass);
+
+    // 背面防風ガラスパネル
+    const backGlass = new THREE.Mesh(new THREE.BoxGeometry(2.86, 1.95, 0.05), glassMat);
+    backGlass.position.set(-0.3, 1.32, -0.62);
+    shelterGroup.add(backGlass);
+
+    // 路線時刻表ライトボックス（右袖）
+    const boardHousing = new THREE.Mesh(new THREE.BoxGeometry(1.05, 2.15, 0.18), frameMat);
+    boardHousing.position.set(1.5, 1.42, -0.58);
+    boardHousing.castShadow = true;
+    shelterGroup.add(boardHousing);
+
+    const boardTex = this.createBusShelterBoardTexture(stationLabel, routesText);
+    const boardFaceMat = new THREE.MeshStandardMaterial({
+      color: boardTex ? 0xffffff : 0xe2e8f0,
+      map: boardTex ?? undefined,
+      emissive: new THREE.Color(boardTex ? 0xffffff : 0xf1f5f9),
+      emissiveMap: boardTex ?? undefined,
+      emissiveIntensity: this.isNightActive ? 0.95 : 0.25,
+      roughness: 0.25,
+      metalness: 0.08,
+    });
+    this.shibuyaStreamEmissiveEntries.push({
+      material: boardFaceMat,
+      dayIntensity: 0.25,
+      nightIntensity: 0.95,
+    });
+    const boardFace = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 1.85), boardFaceMat);
+    boardFace.position.set(1.5, 1.42, -0.485);
+    shelterGroup.add(boardFace);
+
+    // 待合木製スラットベンチ
+    const benchSeat = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.07, 0.44), benchWoodMat);
+    benchSeat.position.set(-0.35, 0.46, -0.25);
+    benchSeat.castShadow = true;
+    shelterGroup.add(benchSeat);
+    for (const bx of [-1.05, 0.35]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.46, 0.4), frameMat);
+      leg.position.set(bx, 0.23, -0.25);
+      shelterGroup.add(leg);
+    }
+
+    // 丸型バス停ポール（東端前面）
+    const poleMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 2.55, 8), frameMat);
+    poleMesh.position.set(2.22, 1.25, 0.22);
+    poleMesh.castShadow = true;
+    shelterGroup.add(poleMesh);
+
+    const discMat = new THREE.MeshStandardMaterial({
+      color: 0x16a34a,
+      emissive: new THREE.Color(0x064e3b),
+      emissiveIntensity: this.isNightActive ? 0.5 : 0.12,
+      roughness: 0.3,
+    });
+    const signDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.06, 16), discMat);
+    signDisc.rotation.x = Math.PI / 2;
+    signDisc.position.set(2.22, 2.25, 0.22);
+    shelterGroup.add(signDisc);
+
+    // 物理コライダー（車道外歩道上のシェルター占有域のみ）
+    const shelterColDesc = rapier.ColliderDesc.cuboid(2.05, 1.32, 0.8)
+      .setTranslation(x, baseY + 1.32, z)
+      .setRotation({ x: 0, y: Math.sin(rotY / 2), z: 0, w: Math.cos(rotY / 2) })
+      .setFriction(0.6)
+      .setRestitution(0.05);
+    this.registerCollider(world.createCollider(shelterColDesc, groundBody), false);
+
+    return shelterGroup;
+  }
+
+  private createBusShelterBoardTexture(
+    stationLabel: string,
+    routesText: string,
+  ): THREE.CanvasTexture | null {
+    if (typeof document === "undefined") {
+      return null;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return null;
+    }
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#15803d";
+    ctx.fillRect(0, 0, canvas.width, 82);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 20px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("TOEI / TOKYU BUS", canvas.width / 2, 34);
+    ctx.font = "bold 16px sans-serif";
+    ctx.fillText(stationLabel, canvas.width / 2, 64, canvas.width - 20);
+
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "bold 22px sans-serif";
+    ctx.fillText(routesText, canvas.width / 2, 130, canvas.width - 24);
+    ctx.fillStyle = "#334155";
+    ctx.fillRect(18, 152, canvas.width - 36, 4);
+    ctx.font = "15px sans-serif";
+    ctx.textAlign = "left";
+    for (let row = 0; row < 10; row++) {
+      const y = 186 + row * 28;
+      ctx.fillStyle = row % 2 === 0 ? "#e2e8f0" : "#f1f5f9";
+      ctx.fillRect(18, y - 18, canvas.width - 36, 24);
+      ctx.fillStyle = "#1e293b";
+      ctx.fillText(`${7 + row} | 04  18  32  46  58`, 26, y);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return tex;
+  }
+
+  /**
    * 渋谷センター街（バスケットボール通り）インフラ
-   * How: スクランブル交差点北西（x = -825, z = 265 〜 井の頭通り合流 x = -875, z = 320）に、
-   * 象徴的な入口アーチ看板「SHIBUYA CENTER-GAI バスケットボール通り」、歩行者天国インターロッキング舗装、
-   * ストリートフラッグ、沿道商業テナントビル群（多層ネオンサイン・店舗ファサード）を配置する。
+   * How: スクランブル交差点北西（`(-1024, 249)` 〜 宇田川町交番 `(-1155, 128)` 〜 東急本店前 `(-1325, 151.3)`）に、
+   * 象徴的な入口アーチ看板「SHIBUYA CENTER-GAI バスケットボール通り」、地形追従インターロッキング舗装、
+   * ストリートフラッグ、沿道商業テナントビル群（地形接地 + `-3.0m` スカート）を配置する。
    */
   private buildShibuyaCenterGaiInfrastructure(
     world: RAPIER.World,
@@ -4234,18 +4958,17 @@ export class TokyoStationMap {
     centerGaiGroup.name = "ShibuyaCenterGaiInfrastructure";
     centerGaiGroup.userData.isRoadInfrastructure = true;
 
-    // 1. 渋谷センター街 歩行者天国タイル・インターロッキングブロック舗装（PuddleMaterial 赤茶舗装）
-    // スクランブル交差点北西端 (-835, 268) から宇田川町交番 (-875, 320) を経て文化村通り・東急本店前 (-940, 345) を結ぶコリドー
-    const centerGaiCorridor = getOpenDataCurvedRoadCorridors().find(
+    const corridors = getOpenDataCurvedRoadCorridors();
+    const centerGaiCorridor = corridors.find(
       (corridor) => corridor.id === "nav-road-shibuya-center-gai",
     );
     const centerGaiPoints: ReadonlyArray<{ x: number; z: number }> = centerGaiCorridor?.points ?? [
-      { x: -835, z: 268 },
-      { x: -850, z: 292 },
-      { x: -875, z: 320 },
-      { x: -902, z: 350 },
-      { x: -922, z: 356 },
-      { x: -940, z: 345 },
+      { x: -1024, z: 249 },
+      { x: -1065, z: 212 },
+      { x: -1110, z: 168 },
+      { x: -1155, z: 128 },
+      { x: -1240, z: 138 },
+      { x: -1325, z: 151.3 },
     ];
     const centerGaiSpline = new THREE.CatmullRomCurve3(
       centerGaiPoints.map((pt) => new THREE.Vector3(pt.x, 0, pt.z)),
@@ -4254,18 +4977,13 @@ export class TokyoStationMap {
       0.5,
     );
     const streetLength = centerGaiSpline.getLength();
-    // 入口アーチは文化村通りとのY字鋭角合流を避けるためスプライン u = 0.08 地点へ前進配置する。
     const archU = 0.08;
     const archCenter = centerGaiSpline.getPointAt(archU);
     const archTangent = centerGaiSpline.getTangentAt(archU).normalize();
     const streetAngle = Math.atan2(archTangent.x, archTangent.z);
-    // 外側白線 (+-3.4m) の内側に収まる 6.5m レンガ舗装リボン
+    const archBaseY = sampleShibuyaTerrainY(archCenter.x, archCenter.z);
     const pavementHalfWidth = 3.25;
 
-    // Why 直線1枚板ではなくスプライン追従・交差点除外リボンを生成するか:
-    // センター街は宇田川町交番で井の頭通りと合流し、東急本店前で文化村通りへ接続する。
-    // 旧来のような52m直線板と固定幅コライダーでは先で途切れたり他道路と重なったりするため、
-    // 道路本体と同一スプラインから交差点部を除いた連続リボンを描画し、当たり判定は Section J の曲線道路コライダーに一本化する。
     const totalSamples = Math.max(48, Math.ceil(streetLength / 2.5));
     const sampledFrames: Array<{
       pos: THREE.Vector3;
@@ -4285,7 +5003,7 @@ export class TokyoStationMap {
     }
 
     const sampledTotalLen = sampledFrames[sampledFrames.length - 1]?.arcLen ?? streetLength;
-    const kobanJunction = { x: -875, z: 320, radius: 13.0 };
+    const kobanJunction = { x: -1155, z: 128, radius: 13.0 };
     const ribbonRuns: Array<typeof sampledFrames> = [];
     let currentRun: typeof sampledFrames = [];
     for (const frame of sampledFrames) {
@@ -4320,13 +5038,15 @@ export class TokyoStationMap {
         const leftZ = frame.pos.z - frame.normal.z * pavementHalfWidth;
         const rightX = frame.pos.x + frame.normal.x * pavementHalfWidth;
         const rightZ = frame.pos.z + frame.normal.z * pavementHalfWidth;
+        const leftY = sampleShibuyaTerrainY(leftX, leftZ);
+        const rightY = sampleShibuyaTerrainY(rightX, rightZ);
 
         const pBase = vertexCursor * 3;
         ribbonPositions[pBase] = leftX;
-        ribbonPositions[pBase + 1] = 0;
+        ribbonPositions[pBase + 1] = leftY;
         ribbonPositions[pBase + 2] = leftZ;
         ribbonPositions[pBase + 3] = rightX;
-        ribbonPositions[pBase + 4] = 0;
+        ribbonPositions[pBase + 4] = rightY;
         ribbonPositions[pBase + 5] = rightZ;
 
         ribbonNormals[pBase] = 0;
@@ -4359,6 +5079,7 @@ export class TokyoStationMap {
     pavementGeo.setAttribute("normal", new THREE.BufferAttribute(ribbonNormals, 3));
     pavementGeo.setAttribute("uv", new THREE.BufferAttribute(ribbonUvs, 2));
     pavementGeo.setIndex(ribbonIndices);
+    pavementGeo.computeVertexNormals();
     const pavementMat = new PuddleMaterial({
       baseColor: 0x78350f,
       baseRoughness: 0.68,
@@ -4370,53 +5091,52 @@ export class TokyoStationMap {
     const pavementMesh = new THREE.Mesh(pavementGeo, pavementMat);
     pavementMesh.name = "CenterGaiPedestrianPavement";
     pavementMesh.userData.isRoadInfrastructure = true;
-    pavementMesh.position.set(0, 0.021, 0);
+    pavementMesh.position.set(0, 0.025, 0);
     pavementMesh.receiveShadow = true;
     centerGaiGroup.add(pavementMesh);
 
     // 2. 渋谷センター街 入口アーチ看板（Center Gai Main Entrance Arch）
-    // スプライン u = 0.08 地点にまたがるトラスゲート（文化村通り合流から離隔確保）
     const archGroup = new THREE.Group();
     archGroup.name = "CenterGaiEntranceArchSign";
     archGroup.userData.isRoadInfrastructure = true;
-    archGroup.position.set(archCenter.x, 0, archCenter.z);
+    archGroup.position.set(archCenter.x, archBaseY, archCenter.z);
     archGroup.rotation.y = streetAngle;
     this.proceduralCenterGaiArchGroup = archGroup;
 
     const archSteelMat = new THREE.MeshStandardMaterial({
-      color: 0x94a3b8,
+      color: 0x8c8a84,
       roughness: 0.38,
       metalness: 0.45,
     });
 
-    // 左右スチール支柱（Pillars: センター街道路幅 10.0m の外側歩道・ビル壁際に設置）
     const halfSpan = 5.4;
     for (const side of [-1, 1]) {
       const colX = side * halfSpan;
+      const cosA = Math.cos(streetAngle);
+      const sinA = Math.sin(streetAngle);
+      const worldColX = archCenter.x + colX * cosA;
+      const worldColZ = archCenter.z - colX * sinA;
+      const colDeltaY = sampleShibuyaTerrainY(worldColX, worldColZ) - archBaseY;
+
       const colMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 7.8, 12), archSteelMat);
-      colMesh.position.set(colX, 3.9, 0);
+      colMesh.position.set(colX, colDeltaY + 3.9, 0);
       colMesh.castShadow = true;
       archGroup.add(colMesh);
 
-      // 支柱基台
-      const baseMesh = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.6, 0.85), archSteelMat);
-      baseMesh.position.set(colX, 0.3, 0);
+      const baseMesh = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.8, 0.85), archSteelMat);
+      baseMesh.position.set(colX, colDeltaY + 0.2, 0);
       baseMesh.castShadow = true;
       archGroup.add(baseMesh);
 
-      // 支柱障害物コライダー（北東ツタヤ側支柱 side=1 のみ登録）
-      // Why side=-1（南西大盛堂側）のコライダーを登録しないか:
-      // 文化村通り（幅14m）とセンター街（幅10m）は鋭角Y字路を形成しており、入口では車道が近接している。
-      // 南西支柱は南側商業ビル（CenterGaiCommercialBuilding_South_1: 大盛堂書店敷地）の壁面に密着しており、
-      // ビル自体のコライダーで完全に保護される。独立した円柱コライダーを置くと文化村通り・オルガン坂の
-      // 車道端に1m突出して「見えない壁」となるため、歩道側（side=1）のみコライダーを生成する。
-      if (side === 1) {
-        const cosA = Math.cos(streetAngle);
-        const sinA = Math.sin(streetAngle);
-        const worldColX = archCenter.x + colX * cosA;
-        const worldColZ = archCenter.z - colX * sinA;
+      const isColliderSafe =
+        side === 1 && this.isPointClearOfRoadCorridors(worldColX, worldColZ, 0.35, corridors);
+      if (isColliderSafe) {
         const pillarCol = world.createCollider(
-          rapier.ColliderDesc.cylinder(3.9, 0.3).setTranslation(worldColX, 3.9, worldColZ),
+          rapier.ColliderDesc.cylinder(3.9, 0.3).setTranslation(
+            worldColX,
+            archBaseY + colDeltaY + 3.9,
+            worldColZ,
+          ),
           groundBody,
         );
         this.registerCollider(pillarCol, true);
@@ -4424,7 +5144,6 @@ export class TokyoStationMap {
       }
     }
 
-    // 上部トラス梁（Cross Beam Truss）
     const crossBeam = new THREE.Mesh(
       new THREE.BoxGeometry(halfSpan * 2 + 0.6, 0.55, 0.55),
       archSteelMat,
@@ -4433,7 +5152,6 @@ export class TokyoStationMap {
     crossBeam.castShadow = true;
     archGroup.add(crossBeam);
 
-    // メインネオン看板パネル「渋谷センター街 / SHIBUYA CENTER-GAI / バスケットボール通り」
     const procArchTex = this.createCenterGaiArchCanvasTexture(true);
     const hasProcArchTex = procArchTex !== null;
     const signBoardMat = new THREE.MeshStandardMaterial({
@@ -4456,7 +5174,6 @@ export class TokyoStationMap {
     signBoardMesh.castShadow = true;
     archGroup.add(signBoardMesh);
 
-    // サイン上部アクセントクラウン
     const signCrownMat = new THREE.MeshStandardMaterial({
       color: 0x3b82f6,
       emissive: new THREE.Color(0x2563eb),
@@ -4491,8 +5208,8 @@ export class TokyoStationMap {
       dayIntensity: 0.18,
       nightIntensity: 0.65,
     });
-    const bannerDistances = [18.0, 38.0, 82.0, 108.0];
-    const bannerLateralOffset = 5.85;
+    const bannerDistances = [20.0, 48.0, 76.0, 108.0, 145.0];
+    const bannerLateralOffset = 5.4;
     for (let bi = 0; bi < bannerDistances.length; bi++) {
       const u = Math.min(0.98, bannerDistances[bi] / streetLength);
       const pt = centerGaiSpline.getPointAt(u);
@@ -4504,20 +5221,21 @@ export class TokyoStationMap {
       for (const side of [-1, 1]) {
         const poleX = pt.x + side * bannerLateralOffset * cosA;
         const poleZ = pt.z - side * bannerLateralOffset * sinA;
+        const poleGroundY = sampleShibuyaTerrainY(poleX, poleZ);
 
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 4.8, 8), archSteelMat);
-        pole.position.set(poleX, 2.4, poleZ);
+        pole.position.set(poleX, poleGroundY + 2.4, poleZ);
         centerGaiGroup.add(pole);
 
         const bannerMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 1.8), bannerMat);
         bannerMesh.name = `CenterGaiStreetBanner_${bi}_${side}`;
-        bannerMesh.position.set(poleX, 3.6, poleZ);
+        bannerMesh.position.set(poleX, poleGroundY + 3.6, poleZ);
         bannerMesh.rotation.y = segAngle + (side > 0 ? 0 : Math.PI);
         centerGaiGroup.add(bannerMesh);
       }
     }
 
-    // 4. センター街 沿道商業テナントビル群（実写店舗・商業ビルファサードテクスチャ）
+    // 4. センター街 沿道商業テナントビル群（全道路車道から >= 9m 離隔、地形標高 + -3m スカート接地）
     const commTex = shibuyaTextureManager.getTexture("commercialFacade");
     const storefrontFacadeTex = shibuyaTextureManager.getTexture("plateauLod2Storefront");
 
@@ -4560,66 +5278,68 @@ export class TokyoStationMap {
       center: { x: number; z: number; rotY: number };
     }> = [
       {
-        w: 8.5,
-        d: 10.0,
+        w: 9.0,
+        d: 10.5,
         h: 28.0,
         mat: buildingMat1,
         name: "CenterGaiCommercialBuilding_North_1",
-        center: { x: -831.5, z: 294.5, rotY: -0.56 },
+        center: { x: -1050.8, z: 205.6, rotY: -2.32 },
       },
       {
         w: 10.0,
-        d: 11.5,
+        d: 11.0,
         h: 36.0,
         mat: buildingMat2,
         name: "CenterGaiCommercialBuilding_North_2",
-        center: { x: -850.5, z: 321.5, rotY: -0.72 },
+        center: { x: -1083.1, z: 173.9, rotY: -2.35 },
       },
       {
         w: 11.0,
-        d: 12.0,
+        d: 11.5,
         h: 32.0,
         mat: buildingMat1,
         name: "CenterGaiCommercialBuilding_North_3",
-        center: { x: -866.0, z: 362.0, rotY: 0.0 },
+        center: { x: -1196.2, z: 113.8, rotY: -1.39 },
       },
-      // 南側3棟は文化村通りと重複しないよう文化村通り南側〜道玄坂北側の道玄坂二丁目・円山町北ブロックへ配置
       {
-        w: 11.0,
-        d: 12.0,
+        w: 10.0,
+        d: 11.0,
         h: 26.0,
         mat: buildingMat2,
         name: "CenterGaiCommercialBuilding_South_1",
-        center: { x: -909.0, z: 261.0, rotY: 0.42 },
+        center: { x: -1070.5, z: 226.7, rotY: -2.32 },
       },
       {
-        w: 12.0,
-        d: 12.0,
+        w: 10.5,
+        d: 11.0,
         h: 34.0,
         mat: buildingMat1,
         name: "CenterGaiCommercialBuilding_South_2",
-        center: { x: -922.0, z: 266.0, rotY: 0.42 },
+        center: { x: -1103.7, z: 194.7, rotY: -2.35 },
       },
       {
-        w: 14.0,
-        d: 14.0,
+        w: 11.5,
+        d: 11.5,
         h: 30.0,
         mat: buildingMat2,
         name: "CenterGaiCommercialBuilding_South_3",
-        center: { x: -948.0, z: 254.0, rotY: 0.42 },
+        center: { x: -1246.4, z: 154.3, rotY: -1.43 },
       },
     ];
 
+    const skirtDepth = 3.0;
     for (const bConf of buildingConfigs) {
       const bCenterX = bConf.center.x;
       const bCenterZ = bConf.center.z;
       const bRotY = bConf.center.rotY;
+      const bTerrainY = sampleShibuyaTerrainY(bCenterX, bCenterZ);
+      const totalH = bConf.h + skirtDepth;
+      const bMidY = bTerrainY - skirtDepth + totalH * 0.5;
 
-      const boxGeo = new THREE.BoxGeometry(bConf.w, bConf.h, bConf.d);
+      const boxGeo = new THREE.BoxGeometry(bConf.w, totalH, bConf.d);
       const uvAttr = boxGeo.getAttribute("uv");
       if (uvAttr) {
-        const verticalRepeats = Math.max(1, Math.round(bConf.h / 14.0));
-        // BoxGeometry groups 2(+Y) & 3(-Y) occupy vertices 8..15; scale side walls only
+        const verticalRepeats = Math.max(1, Math.round(totalH / 14.0));
         for (let vi = 0; vi < uvAttr.count; vi++) {
           if (vi < 8 || vi >= 16) {
             uvAttr.setY(vi, uvAttr.getY(vi) * verticalRepeats);
@@ -4637,26 +5357,44 @@ export class TokyoStationMap {
         bConf.mat,
       ]);
       bMesh.name = bConf.name;
-      bMesh.position.set(bCenterX, bConf.h / 2, bCenterZ);
+      bMesh.position.set(bCenterX, bMidY, bCenterZ);
       bMesh.rotation.y = bRotY;
       bMesh.castShadow = true;
       bMesh.receiveShadow = true;
       centerGaiGroup.add(bMesh);
 
-      const bColDesc = rapier.ColliderDesc.cuboid(bConf.w / 2, bConf.h / 2, bConf.d / 2)
-        .setTranslation(bCenterX, bConf.h / 2, bCenterZ)
+      const bColDesc = rapier.ColliderDesc.cuboid(bConf.w / 2, totalH / 2, bConf.d / 2)
+        .setTranslation(bCenterX, bMidY, bCenterZ)
         .setRotation({ x: 0, y: Math.sin(bRotY / 2), z: 0, w: Math.cos(bRotY / 2) })
         .setFriction(0.65)
         .setRestitution(0.01);
       this.registerCollider(world.createCollider(bColDesc, groundBody), false);
+
+      this.attachStreetFacingAwningAndSign({
+        parent: centerGaiGroup,
+        offsetX: bCenterX,
+        offsetZ: bCenterZ,
+        worldX: bCenterX,
+        worldZ: bCenterZ,
+        terrainY: bTerrainY,
+        w: bConf.w,
+        d: bConf.d,
+        h: bConf.h,
+        rotY: bRotY,
+        streetPts: centerGaiSpline.getPoints(80),
+        index: buildingConfigs.indexOf(bConf),
+        awningNamePrefix: "CenterGaiStoreAwning",
+        sodeNamePrefix: "CenterGaiSodeKanban",
+      });
     }
 
     this.group.add(centerGaiGroup);
   }
 
   /**
-   * 公園通り北側（西武・マルイ・MODI・神南方面 z = 302..420）および道玄坂周辺（x = -965..-858）の
-   * 空白水色路面を解消し、連続する商業街区舗装と実在感のある沿道商業ビル群を構築する。
+   * 公園通り（北北西）・道玄坂（南西）・宮益坂（東北東）沿道の商業街区舗装と沿道ビル群を構築する。
+   * How: 1:1 非反転 WGS84 実座標（公園通り `z = 11..181`、道玄坂 `x = -1220..-1404`、
+   * 宮益坂 `x = -764..-476`）に沿って全道路車道から安全離隔を保って配置し、地形追従舗装と `-3.0m` スカートで傾斜接地する。
    */
   private buildShibuyaStreetscapeFillInfrastructure(
     world: RAPIER.World,
@@ -4668,9 +5406,9 @@ export class TokyoStationMap {
     const facadeTex = shibuyaTextureManager.getTexture("plateauLod2Facade");
     const roofMat = shibuyaTextureManager.createPlateauLod2RoofMaterial(this.isNightActive);
     const plazaMat = new THREE.MeshStandardMaterial({
-      color: 0xa8b2bf,
-      roughness: 0.74,
-      metalness: 0.05,
+      color: 0x9c9a92,
+      roughness: 0.76,
+      metalness: 0.04,
     });
     this.applyArchitecture3DTexture(plazaMat, "white_granite");
     this.shibuyaStreamEmissiveEntries.push({
@@ -4722,260 +5460,418 @@ export class TokyoStationMap {
     }> = [
       {
         groupName: "ShibuyaKoenDoriStreetscapeGroup",
-        anchor: { x: -792, z: 360 },
+        anchor: { x: -990, z: 105 },
         aprons: [
-          { x: -778.0, z: 308.0, w: 23.0, d: 68.0, rotY: -0.06 },
-          { x: -784.0, z: 396.0, w: 20.0, d: 56.0, rotY: -0.08 },
-          { x: -819.0, z: 312.0, w: 30.0, d: 56.0, rotY: -0.06 },
-          { x: -822.0, z: 396.0, w: 26.0, d: 54.0, rotY: -0.08 },
+          { x: -963.5, z: 162.0, w: 18.0, d: 48.0, rotY: 2.94 },
+          { x: -1012.0, z: 54.0, w: 18.0, d: 92.0, rotY: 2.6 },
+          { x: -1003.0, z: 181.0, w: 18.0, d: 24.0, rotY: 3.01 },
+          { x: -1028.0, z: 104.0, w: 18.0, d: 20.0, rotY: 2.67 },
         ],
         buildings: [
           {
             name: "KoenEast_MaruiSouth",
-            x: -778.0,
-            z: 312.0,
+            x: -962.0,
+            z: 176.0,
             w: 13.0,
             d: 18.0,
             h: 34.0,
-            rotY: -0.06,
+            rotY: 3.01,
             style: "commercial",
           },
           {
             name: "KoenEast_MaruiNorth",
-            x: -779.5,
-            z: 332.0,
+            x: -965.0,
+            z: 148.0,
             w: 13.0,
-            d: 14.0,
+            d: 16.0,
             h: 38.0,
-            rotY: -0.06,
+            rotY: 2.85,
             style: "facade",
           },
           {
             name: "KoenEast_ModiSouth",
-            x: -783.5,
-            z: 381.0,
-            w: 12.0,
-            d: 16.0,
+            x: -991.0,
+            z: 88.0,
+            w: 13.0,
+            d: 18.0,
             h: 34.0,
-            rotY: -0.08,
+            rotY: 2.67,
             style: "storefront",
           },
           {
             name: "KoenEast_ModiNorth",
-            x: -785.5,
-            z: 405.0,
-            w: 12.0,
-            d: 22.0,
+            x: -1039.0,
+            z: 11.0,
+            w: 13.0,
+            d: 20.0,
             h: 42.0,
-            rotY: -0.08,
+            rotY: 2.53,
             style: "commercial",
           },
           {
             name: "KoenWest_SeibuB",
-            x: -816.5,
-            z: 312.5,
-            w: 16.0,
+            x: -1003.0,
+            z: 181.0,
+            w: 14.0,
             d: 18.0,
             h: 34.0,
-            rotY: -0.06,
+            rotY: 3.01,
             style: "facade",
           },
           {
             name: "KoenWest_SeibuA",
-            x: -819.5,
-            z: 330.0,
-            w: 15.0,
-            d: 12.0,
+            x: -1028.0,
+            z: 104.0,
+            w: 14.0,
+            d: 14.0,
             h: 30.0,
-            rotY: -0.06,
+            rotY: 2.67,
             style: "storefront",
           },
         ],
       },
       {
         groupName: "ShibuyaDogenzakaStreetscapeGroup",
-        anchor: { x: -910, z: 210 },
+        anchor: { x: -1300, z: 410 },
         aprons: [
-          { x: -852.0, z: 226.0, w: 36.0, d: 24.0, rotY: -0.28 },
-          { x: -886.0, z: 204.0, w: 58.0, d: 34.0, rotY: -0.36 },
-          { x: -940.0, z: 184.0, w: 58.0, d: 36.0, rotY: -0.46 },
-          { x: -928.0, z: 230.0, w: 68.0, d: 20.0, rotY: -0.4 },
+          { x: -1234.0, z: 356.0, w: 20.0, d: 44.0, rotY: 0.9 },
+          { x: -1318.0, z: 460.0, w: 20.0, d: 86.0, rotY: 0.62 },
+          { x: -1274.0, z: 339.0, w: 18.0, d: 72.0, rotY: 0.87 },
+          { x: -1382.0, z: 474.0, w: 20.0, d: 88.0, rotY: 0.5 },
         ],
         buildings: [
           {
             name: "DogenzakaSouth_CornerBlock",
-            x: -854.0,
-            z: 222.0,
-            w: 16.0,
+            x: -1220.0,
+            z: 344.0,
+            w: 15.0,
             d: 12.0,
             h: 26.0,
-            rotY: -0.3,
+            rotY: 0.96,
             style: "storefront",
           },
           {
             name: "DogenzakaSouth_EastCommercial",
-            x: -874.0,
-            z: 215.5,
-            w: 18.0,
-            d: 13.0,
+            x: -1248.0,
+            z: 368.0,
+            w: 16.0,
+            d: 12.0,
             h: 26.0,
-            rotY: -0.34,
+            rotY: 0.86,
             style: "commercial",
           },
           {
             name: "DogenzakaSouth_UniqloBlock",
-            x: -896.0,
-            z: 206.5,
-            w: 18.0,
-            d: 13.0,
+            x: -1278.0,
+            z: 395.0,
+            w: 15.0,
+            d: 12.0,
             h: 30.0,
-            rotY: -0.36,
+            rotY: 0.78,
             style: "storefront",
           },
           {
-            name: "DogenzakaSouth_MidTower",
-            x: -918.0,
-            z: 196.5,
-            w: 16.0,
-            d: 13.0,
-            h: 34.0,
-            rotY: -0.42,
-            style: "facade",
-          },
-          {
             name: "DogenzakaSouth_UpperCommercial",
-            x: -960.0,
-            z: 174.5,
-            w: 18.0,
-            d: 13.0,
+            x: -1366.0,
+            z: 534.0,
+            w: 15.0,
+            d: 12.0,
             h: 28.0,
-            rotY: -0.48,
+            rotY: 0.46,
             style: "commercial",
           },
           {
             name: "DogenzakaNorth_109West1",
-            x: -910.0,
-            z: 240.0,
-            w: 12.0,
-            d: 9.0,
+            x: -1242.0,
+            z: 312.0,
+            w: 14.0,
+            d: 10.0,
             h: 24.0,
-            rotY: -0.36,
+            rotY: 0.96,
             style: "storefront",
           },
           {
             name: "DogenzakaNorth_109West2",
-            x: -931.0,
-            z: 231.0,
-            w: 14.0,
-            d: 10.0,
+            x: -1307.0,
+            z: 366.0,
+            w: 15.0,
+            d: 11.0,
             h: 28.0,
-            rotY: -0.4,
+            rotY: 0.78,
             style: "commercial",
           },
           {
+            name: "DogenzakaSouth_MidTower",
+            x: -1360.0,
+            z: 434.0,
+            w: 15.0,
+            d: 11.0,
+            h: 34.0,
+            rotY: 0.54,
+            style: "facade",
+          },
+          {
             name: "DogenzakaNorth_UpperWest",
-            x: -953.0,
-            z: 219.5,
-            w: 14.0,
-            d: 10.0,
+            x: -1404.0,
+            z: 514.0,
+            w: 16.0,
+            d: 11.0,
             h: 26.0,
-            rotY: -0.46,
+            rotY: 0.46,
             style: "facade",
           },
         ],
       },
       {
         groupName: "ShibuyaMiyamasuzakaStreetscapeGroup",
-        anchor: { x: -560, z: 250 },
+        anchor: { x: -640, z: 220 },
         aprons: [
-          { x: -560.0, z: 229.0, w: 280.0, d: 20.0, rotY: 0 },
-          { x: -560.0, z: 271.0, w: 280.0, d: 20.0, rotY: 0 },
+          { x: -760.0, z: 260.0, w: 26.0, d: 16.0, rotY: -1.73 },
+          { x: -600.0, z: 234.0, w: 120.0, d: 16.0, rotY: -1.74 },
+          { x: -645.0, z: 194.0, w: 130.0, d: 16.0, rotY: -1.73 },
         ],
         buildings: [
           {
             name: "MiyamasuSouth_WestBlock",
-            x: -660.0,
-            z: 228.5,
-            w: 24.0,
-            d: 14.0,
+            x: -760.0,
+            z: 260.0,
+            w: 22.0,
+            d: 13.0,
             h: 36.0,
-            rotY: 0,
+            rotY: -1.73,
             style: "facade",
           },
           {
             name: "MiyamasuSouth_PostOfficeBlock",
-            x: -585.0,
-            z: 228.0,
-            w: 26.0,
-            d: 14.0,
+            x: -655.0,
+            z: 242.0,
+            w: 24.0,
+            d: 13.0,
             h: 34.0,
-            rotY: 0,
+            rotY: -1.74,
             style: "storefront",
           },
           {
             name: "MiyamasuSouth_MidTower",
-            x: -535.0,
-            z: 227.5,
+            x: -598.0,
+            z: 232.0,
             w: 24.0,
-            d: 14.0,
+            d: 13.0,
             h: 38.0,
-            rotY: 0,
+            rotY: -1.74,
             style: "commercial",
           },
           {
             name: "MiyamasuSouth_EastTower",
-            x: -465.0,
-            z: 227.5,
-            w: 26.0,
-            d: 14.0,
+            x: -546.0,
+            z: 227.0,
+            w: 24.0,
+            d: 13.0,
             h: 42.0,
-            rotY: 0,
+            rotY: -1.71,
             style: "facade",
           },
           {
             name: "MiyamasuNorth_WestBlock",
-            x: -660.0,
-            z: 273.5,
-            w: 24.0,
-            d: 14.0,
+            x: -764.0,
+            z: 212.0,
+            w: 22.0,
+            d: 13.0,
             h: 34.0,
-            rotY: 0,
+            rotY: -1.73,
             style: "storefront",
           },
           {
             name: "MiyamasuNorth_MidBlock",
-            x: -585.0,
-            z: 271.5,
-            w: 26.0,
-            d: 14.0,
+            x: -660.0,
+            z: 198.0,
+            w: 20.0,
+            d: 12.0,
             h: 38.0,
-            rotY: 0,
+            rotY: -1.74,
             style: "facade",
           },
           {
             name: "MiyamasuNorth_UpperBlock",
-            x: -530.0,
-            z: 270.5,
-            w: 24.0,
-            d: 14.0,
+            x: -554.0,
+            z: 178.0,
+            w: 22.0,
+            d: 13.0,
             h: 36.0,
-            rotY: 0,
+            rotY: -1.71,
             style: "commercial",
           },
           {
             name: "MiyamasuNorth_AoyamaGate",
-            x: -460.0,
-            z: 270.5,
-            w: 26.0,
-            d: 14.0,
+            x: -476.0,
+            z: 136.0,
+            w: 22.0,
+            d: 13.0,
             h: 44.0,
-            rotY: 0,
+            rotY: -2.24,
             style: "facade",
+          },
+        ],
+      },
+      {
+        groupName: "ShibuyaKonnozakaStreetscapeGroup",
+        anchor: { x: -585, z: 310 },
+        aprons: [
+          { x: -610.0, z: 314.0, w: 18.0, d: 92.0, rotY: 2.52 },
+          { x: -555.0, z: 318.0, w: 18.0, d: 92.0, rotY: 2.52 },
+        ],
+        buildings: [
+          {
+            name: "KonnozakaNorth_1",
+            x: -651.0,
+            z: 358.0,
+            w: 13.0,
+            d: 20.0,
+            h: 34.0,
+            rotY: 2.34,
+            style: "storefront",
+          },
+          {
+            name: "KonnozakaNorth_2",
+            x: -610.1,
+            z: 312.6,
+            w: 13.0,
+            d: 20.0,
+            h: 38.0,
+            rotY: 2.53,
+            style: "commercial",
+          },
+          {
+            name: "KonnozakaNorth_3",
+            x: -572.0,
+            z: 256.1,
+            w: 13.0,
+            d: 20.0,
+            h: 36.0,
+            rotY: 2.55,
+            style: "facade",
+          },
+          {
+            name: "KonnozakaSouth_1",
+            x: -577.0,
+            z: 352.0,
+            w: 13.0,
+            d: 20.0,
+            h: 32.0,
+            rotY: 2.5,
+            style: "storefront",
+          },
+          {
+            name: "KonnozakaSouth_2",
+            x: -530.7,
+            z: 284.0,
+            w: 13.0,
+            d: 20.0,
+            h: 40.0,
+            rotY: 2.55,
+            style: "commercial",
+          },
+        ],
+      },
+      {
+        groupName: "ShibuyaBunkamuraStreetscapeGroup",
+        anchor: { x: -1300, z: 165 },
+        aprons: [
+          { x: -1260.0, z: 206.0, w: 18.0, d: 96.0, rotY: -2.06 },
+          { x: -1360.0, z: 112.0, w: 18.0, d: 96.0, rotY: -2.18 },
+        ],
+        buildings: [
+          {
+            name: "BunkamuraSouth_1",
+            x: -1220.4,
+            z: 223.6,
+            w: 13.0,
+            d: 18.0,
+            h: 28.0,
+            rotY: -2.03,
+            style: "commercial",
+          },
+          {
+            name: "BunkamuraSouth_2",
+            x: -1297.9,
+            z: 187.7,
+            w: 13.0,
+            d: 18.0,
+            h: 32.0,
+            rotY: -2.07,
+            style: "storefront",
+          },
+          {
+            name: "BunkamuraSouth_3",
+            x: -1370.9,
+            z: 140.1,
+            w: 13.0,
+            d: 18.0,
+            h: 30.0,
+            rotY: -2.21,
+            style: "facade",
+          },
+          {
+            name: "BunkamuraNorth_1",
+            x: -1188.1,
+            z: 201.9,
+            w: 13.0,
+            d: 18.0,
+            h: 28.0,
+            rotY: -2.33,
+            style: "storefront",
+          },
+          {
+            name: "BunkamuraNorth_2",
+            x: -1343.5,
+            z: 115.4,
+            w: 13.0,
+            d: 18.0,
+            h: 34.0,
+            rotY: -2.22,
+            style: "commercial",
+          },
+          {
+            name: "BunkamuraNorth_3",
+            x: -1399.2,
+            z: 80.2,
+            w: 13.0,
+            d: 18.0,
+            h: 26.0,
+            rotY: -2.09,
+            style: "storefront",
           },
         ],
       },
     ];
 
+    const corridorIdByGroupName: Record<string, string> = {
+      ShibuyaKoenDoriStreetscapeGroup: "nav-road-shibuya-koen-dori",
+      ShibuyaDogenzakaStreetscapeGroup: "nav-road-shibuya-dogenzaka",
+      ShibuyaMiyamasuzakaStreetscapeGroup: "nav-road-shibuya-miyamasuzaka",
+      ShibuyaKonnozakaStreetscapeGroup: "nav-road-route246",
+      ShibuyaBunkamuraStreetscapeGroup: "nav-road-shibuya-bunkamura-dori",
+    };
+    const allCorridors = getOpenDataCurvedRoadCorridors();
+    const streetPtsByGroupName = new Map<string, Array<{ x: number; z: number }>>();
+    for (const [groupName, cid] of Object.entries(corridorIdByGroupName)) {
+      const cor = allCorridors.find((c) => c.id === cid);
+      if (cor) {
+        const curve = new THREE.CatmullRomCurve3(
+          cor.points.map((pt) => new THREE.Vector3(pt.x, 0, pt.z)),
+          false,
+          "catmullrom",
+          0.35,
+        );
+        streetPtsByGroupName.set(
+          groupName,
+          curve.getPoints(80).map((v) => ({ x: v.x, z: v.z })),
+        );
+      }
+    }
+
+    const skirtDepth = 3.0;
+    let retailAttachIdx = 0;
     for (const district of districtSpecs) {
       const distGroup = new THREE.Group();
       distGroup.name = district.groupName;
@@ -4984,21 +5880,39 @@ export class TokyoStationMap {
       distGroup.userData.maxLodDrawDistance = 750;
 
       for (const ap of district.aprons) {
-        const apGeo = new THREE.PlaneGeometry(ap.w, ap.d);
+        const apGeo = new THREE.PlaneGeometry(ap.w, ap.d, 6, 4);
         apGeo.rotateX(-Math.PI / 2);
+        const cosR = Math.cos(ap.rotY);
+        const sinR = Math.sin(ap.rotY);
+        const apPos = apGeo.getAttribute("position");
+        if (apPos) {
+          for (let vi = 0; vi < apPos.count; vi++) {
+            const lx = apPos.getX(vi);
+            const lz = apPos.getZ(vi);
+            const wx = ap.x + lx * cosR + lz * sinR;
+            const wz = ap.z - lx * sinR + lz * cosR;
+            apPos.setY(vi, sampleShibuyaTerrainY(wx, wz) + 0.015);
+          }
+          apPos.needsUpdate = true;
+          apGeo.computeVertexNormals();
+        }
         const apMesh = new THREE.Mesh(apGeo, plazaMat);
-        apMesh.position.set(ap.x - district.anchor.x, 0.015, ap.z - district.anchor.z);
+        apMesh.position.set(ap.x - district.anchor.x, 0, ap.z - district.anchor.z);
         apMesh.rotation.y = ap.rotY;
         apMesh.receiveShadow = true;
         distGroup.add(apMesh);
       }
 
+      const streetPts = streetPtsByGroupName.get(district.groupName) ?? [];
       for (const b of district.buildings) {
+        const terrainY = sampleShibuyaTerrainY(b.x, b.z);
+        const totalH = b.h + skirtDepth;
+        const midY = terrainY - skirtDepth + totalH * 0.5;
         const texChoice =
           b.style === "commercial" ? commTex : b.style === "storefront" ? storefrontTex : facadeTex;
-        const wallMatX = createTiledWallMat(texChoice, b.d, b.h, 0xfff8e7);
-        const wallMatZ = createTiledWallMat(texChoice, b.w, b.h, 0xfff8e7);
-        const boxGeo = new THREE.BoxGeometry(b.w, b.h, b.d);
+        const wallMatX = createTiledWallMat(texChoice, b.d, totalH, 0xfff8e7);
+        const wallMatZ = createTiledWallMat(texChoice, b.w, totalH, 0xfff8e7);
+        const boxGeo = new THREE.BoxGeometry(b.w, totalH, b.d);
         const bMesh = new THREE.Mesh(boxGeo, [
           wallMatX,
           wallMatX,
@@ -5008,22 +5922,247 @@ export class TokyoStationMap {
           wallMatZ,
         ]);
         bMesh.name = b.name;
-        bMesh.position.set(b.x - district.anchor.x, b.h / 2, b.z - district.anchor.z);
+        bMesh.position.set(b.x - district.anchor.x, midY, b.z - district.anchor.z);
         bMesh.rotation.y = b.rotY;
         bMesh.castShadow = true;
         bMesh.receiveShadow = true;
         distGroup.add(bMesh);
 
-        const bColDesc = rapier.ColliderDesc.cuboid(b.w / 2, b.h / 2, b.d / 2)
-          .setTranslation(b.x, b.h / 2, b.z)
+        const bColDesc = rapier.ColliderDesc.cuboid(b.w / 2, totalH / 2, b.d / 2)
+          .setTranslation(b.x, midY, b.z)
           .setRotation({ x: 0, y: Math.sin(b.rotY / 2), z: 0, w: Math.cos(b.rotY / 2) })
           .setFriction(0.65)
           .setRestitution(0.01);
         this.registerCollider(world.createCollider(bColDesc, groundBody), false);
+
+        const isRetailBuilding = b.style === "commercial" || b.style === "storefront";
+        if (isRetailBuilding && streetPts.length > 0) {
+          this.attachStreetFacingAwningAndSign({
+            parent: distGroup,
+            offsetX: b.x - district.anchor.x,
+            offsetZ: b.z - district.anchor.z,
+            worldX: b.x,
+            worldZ: b.z,
+            terrainY,
+            w: b.w,
+            d: b.d,
+            h: b.h,
+            rotY: b.rotY,
+            streetPts,
+            index: retailAttachIdx++,
+            awningNamePrefix: "ShibuyaStorefrontAwning",
+            sodeNamePrefix: "ShibuyaSodeKanban",
+          });
+        }
       }
 
       this.group.add(distGroup);
     }
+  }
+
+  private sodeKanbanMatCache: THREE.MeshStandardMaterial[] | null = null;
+  private storeAwningMatCache: THREE.MeshStandardMaterial[] | null = null;
+
+  /**
+   * 商業・店舗ビルの道路側前面壁を自動判定し、1F 庇（地上 3.45m）と縦型袖看板（地上 7.6〜11.3m）を付与する。
+   */
+  private attachStreetFacingAwningAndSign(params: {
+    parent: THREE.Group;
+    offsetX: number;
+    offsetZ: number;
+    worldX: number;
+    worldZ: number;
+    terrainY: number;
+    w: number;
+    d: number;
+    h: number;
+    rotY: number;
+    streetPts: Array<{ x: number; z: number }>;
+    index: number;
+    awningNamePrefix: string;
+    sodeNamePrefix: string;
+  }): void {
+    const {
+      parent,
+      offsetX,
+      offsetZ,
+      worldX,
+      worldZ,
+      terrainY,
+      w,
+      d,
+      h,
+      rotY,
+      streetPts,
+      index,
+      awningNamePrefix,
+      sodeNamePrefix,
+    } = params;
+    if (streetPts.length === 0) {
+      return;
+    }
+
+    const cosR = Math.cos(rotY);
+    const sinR = Math.sin(rotY);
+    const candidateFaces: Array<{ lx: number; lz: number; span: number; localRotY: number }> = [
+      { lx: 0, lz: d * 0.5, span: w, localRotY: 0 },
+      { lx: 0, lz: -d * 0.5, span: w, localRotY: Math.PI },
+      { lx: w * 0.5, lz: 0, span: d, localRotY: Math.PI * 0.5 },
+      { lx: -w * 0.5, lz: 0, span: d, localRotY: -Math.PI * 0.5 },
+    ];
+
+    let bestFace = candidateFaces[0];
+    let bestFaceOffsetX = 0;
+    let bestFaceOffsetZ = 0;
+    let minStreetDistSq = Infinity;
+    for (const face of candidateFaces) {
+      const rx = face.lx * cosR + face.lz * sinR;
+      const rz = -face.lx * sinR + face.lz * cosR;
+      const fx = worldX + rx;
+      const fz = worldZ + rz;
+      for (const pt of streetPts) {
+        const dSq = (fx - pt.x) ** 2 + (fz - pt.z) ** 2;
+        if (dSq < minStreetDistSq) {
+          minStreetDistSq = dSq;
+          bestFace = face;
+          bestFaceOffsetX = rx;
+          bestFaceOffsetZ = rz;
+        }
+      }
+    }
+
+    if (!this.storeAwningMatCache) {
+      this.storeAwningMatCache = [0x9a3412, 0x1e3a5f, 0x3f3f46, 0x166534, 0x78716c].map(
+        (hex) =>
+          new THREE.MeshStandardMaterial({
+            color: hex,
+            roughness: 0.72,
+            metalness: 0.08,
+          }),
+      );
+    }
+    if (!this.sodeKanbanMatCache) {
+      const presets: Array<[string, string, string]> = [
+        ["珈琲 CAFE", "ROASTERY", "#1f2937"],
+        ["居酒屋", "DINING", "#991b1b"],
+        ["薬局", "DRUG", "#0f766e"],
+        ["書店", "BOOKS", "#1e3a8a"],
+        ["洋品", "FASHION", "#4c1d95"],
+        ["パン", "BAKERY", "#9a3412"],
+      ];
+      this.sodeKanbanMatCache = presets.map(([ja, en, bg]) => {
+        const tex = this.createShibuyaSodeKanbanTexture(ja, en, bg);
+        const dayInt = 0.2;
+        const nightInt = 1.05;
+        const mat = new THREE.MeshStandardMaterial({
+          color: tex ? 0xffffff : bg,
+          map: tex ?? undefined,
+          emissive: new THREE.Color(tex ? 0xffffff : bg),
+          emissiveMap: tex ?? undefined,
+          emissiveIntensity: this.isNightActive ? nightInt : dayInt,
+          roughness: 0.34,
+          metalness: 0.14,
+        });
+        this.shibuyaStreamEmissiveEntries.push({
+          material: mat,
+          dayIntensity: dayInt,
+          nightIntensity: nightInt,
+        });
+        return mat;
+      });
+    }
+
+    const bracketMat = new THREE.MeshStandardMaterial({
+      color: 0x27272a,
+      roughness: 0.45,
+      metalness: 0.7,
+    });
+    const awningMat = this.storeAwningMatCache[index % this.storeAwningMatCache.length];
+    const sodeSignMat = this.sodeKanbanMatCache[index % this.sodeKanbanMatCache.length];
+    const faceWorldRotY = rotY + bestFace.localRotY;
+
+    const awningW = Math.max(3.6, Math.min(11.0, bestFace.span * 0.72));
+    const attachGroup = new THREE.Group();
+    attachGroup.name = `${awningNamePrefix}_Group_${index}`;
+    attachGroup.position.set(offsetX + bestFaceOffsetX, terrainY, offsetZ + bestFaceOffsetZ);
+    attachGroup.rotation.y = faceWorldRotY;
+
+    const awningSlant = new THREE.Mesh(new THREE.BoxGeometry(awningW, 0.14, 0.76), awningMat);
+    awningSlant.name = `${awningNamePrefix}_${index}`;
+    awningSlant.position.set(0, 3.45, 0.38);
+    awningSlant.rotation.x = 0.24;
+    awningSlant.castShadow = true;
+    attachGroup.add(awningSlant);
+
+    const awningValance = new THREE.Mesh(new THREE.BoxGeometry(awningW, 0.22, 0.05), awningMat);
+    awningValance.name = `${awningNamePrefix}_Valance_${index}`;
+    awningValance.position.set(0, 3.28, 0.74);
+    attachGroup.add(awningValance);
+
+    const sodeSideSign = index % 2 === 0 ? 1 : -1;
+    const sodeX = sodeSideSign * Math.min(bestFace.span * 0.34, awningW * 0.48);
+    const sodeY = Math.min(h - 2.4, 7.6 + (index % 3) * 1.85);
+    for (const dy of [-1.25, 1.25]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.3), bracketMat);
+      arm.position.set(sodeX, sodeY + dy, 0.15);
+      attachGroup.add(arm);
+    }
+
+    const sodeBlade = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.5, 0.78), [
+      sodeSignMat,
+      sodeSignMat,
+      bracketMat,
+      bracketMat,
+      bracketMat,
+      bracketMat,
+    ]);
+    sodeBlade.name = `${sodeNamePrefix}_${index}`;
+    sodeBlade.position.set(sodeX, sodeY, 0.56);
+    sodeBlade.castShadow = true;
+    attachGroup.add(sodeBlade);
+
+    parent.add(attachGroup);
+  }
+
+  private createShibuyaSodeKanbanTexture(
+    labelJa: string,
+    labelEn: string,
+    accentHex: string,
+  ): THREE.CanvasTexture | null {
+    if (typeof document === "undefined") {
+      return null;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return null;
+    }
+    ctx.fillStyle = accentHex;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "#f8fafc";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.font = "bold 46px sans-serif";
+    const chars = Array.from(labelJa);
+    const startY = 82;
+    const stepY = Math.min(62, Math.floor(290 / Math.max(1, chars.length)));
+    for (let i = 0; i < chars.length; i++) {
+      ctx.fillText(chars[i], canvas.width / 2, startY + i * stepY);
+    }
+
+    ctx.fillStyle = "#fde68a";
+    ctx.font = "bold 20px sans-serif";
+    ctx.fillText(labelEn, canvas.width / 2, canvas.height - 42, canvas.width - 20);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return tex;
   }
 
   private jrGuardTextureCache = new Map<string, THREE.CanvasTexture>();
@@ -5786,6 +6925,32 @@ export class TokyoStationMap {
       return;
     }
 
+    // 25b. 忠犬ハチ公ブロンズ像＆ニュートラル花崗岩台座
+    const isHachikoBronze = matName.includes("HachikoBronze");
+    if (isHachikoBronze) {
+      stdMat.color = new THREE.Color(0x8f6f47);
+      stdMat.emissive = new THREE.Color(0x2d1f0e);
+      const dayIntensity = 0.24;
+      const nightIntensity = 0.42;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      stdMat.roughness = 0.42;
+      stdMat.metalness = 0.56;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      return;
+    }
+    const isHachikoGranite = matName.includes("HachikoGranite");
+    if (isHachikoGranite) {
+      stdMat.color = new THREE.Color(0xc2bfb8);
+      stdMat.roughness = 0.68;
+      stdMat.metalness = 0.04;
+      this.applyArchitecture3DTexture(stdMat, "white_granite");
+      return;
+    }
+
     // 26. セルリアンタワー（Cerulean Tower）外観カーテンウォール・ホテル基壇＆屋上ヘリポート
     const isCeruleanMat = matName.includes("Cerulean");
     if (isCeruleanMat) {
@@ -5904,15 +7069,14 @@ export class TokyoStationMap {
             return;
           }
 
-          const offsetX = config?.offset[0] ?? -695.0;
+          const offsetX = config?.offset[0] ?? -750.0;
           const offsetY = config?.offset[1] ?? 0.0;
-          const offsetZ = config?.offset[2] ?? -15.0;
+          const offsetZ = config?.offset[2] ?? 527.6;
           glbModel.position.set(offsetX, offsetY, offsetZ);
           glbModel.userData.basePositionY = offsetY;
           glbModel.userData.baseScaleY = 1;
-          // How: Blender 座標系で -Y 正面（Three.js GLB +Z 正面）に造形された渋谷ストリームを -90° 回転させ、
-          // 西側（x = -750）を走る明治通りに向かって正面広場・大階段が正対するように配置する
-          glbModel.rotation.y = -Math.PI / 2;
+          // 非鏡像 1:1 座標投影 (+X=東, -Z=北) へ Blender 出力を直接整合させるため回転 0 で配置
+          glbModel.rotation.y = 0;
 
           glbModel.traverse((child) => {
             const isMesh = (child as THREE.Mesh).isMesh;
@@ -6552,13 +7716,13 @@ export class TokyoStationMap {
       color: number;
       podiumColor: number;
     }> = [
-      // 1. 原宿・表参道エリア (harajuku-yoyogi / omotesando-aoyama-north)
+      // 1. 原宿・表参道エリア (harajuku-yoyogi / omotesando-aoyama-north: 北方 -Z)
       {
         id: "exp-bldg-harajuku-fashion-1",
         name: "原宿ファッションプラザ",
         nameEn: "Harajuku Fashion Plaza",
-        x: -852,
-        z: 482,
+        x: -915,
+        z: -145,
         w: 42,
         d: 34,
         h: 48,
@@ -6571,23 +7735,23 @@ export class TokyoStationMap {
         id: "exp-bldg-harajuku-boutique",
         name: "原宿ブティックタワー",
         nameEn: "Harajuku Boutique Tower",
-        x: -705,
-        z: 480,
+        x: -790,
+        z: -40,
         w: 36,
         d: 34,
         h: 56,
         usage: "商業施設",
         mode: "anodized_metal",
-        color: 0x94a3b8,
+        color: 0xa3a19a,
         podiumColor: 0x334155,
       },
       {
         id: "exp-bldg-omotesando-complex",
         name: "表参道テラスコンプレックス",
         nameEn: "Omotesando Terrace Complex",
-        x: -610,
-        z: 400,
-        w: 78,
+        x: -690,
+        z: -140,
+        w: 70,
         d: 32,
         h: 36,
         usage: "商業施設",
@@ -6599,8 +7763,8 @@ export class TokyoStationMap {
         id: "exp-bldg-omotesando-luxury",
         name: "表参道ラグジュアリータワー",
         nameEn: "Omotesando Luxury Tower",
-        x: -490,
-        z: 360,
+        x: -580,
+        z: 10,
         w: 38,
         d: 38,
         h: 64,
@@ -6613,10 +7777,10 @@ export class TokyoStationMap {
         id: "exp-bldg-yoyogi-gym-tower",
         name: "代々木パークタワー",
         nameEn: "Yoyogi Park Tower",
-        x: -800,
-        z: 720,
-        w: 48,
-        d: 42,
+        x: -875,
+        z: -310,
+        w: 46,
+        d: 40,
         h: 72,
         usage: "業務施設",
         mode: "ribbon_window",
@@ -6627,8 +7791,8 @@ export class TokyoStationMap {
         id: "exp-bldg-harajuku-station-front",
         name: "原宿駅前ゲートビル",
         nameEn: "Harajuku Station Gate Building",
-        x: -795,
-        z: 820,
+        x: -830,
+        z: -410,
         w: 40,
         d: 36,
         h: 52,
@@ -6638,13 +7802,13 @@ export class TokyoStationMap {
         podiumColor: 0x0f172a,
       },
 
-      // 2. 恵比寿・代官山エリア (ebisu-daikanyama)
+      // 2. 恵比寿・代官山エリア (ebisu-daikanyama: 南方 +Z)
       {
         id: "exp-bldg-ebisu-garden-tower",
         name: "恵比寿ガーデンタワー",
         nameEn: "Ebisu Garden Tower",
-        x: -705,
-        z: -720,
+        x: -330,
+        z: 1030,
         w: 52,
         d: 48,
         h: 167,
@@ -6657,10 +7821,10 @@ export class TokyoStationMap {
         id: "exp-bldg-ebisu-station-front",
         name: "恵比寿駅前ビル",
         nameEn: "Ebisu Station Front Building",
-        x: -795,
-        z: -750,
-        w: 46,
-        d: 40,
+        x: -455,
+        z: 970,
+        w: 44,
+        d: 38,
         h: 68,
         usage: "商業施設",
         mode: "anodized_metal",
@@ -6671,8 +7835,8 @@ export class TokyoStationMap {
         id: "exp-bldg-daikanyama-terrace",
         name: "代官山テラスセンター",
         nameEn: "Daikanyama Terrace Center",
-        x: -880,
-        z: -480,
+        x: -1020,
+        z: 910,
         w: 44,
         d: 38,
         h: 42,
@@ -6685,8 +7849,8 @@ export class TokyoStationMap {
         id: "exp-bldg-ebisu-south-office",
         name: "恵比寿サウスオフィスタワー",
         nameEn: "Ebisu South Office Tower",
-        x: -705,
-        z: -900,
+        x: -330,
+        z: 1140,
         w: 42,
         d: 38,
         h: 84,
@@ -6696,13 +7860,13 @@ export class TokyoStationMap {
         podiumColor: 0x1e293b,
       },
 
-      // 3. 山手通り・神泉・松濤エリア (shibuya-west)
+      // 3. 山手通り・神泉・松濤エリア (shibuya-west: 西方 -X)
       {
         id: "exp-bldg-shinsen-crossing",
         name: "神泉交差点タワー",
         nameEn: "Shinsen Crossing Tower",
-        x: -1278,
-        z: 188,
+        x: -1550,
+        z: 775,
         w: 42,
         d: 36,
         h: 78,
@@ -6715,9 +7879,8 @@ export class TokyoStationMap {
         id: "exp-bldg-shoto-heights",
         name: "松濤レジデンスハイツ",
         nameEn: "Shoto Residence Heights",
-        // 道玄坂上の実 PLATEAU 街区と重ならないよう山手通り西側へ配置
-        x: -1415,
-        z: 200,
+        x: -1530,
+        z: 120,
         w: 48,
         d: 38,
         h: 46,
@@ -6730,11 +7893,10 @@ export class TokyoStationMap {
         id: "exp-bldg-yamate-shinsen-center",
         name: "山手神泉センタービル",
         nameEn: "Yamate Shinsen Center Building",
-        // 南側 PLATEAU 建物群と重ならないよう山手通り西側へ配置
-        x: -1415,
-        z: 90,
-        w: 54,
-        d: 42,
+        x: -1700,
+        z: 740,
+        w: 52,
+        d: 40,
         h: 96,
         usage: "業務施設",
         mode: "anodized_metal",
@@ -6745,8 +7907,8 @@ export class TokyoStationMap {
         id: "exp-bldg-yamate-komazawa-tower",
         name: "山手駒沢タワー",
         nameEn: "Yamate Komazawa Tower",
-        x: -1290,
-        z: -480,
+        x: -1700,
+        z: 950,
         w: 48,
         d: 42,
         h: 88,
@@ -6759,8 +7921,8 @@ export class TokyoStationMap {
         id: "exp-bldg-yamate-tomigaya-tower",
         name: "山手富ヶ谷タワー",
         nameEn: "Yamate Tomigaya Tower",
-        x: -1290,
-        z: 480,
+        x: -1700,
+        z: 80,
         w: 46,
         d: 40,
         h: 92,
@@ -6770,15 +7932,15 @@ export class TokyoStationMap {
         podiumColor: 0x1e293b,
       },
 
-      // 4. 六本木・西麻布・赤坂エリア (roppongi-nishiazabu / aoyama-east)
+      // 4. 六本木・西麻布・赤坂エリア (roppongi-nishiazabu / aoyama-east: 南東 +X/+Z)
       {
         id: "exp-bldg-roppongi-hills-mori",
         name: "六本木ヒルズ森タワー",
         nameEn: "Roppongi Hills Mori Tower",
-        x: -380,
-        z: -420,
-        w: 68,
-        d: 62,
+        x: -310,
+        z: 510,
+        w: 66,
+        d: 60,
         h: 238,
         usage: "業務施設",
         mode: "curtain_glass",
@@ -6789,8 +7951,8 @@ export class TokyoStationMap {
         id: "exp-bldg-roppongi-grand-tower",
         name: "六本木グランドタワー",
         nameEn: "Roppongi Grand Tower",
-        x: -320,
-        z: -300,
+        x: -230,
+        z: 470,
         w: 54,
         d: 48,
         h: 180,
@@ -6803,10 +7965,10 @@ export class TokyoStationMap {
         id: "exp-bldg-nishi-azabu-crossing",
         name: "西麻布クロッシングビル",
         nameEn: "Nishi-Azabu Crossing Building",
-        x: -600,
-        z: -300,
-        w: 44,
-        d: 38,
+        x: -520,
+        z: 485,
+        w: 42,
+        d: 36,
         h: 62,
         usage: "商業施設",
         mode: "anodized_metal",
@@ -6817,10 +7979,10 @@ export class TokyoStationMap {
         id: "exp-bldg-akasaka-ark-hills",
         name: "赤坂アークヒルズタワー",
         nameEn: "Akasaka Ark Hills Tower",
-        x: -220,
-        z: -220,
-        w: 56,
-        d: 50,
+        x: -210,
+        z: 220,
+        w: 54,
+        d: 48,
         h: 153,
         usage: "業務施設",
         mode: "stone_punched",
@@ -6831,10 +7993,10 @@ export class TokyoStationMap {
         id: "exp-bldg-akasaka-biz-tower",
         name: "赤坂Bizタワー",
         nameEn: "Akasaka Biz Tower",
-        x: -220,
-        z: 80,
-        w: 52,
-        d: 46,
+        x: -210,
+        z: 310,
+        w: 50,
+        d: 44,
         h: 179,
         usage: "業務施設",
         mode: "curtain_glass",
@@ -7108,6 +8270,8 @@ export class TokyoStationMap {
     const beaconRedMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
 
     for (const b of districts) {
+      const groundY = b.x < -395 ? sampleShibuyaTerrainY(b.x, b.z) : 0;
+      const podiumSkirt = b.x < -395 ? 3.5 : 0;
       const bGroup = new THREE.Group();
       bGroup.name = b.id;
       bGroup.userData = {
@@ -7118,22 +8282,22 @@ export class TokyoStationMap {
         usage: b.usage,
         measuredHeight: b.h,
         storeysAboveGround: Math.round(b.h / 3.8),
-        groundElevationM: 0,
+        groundElevationM: groundY,
         isLargeStructure: true,
       };
-      bGroup.position.set(b.x, b.h / 2, b.z);
+      bGroup.position.set(b.x, groundY + b.h / 2, b.z);
 
       const podiumHeight = Math.min(28, b.h * 0.35);
       const crownHeight = Math.min(10, Math.max(4, b.h * 0.08));
       const towerHeight = Math.max(8, b.h - podiumHeight - crownHeight);
 
-      // 1. 低層ポディウム
-      const baseGeo = new THREE.BoxGeometry(b.w, podiumHeight, b.d);
+      // 1. 低層ポディウム（渋谷傾斜区間は -3.5m 地中スカートを延長して接地隙間を防止）
+      const baseGeo = new THREE.BoxGeometry(b.w, podiumHeight + podiumSkirt, b.d);
       const expBaseTex = shibuyaTextureManager.getTexture("plateauLod2Storefront").clone();
       expBaseTex.needsUpdate = true;
       expBaseTex.repeat.set(
         Math.max(1, Math.round(b.w / 14)),
-        Math.max(1, Math.round(podiumHeight / 14)),
+        Math.max(1, Math.round((podiumHeight + podiumSkirt) / 14)),
       );
       const baseMat = new THREE.MeshStandardMaterial({
         color: b.podiumColor,
@@ -7156,7 +8320,7 @@ export class TokyoStationMap {
       // 本体・塔屋に別々の lodDetailTier を付けると medium 距離で下部だけ消えて屋上スラブが宙に浮くため、
       // 丸の内ビル群と同様に基壇・本体・塔屋の 3 メッシュを全可視距離で一体表示する
       const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-      baseMesh.position.y = -b.h / 2 + podiumHeight / 2;
+      baseMesh.position.y = -b.h / 2 + (podiumHeight - podiumSkirt) / 2;
       baseMesh.castShadow = true;
       baseMesh.receiveShadow = true;
       bGroup.add(baseMesh);
@@ -7220,9 +8384,13 @@ export class TokyoStationMap {
       this.plateauBuildingGroups.push(bGroup);
 
       // 物理コライダー（Rapier）
-      const bBodyDesc = rapier.RigidBodyDesc.fixed().setTranslation(b.x, b.h / 2, b.z);
+      const bBodyDesc = rapier.RigidBodyDesc.fixed().setTranslation(
+        b.x,
+        groundY + (b.h - podiumSkirt) / 2,
+        b.z,
+      );
       const bBody = world.createRigidBody(bBodyDesc);
-      const bCollider = rapier.ColliderDesc.cuboid(b.w / 2, b.h / 2, b.d / 2)
+      const bCollider = rapier.ColliderDesc.cuboid(b.w / 2, (b.h + podiumSkirt) / 2, b.d / 2)
         .setFriction(0.5)
         .setRestitution(0.1);
       this.registerCollider(world.createCollider(bCollider, bBody), true);
@@ -7342,34 +8510,14 @@ export class TokyoStationMap {
       }
     }
 
-    // 5. 渋谷・明治通り（x = -750）および渋谷川遊歩道（x = -673.5）のケヤキ・イチョウ並木
-    for (let z = -175; z <= 185; z += 28) {
-      const isNearShibuyaCrossRoad =
-        Math.abs(z - -200) < 18 ||
-        Math.abs(z - -95) < 18 ||
-        Math.abs(z - 102) < 24 ||
-        Math.abs(z - 195) < 18;
-      if (isNearShibuyaCrossRoad) {
-        continue;
-      }
-      this.createGinkgoTree(-750 - 14.8, z, treeIndex++, world, rapier, streetPropsBody);
-      this.createGinkgoTree(-750 + 14.8, z, treeIndex++, world, rapier, streetPropsBody);
-      const isAlongShibuyaRiver = z >= -150 && z <= 40;
-      if (isAlongShibuyaRiver) {
-        this.createGinkgoTree(-673.5, z, treeIndex++, world, rapier, streetPropsBody);
-      }
-    }
-
-    // 6. 渋谷放射状スプライン路線（道玄坂・宮益坂・公園通り・文化村通り・明治通りカーブ・国道246号・玉川通り西進）の並木・街灯・交差点信号機
+    // 5. 渋谷放射状スプライン路線（明治通り本線・六本木通り・道玄坂・宮益坂・公園通り・文化村通り・明治通り上下・国道246号・玉川通り西進）の並木・街灯・交差点信号機
     // Why this.loadBlenderStreetTreeGlb() の直前に樹木を配置するか:
     // 後続の GLB 街路樹モデル非同期ロード・置換処理が渋谷の全スプライン沿道樹木にも適用されるようにするため。
     const placedShibuyaProps: Array<{ x: number; z: number }> = [];
-    for (let z = -175; z <= 185; z += 28) {
-      placedShibuyaProps.push({ x: -750 - 14.8, z });
-      placedShibuyaProps.push({ x: -750 + 14.8, z });
-    }
 
     const shibuyaRadialRoadIds = [
+      "nav-road-meiji-dori",
+      "nav-road-shibuya-roppongi-dori",
       "nav-road-shibuya-dogenzaka",
       "nav-road-shibuya-miyamasuzaka",
       "nav-road-shibuya-koen-dori",
@@ -7380,21 +8528,24 @@ export class TokyoStationMap {
       "nav-road-shibuya-tamagawa-west",
     ];
 
-    // 交差点開口部・主要交点除外ゾーン（交差点内での樹木・街灯生成を抑制）
+    // 1:1 非反転 実座標 交差点開口部・除外ゾーン（樹木・街灯の交差点内生成を抑制）
     const shibuyaIntersectionExclusionZones: Array<{ x: number; z: number; radius: number }> = [
-      { x: -815, z: 248, radius: 30 }, // スクランブル交差点
-      { x: -750, z: 248, radius: 24 }, // 宮益坂下交差点
-      { x: -940, z: 345, radius: 26 }, // 文化村通り・オルガン坂交差点
-      { x: -1080, z: 140, radius: 50 }, // 道玄坂上交差点
-      { x: -1250, z: 150, radius: 26 }, // 神泉町交差点
-      { x: -1350, z: 150, radius: 28 }, // 山手通り合流部
-      { x: -723, z: 103, radius: 26 }, // 国道246号・明治通り交差点
-      { x: -750, z: 102, radius: 28 }, // 渋谷駅南・明治通り×国道246号交差点
-      { x: -380, z: 250, radius: 26 }, // 青山一丁目交差点
-      { x: -756, z: 354, radius: 24 }, // 神南一丁目交差点
-      { x: -762, z: 420, radius: 24 }, // 勤労福祉会館前交差点
-      { x: -750, z: 430, radius: 24 }, // 宮下公園北交差点
-      { x: -855, z: 95, radius: 24 }, // セルリアンタワー前交差点
+      { x: -990.7, z: 275.8, radius: 30 }, // スクランブル交差点
+      { x: -818.4, z: 245.8, radius: 24 }, // 宮益坂下交差点
+      { x: -1159.4, z: 272.4, radius: 26 }, // SHIBUYA109前Y字交差点
+      { x: -1325.0, z: 151.3, radius: 24 }, // 東急本店前
+      { x: -1440.0, z: 675.0, radius: 34 }, // 道玄坂上交差点
+      { x: -1530.0, z: 705.0, radius: 26 }, // 神泉町交差点
+      { x: -1625.0, z: 740.0, radius: 28 }, // 山手通り神泉合流
+      { x: -762.8, z: 435.5, radius: 28 }, // 渋谷駅東口・国道246号
+      { x: -672.0, z: 413.0, radius: 24 }, // 金王坂下
+      { x: -501.1, z: 194.8, radius: 26 }, // 宮益坂上交差点
+      { x: -380.0, z: 98.0, radius: 26 }, // 青山一丁目北接続
+      { x: -981.6, z: 185.0, radius: 24 }, // 神南一丁目交差点
+      { x: -1108.1, z: -43.6, radius: 24 }, // 渋谷PARCO前
+      { x: -1165.0, z: -120.0, radius: 24 }, // 勤労福祉会館前
+      { x: -974.8, z: 519.7, radius: 24 }, // セルリアンタワー前
+      { x: -1155.0, z: 128.0, radius: 22 }, // 宇田川町交番前
     ];
 
     this.group.updateMatrixWorld(true);
@@ -7469,7 +8620,7 @@ export class TokyoStationMap {
         medW = 1.4;
       } else if (id === "nav-road-shibuya-tamagawa-west" || id === "nav-road-uchibori-dori") {
         medW = 1.2;
-      } else if (id === "nav-road-route246") {
+      } else if (id === "nav-road-route246" || id === "nav-road-shibuya-roppongi-dori") {
         medW = 1.0;
       }
       return (lanes * 2 * laneW + shW * 2 + medW) * 0.5;
@@ -7500,11 +8651,13 @@ export class TokyoStationMap {
         minRoadGap?: number;
         minPropGap?: number;
         requireSidewalk?: boolean;
+        skipIntersectionExclusion?: boolean;
       },
     ): boolean => {
       const minRoadGap = options?.minRoadGap ?? 2.2;
       const minPropGap = options?.minPropGap ?? 8.0;
       const requireSidewalk = options?.requireSidewalk ?? false;
+      const skipIntersectionExclusion = options?.skipIntersectionExclusion ?? false;
 
       // 丸の内・日比谷直線道路エリア（x > -440）の車道重複除外
       const isInsideMarunouchiStraightPlanes = px > -440;
@@ -7512,22 +8665,24 @@ export class TokyoStationMap {
         return false;
       }
 
-      // 交差点開口部・交差ゾーン内の除外
-      const isInsideIntersectionZone = shibuyaIntersectionExclusionZones.some((ez) => {
-        const dx = px - ez.x;
-        const dz = pz - ez.z;
-        return dx * dx + dz * dz < ez.radius * ez.radius;
-      });
-      if (isInsideIntersectionZone) {
-        return false;
-      }
+      if (!skipIntersectionExclusion) {
+        // 交差点開口部・交差ゾーン内の除外
+        const isInsideIntersectionZone = shibuyaIntersectionExclusionZones.some((ez) => {
+          const dx = px - ez.x;
+          const dz = pz - ez.z;
+          return dx * dx + dz * dz < ez.radius * ez.radius;
+        });
+        if (isInsideIntersectionZone) {
+          return false;
+        }
 
-      // 交差点パッド AABB 内の除外
-      const inInter = testIntersectionPads.some(
-        (p) => px >= p.minX && px <= p.maxX && pz >= p.minZ && pz <= p.maxZ,
-      );
-      if (inInter) {
-        return false;
+        // 交差点パッド AABB 内の除外
+        const inInter = testIntersectionPads.some(
+          (p) => px >= p.minX && px <= p.maxX && pz >= p.minZ && pz <= p.maxZ,
+        );
+        if (inInter) {
+          return false;
+        }
       }
 
       // 直交道路 AABB 内の除外
@@ -7538,15 +8693,15 @@ export class TokyoStationMap {
         return false;
       }
 
-      // スプライン道路路面メッシュへの Raycast チェック（車道アスファルト直上の配置除外）
-      propRaycaster.set(new THREE.Vector3(px, 1.0, pz), propRayDown);
+      // スプライン道路路面メッシュへの Raycast チェック（坂道標高 y <= 15m に対応するため y = 60.0m 上空から真下照射）
+      propRaycaster.set(new THREE.Vector3(px, 60.0, pz), propRayDown);
       const roadHits = propRaycaster.intersectObjects(shibuyaCurvedRoadMeshes, false);
       const hasRoadHit = roadHits.length > 0;
       if (hasRoadHit) {
         return false;
       }
 
-      // 1. 全14コリドーの車道（testHalfDriveable）内侵入を絶対に防ぐ
+      // 全コリドーの車道（testHalfDriveable）内侵入を絶対に防ぐ
       for (const cd of allCorridorDatas) {
         let minDistSq = Infinity;
         for (let i = 0; i < cd.sampledPts.length - 1; i++) {
@@ -7573,7 +8728,7 @@ export class TokyoStationMap {
         }
       }
 
-      // 2. 歩道メッシュの直上確認（信号柱など必須の場合）
+      // 歩道メッシュの直上確認（必要な場合）
       if (requireSidewalk) {
         const swHits = propRaycaster.intersectObjects(shibuyaSidewalkMeshes, false);
         const hasSidewalkHit = swHits.length > 0;
@@ -7582,7 +8737,7 @@ export class TokyoStationMap {
         }
       }
 
-      // 3. PLATEAU 建築物（外側 1.5m）との非干渉判定
+      // PLATEAU 建築物（外側 1.5m）との非干渉判定
       for (const b of SHIBUYA_PLATEAU_BUILDINGS) {
         const dx = Math.max(0, Math.abs(px - b.localX) - b.width * 0.5);
         const dz = Math.max(0, Math.abs(pz - b.localZ) - b.depth * 0.5);
@@ -7593,8 +8748,8 @@ export class TokyoStationMap {
         }
       }
 
-      // 4. センター街エリア（x ∈ [-945, -805], z ∈ [252, 345] かつセンター街道路から 14m 以内）の除外
-      const isInsideCenterGaiBox = px >= -945 && px <= -805 && pz >= 252 && pz <= 345;
+      // センター街エリア（x ∈ [-1340, -1010], z ∈ [115, 265] かつセンター街道路から 14m 以内）の除外
+      const isInsideCenterGaiBox = px >= -1340 && px <= -1010 && pz >= 115 && pz <= 265;
       if (isInsideCenterGaiBox) {
         const centerGaiCorridor = allCorridorDatas.find(
           (c) => c.id === "nav-road-shibuya-center-gai",
@@ -7616,13 +8771,15 @@ export class TokyoStationMap {
         }
       }
 
-      // 5. JR高架橋トンネル下（x ∈ [-788, -764], z ∈ [232, 264]）の除外
-      const isInsideJrUnderpass = px >= -788 && px <= -764 && pz >= 232 && pz <= 264;
+      // JR山手線ガード下2箇所（スクランブル〜宮益坂下・玉川通り）の除外
+      const isInsideJrUnderpass =
+        (px >= -912 && px <= -878 && pz >= 242 && pz <= 278) ||
+        (px >= -872 && px <= -838 && pz >= 445 && pz <= 490);
       if (isInsideJrUnderpass) {
         return false;
       }
 
-      // 6. 既存樹木・街灯・標識柱との最小距離チェック
+      // 既存樹木・街灯・標識柱との最小距離チェック
       const minPropGapSq = minPropGap * minPropGap;
       for (const prop of placedShibuyaProps) {
         const distSq = (px - prop.x) ** 2 + (pz - prop.z) ** 2;
@@ -7639,7 +8796,200 @@ export class TokyoStationMap {
       shibuyaRadialRoadIds.includes(c.id),
     );
 
-    // A. 樹木の配置: s = 22m .. totalLen - 22m（30m 間隔、offset = ±(testHalfDriveable + 3.2m)）
+    // A. 主要交差点の歩道角への信号機配置（街路樹・街灯より先に交差点信号を確保し、視認遮蔽を防止）
+    const shibuyaIntersections = [
+      {
+        x: -968.0,
+        z: 263.0,
+        rotY: -Math.PI / 2,
+        nameJa: "渋谷駅前スクランブル交差点",
+        nameEn: "Shibuya Scramble Crossing",
+      },
+      {
+        x: -1014.0,
+        z: 286.0,
+        rotY: Math.PI / 2,
+        nameJa: "渋谷駅ハチ公前",
+        nameEn: "Hachiko Entrance",
+      },
+      {
+        x: -993.0,
+        z: 249.0,
+        rotY: Math.PI,
+        nameJa: "渋谷駅前・QFRONT前",
+        nameEn: "Shibuya Station Front",
+      },
+      {
+        x: -968.0,
+        z: 282.0,
+        rotY: 0,
+        nameJa: "渋谷駅ハチ公広場北",
+        nameEn: "Hachiko Sq. North",
+      },
+      {
+        x: -802.0,
+        z: 232.0,
+        rotY: Math.PI,
+        nameJa: "宮益坂下交差点",
+        nameEn: "Miyamasuzaka-shita",
+      },
+      {
+        x: -794.0,
+        z: 253.0,
+        rotY: 0,
+        nameJa: "宮益坂下・明治通り",
+        nameEn: "Miyamasuzaka-shita",
+      },
+      {
+        x: -758.0,
+        z: 418.0,
+        rotY: Math.PI,
+        nameJa: "渋谷駅東口・国道246号",
+        nameEn: "Shibuya Sta. East (R246)",
+      },
+      {
+        x: -776.0,
+        z: 456.0,
+        rotY: 0,
+        nameJa: "渋谷警察署前・明治通り",
+        nameEn: "Shibuya Police Sta.",
+      },
+      {
+        x: -972.0,
+        z: 505.0,
+        rotY: 0,
+        nameJa: "セルリアンタワー前・R246",
+        nameEn: "Cerulean Tower (R246)",
+      },
+      {
+        x: -1140.0,
+        z: 282.0,
+        rotY: Math.PI / 3,
+        nameJa: "SHIBUYA 109前",
+        nameEn: "Shibuya 109",
+      },
+      {
+        x: -1140.0,
+        z: 262.0,
+        rotY: -Math.PI / 3,
+        nameJa: "道玄坂入口・109前",
+        nameEn: "Dogenzaka Ent.",
+      },
+      {
+        x: -1271.0,
+        z: 349.0,
+        rotY: -Math.PI / 4,
+        nameJa: "道玄坂中腹",
+        nameEn: "Dogenzaka",
+      },
+      {
+        x: -1426.0,
+        z: 650.0,
+        rotY: -Math.PI * 0.7,
+        nameJa: "道玄坂上交差点",
+        nameEn: "Dogenzaka-ue",
+      },
+      {
+        x: -660.0,
+        z: 209.0,
+        rotY: Math.PI,
+        nameJa: "渋谷郵便局前・宮益坂",
+        nameEn: "Shibuya Post Office",
+      },
+      {
+        x: -518.0,
+        z: 186.0,
+        rotY: Math.PI * 0.5,
+        nameJa: "宮益坂上交差点",
+        nameEn: "Miyamasuzaka-ue",
+      },
+      {
+        x: -1110.0,
+        z: -29.0,
+        rotY: Math.PI * 0.6,
+        nameJa: "渋谷PARCO前",
+        nameEn: "Shibuya PARCO",
+      },
+      {
+        x: -1010.2,
+        z: 108.0,
+        rotY: -2.72,
+        nameJa: "公園通り・神南一丁目",
+        nameEn: "Koen-dori Jinnan 1",
+      },
+      {
+        x: -1145.0,
+        z: -102.0,
+        rotY: 0.64,
+        nameJa: "渋谷区役所前・公園通り",
+        nameEn: "Shibuya City Office",
+      },
+      {
+        x: -1279.6,
+        z: 183.9,
+        rotY: -2.07,
+        nameJa: "文化村通り・東急本店前",
+        nameEn: "Bunkamura-dori",
+      },
+      {
+        x: -1405.1,
+        z: 90.7,
+        rotY: 1.05,
+        nameJa: "松濤二丁目入口交差点",
+        nameEn: "Shoto 2-chome",
+      },
+      {
+        x: -600.2,
+        z: 319.6,
+        rotY: 2.53,
+        nameJa: "金王坂中腹・渋谷二丁目",
+        nameEn: "Konnozaka Shibuya 2",
+      },
+      {
+        x: -530.3,
+        z: 261.3,
+        rotY: -0.56,
+        nameJa: "金王坂上・渋谷二丁目東",
+        nameEn: "Konnozaka-ue",
+      },
+      {
+        x: -577.0,
+        z: 599.0,
+        rotY: 0.84,
+        nameJa: "明治通り・並木橋方面",
+        nameEn: "Meiji-dori Namikibashi",
+      },
+      {
+        x: -1104.2,
+        z: -21.1,
+        rotY: -2.52,
+        nameJa: "井の頭通り・宇田川町",
+        nameEn: "Inokashira Udagawacho",
+      },
+    ];
+
+    for (const inter of shibuyaIntersections) {
+      const isSafe = isSafeShibuyaStreetPropPosition(inter.x, inter.z, {
+        minRoadGap: 0.25,
+        minPropGap: 6.0,
+        requireSidewalk: true,
+        skipIntersectionExclusion: true,
+      });
+      if (isSafe) {
+        const tl = this.roadBuilder.props.createTrafficLight(inter.x, inter.z, inter.rotY, {
+          intersectionNameJa: inter.nameJa,
+          intersectionNameEn: inter.nameEn,
+          activeSignal: "green",
+          showArrowSignal: true,
+        });
+        tl.position.y = sampleShibuyaTerrainY(inter.x, inter.z);
+        this.removeAttachedLights(tl);
+        this.group.add(tl);
+        placedShibuyaProps.push({ x: inter.x, z: inter.z });
+      }
+    }
+
+    // B. 樹木の配置: s = 22m .. totalLen - 22m（30m 間隔、offset = ±(testHalfDriveable + 2.35m)）
     for (const corridor of shibuyaRadialCorridors) {
       const totalLen = corridor.length;
       const isShort = totalLen < 44;
@@ -7675,7 +9025,7 @@ export class TokyoStationMap {
       }
     }
 
-    // B. 街灯の配置: s = 36m .. totalLen - 22m（45m 間隔、offset = ±(testHalfDriveable + 2.35m)）
+    // C. 街灯の配置: s = 36m .. totalLen - 22m（45m 間隔、offset = ±(testHalfDriveable + 2.35m)）
     for (const corridor of shibuyaRadialCorridors) {
       const totalLen = corridor.length;
       const isShort = totalLen < 58;
@@ -7711,140 +9061,12 @@ export class TokyoStationMap {
       }
     }
 
-    // C. 主要交差点の歩道角への信号機配置（直下に歩道メッシュが存在することを保証）
-    const shibuyaIntersections = [
-      {
-        x: -801.5,
-        z: 275.0,
-        rotY: -Math.PI / 2,
-        nameJa: "渋谷駅前スクランブル交差点",
-        nameEn: "Shibuya Scramble Crossing",
-      },
-      {
-        x: -792.5,
-        z: 229.0,
-        rotY: Math.PI / 2,
-        nameJa: "渋谷駅ハチ公前",
-        nameEn: "Hachiko Entrance",
-      },
-      {
-        x: -835.5,
-        z: 274.0,
-        rotY: Math.PI,
-        nameJa: "渋谷駅前・QFRONT前",
-        nameEn: "Shibuya Station Front",
-      },
-      {
-        x: -837.5,
-        z: 225.5,
-        rotY: 0,
-        nameJa: "道玄坂入口・スクランブル",
-        nameEn: "Dogenzaka Ent.",
-      },
-      {
-        x: -737.0,
-        z: 232.0,
-        rotY: Math.PI,
-        nameJa: "宮益坂下交差点",
-        nameEn: "Miyamasuzaka-shita",
-      },
-      {
-        x: -734.5,
-        z: 266.0,
-        rotY: Math.PI,
-        nameJa: "宮益坂下・明治通り",
-        nameEn: "Miyamasuzaka-shita",
-      },
-      {
-        x: -734.5,
-        z: 117.5,
-        rotY: Math.PI,
-        nameJa: "渋谷駅東口・国道246号",
-        nameEn: "Shibuya Sta. East (R246)",
-      },
-      {
-        x: -764.5,
-        z: 86.5,
-        rotY: 0,
-        nameJa: "渋谷警察署前・明治通り",
-        nameEn: "Shibuya Police Sta.",
-      },
-      {
-        x: -862.0,
-        z: 79.5,
-        rotY: 0,
-        nameJa: "セルリアンタワー前・R246",
-        nameEn: "Cerulean Tower (R246)",
-      },
-      {
-        x: -875.0,
-        z: 245.0,
-        rotY: -Math.PI / 3,
-        nameJa: "SHIBUYA 109前",
-        nameEn: "Shibuya 109",
-      },
-      {
-        x: -925.0,
-        z: 199.0,
-        rotY: -Math.PI / 3,
-        nameJa: "道玄坂中腹",
-        nameEn: "Dogenzaka",
-      },
-      {
-        x: -1050.0,
-        z: 162.0,
-        rotY: -Math.PI * 0.7,
-        nameJa: "道玄坂上交差点",
-        nameEn: "Dogenzaka-ue",
-      },
-      {
-        x: -560.0,
-        z: 262.0,
-        rotY: Math.PI,
-        nameJa: "渋谷郵便局前・宮益坂",
-        nameEn: "Shibuya Post Office",
-      },
-      {
-        x: -450.0,
-        z: 258.5,
-        rotY: Math.PI * 0.5,
-        nameJa: "宮益坂上交差点",
-        nameEn: "Miyamasuzaka-ue",
-      },
-      {
-        x: -815.5,
-        z: 425.0,
-        rotY: Math.PI * 0.6,
-        nameJa: "渋谷PARCO前",
-        nameEn: "Shibuya PARCO",
-      },
-    ];
-
-    for (const inter of shibuyaIntersections) {
-      const isSafe = isSafeShibuyaStreetPropPosition(inter.x, inter.z, {
-        minRoadGap: 1.5,
-        minPropGap: 6.0,
-        requireSidewalk: true,
-      });
-      if (isSafe) {
-        const tl = this.roadBuilder.props.createTrafficLight(inter.x, inter.z, inter.rotY, {
-          intersectionNameJa: inter.nameJa,
-          intersectionNameEn: inter.nameEn,
-          activeSignal: "green",
-          showArrowSignal: true,
-        });
-        this.removeAttachedLights(tl);
-        this.group.add(tl);
-        placedShibuyaProps.push({ x: inter.x, z: inter.z });
-      }
-    }
-
     // Blender CLI 生成 GLB 街路樹モデルの非同期ロード＆全スロットへの展開
     if (!this.deferGlbLoads) {
       this.glbLoadPromises.push(this.loadBlenderStreetTreeGlb());
     }
 
-    // 街灯（夜間に点灯：丸の内・行幸通り・仲通り・日比谷通り・永代通り・馬場先門通りの黒鋳鉄製2灯式クラシカル街灯 + 渋谷明治通り）
+    // 街灯（夜間に点灯：丸の内・行幸通り・仲通り・日比谷通り・永代通り・馬場先門通りの黒鋳鉄製2灯式クラシカル街灯）
     for (let z = 18; z < 245; z += 35) {
       const isNearNakadori = Math.abs(z - 165) < 15;
       if (isNearNakadori) {
@@ -7854,10 +9076,6 @@ export class TokyoStationMap {
       this.createStreetLamp(12.8, z, world, rapier, streetPropsBody);
     }
     // 街灯（丸の内都心ブロック x=-240 〜 x=+240: 仲通り・日比谷通り・皇居外苑広場）
-    // Why x < -240 および |x| >= 160 の生成を抑制するか:
-    // x < -240 は渋谷・宮益坂（都道413号: x=-400, z=235.8）の走行車線内に街灯コライダーが突き刺さり、
-    // また |x| >= 160 は内堀通りカーブ区間（nav-road-uchibori-dori: x=±185..205, z=376.2）の車道内に
-    // 街灯が突き刺さる「見えない壁」となるため、安全な丸の内都心歩道上のみに限定配置する。
     for (let x = -240; x <= 240; x += 65) {
       const isNearIntersection =
         Math.abs(x) < 22 ||
@@ -7873,18 +9091,6 @@ export class TokyoStationMap {
       if (Math.abs(x) < 160 && !isNearCurvedRoadway(x, 365 + 11.2)) {
         this.createStreetLamp(x, 365 + 11.2, world, rapier, streetPropsBody);
       }
-    }
-    for (let z = -165; z <= 175; z += 42) {
-      const isNearShibuyaCrossRoad =
-        Math.abs(z - -200) < 18 ||
-        Math.abs(z - -95) < 18 ||
-        Math.abs(z - 102) < 24 ||
-        Math.abs(z - 195) < 18;
-      if (isNearShibuyaCrossRoad) {
-        continue;
-      }
-      this.createStreetLamp(-750 - 14.2, z, world, rapier, streetPropsBody);
-      this.createStreetLamp(-750 + 14.2, z, world, rapier, streetPropsBody);
     }
 
     // 行幸通り石造ボラード（車止め御影石柱：歩道車道境界縁石 |x|=8.75m のすぐ内側 x = ±9.15m に実寸配置）
@@ -7961,8 +9167,9 @@ export class TokyoStationMap {
     rapier: typeof RAPIER,
     streetPropsBody: RAPIER.RigidBody,
   ): void {
+    const groundY = x < -395 ? sampleShibuyaTerrainY(x, z) : 0;
     const slotGroup = new THREE.Group();
-    slotGroup.position.set(x, 0, z);
+    slotGroup.position.set(x, groundY, z);
     slotGroup.userData.isStreetTreeSlot = true;
     slotGroup.userData.maxLodDrawDistance = 260;
 
@@ -7972,7 +9179,7 @@ export class TokyoStationMap {
 
     // 街路樹の幹の物理コライダー（根元半径 0.34m * scale, 高さ 3.6m）
     const trunkColliderDesc = this.createCylinderDesc(rapier, 1.8, 0.34 * scale)
-      .setTranslation(x, 1.8, z)
+      .setTranslation(x, groundY + 1.8, z)
       .setFriction(0.55)
       .setRestitution(0.1);
     this.registerCollider(world.createCollider(trunkColliderDesc, streetPropsBody), true);
@@ -8120,13 +9327,14 @@ export class TokyoStationMap {
     rapier: typeof RAPIER,
     streetPropsBody: RAPIER.RigidBody,
   ): void {
+    const groundY = x < -395 ? sampleShibuyaTerrainY(x, z) : 0;
     const lampGroup = new THREE.Group();
-    lampGroup.position.set(x, 0, z);
+    lampGroup.position.set(x, groundY, z);
     lampGroup.userData.maxLodDrawDistance = 220;
 
     // 街灯ポールの物理コライダー（台座半径 0.22m, 高さ 5.0m）
     const lampColDesc = this.createCylinderDesc(rapier, 2.5, 0.22)
-      .setTranslation(x, 2.5, z)
+      .setTranslation(x, groundY + 2.5, z)
       .setFriction(0.4)
       .setRestitution(0.15);
     this.registerCollider(world.createCollider(lampColDesc, streetPropsBody), true);
@@ -8207,25 +9415,36 @@ export class TokyoStationMap {
     }
 
     for (const p of signPlacements) {
-      const isOverhead = p.type === "overhead_guide";
-      const isWadakuraGantry = p.id === "overhead_guide_wadakura";
+      const groundY =
+        p.position[0] < -395 ? sampleShibuyaTerrainY(p.position[0], p.position[2]) : 0;
+      const seatedSpec: RoadSignPlacement =
+        groundY !== 0
+          ? {
+              ...p,
+              position: [p.position[0], p.position[1] + groundY, p.position[2]],
+            }
+          : p;
+      const isOverhead = seatedSpec.type === "overhead_guide";
+      const isWadakuraGantry = seatedSpec.id === "overhead_guide_wadakura";
       const enrichedSpec: RoadSignPlacement = isOverhead
         ? {
-            ...p,
-            label: p.label ?? "皇居・大手町",
-            subLabel: p.subLabel ?? "Imperial Palace / Otemachi",
-            leftLabel: p.leftLabel ?? (isWadakuraGantry ? "桜田門・三宅坂" : "日比谷・有楽町"),
+            ...seatedSpec,
+            label: seatedSpec.label ?? "皇居・大手町",
+            subLabel: seatedSpec.subLabel ?? "Imperial Palace / Otemachi",
+            leftLabel:
+              seatedSpec.leftLabel ?? (isWadakuraGantry ? "桜田門・三宅坂" : "日比谷・有楽町"),
             leftSubLabel:
-              p.leftSubLabel ?? (isWadakuraGantry ? "Sakuradamon" : "Hibiya / Yurakucho"),
-            rightLabel: p.rightLabel ?? "大手町・神田",
-            rightSubLabel: p.rightSubLabel ?? "Otemachi / Kanda",
-            roadNumber: p.roadNumber ?? "1",
-            subRoadNumber: p.subRoadNumber ?? "404",
-            intersectionName: p.intersectionName ?? (isWadakuraGantry ? "和田倉門" : "行幸通り"),
-            spanWidth: p.spanWidth ?? 19.2,
-            supportType: p.supportType ?? "cantilever",
+              seatedSpec.leftSubLabel ?? (isWadakuraGantry ? "Sakuradamon" : "Hibiya / Yurakucho"),
+            rightLabel: seatedSpec.rightLabel ?? "大手町・神田",
+            rightSubLabel: seatedSpec.rightSubLabel ?? "Otemachi / Kanda",
+            roadNumber: seatedSpec.roadNumber ?? "1",
+            subRoadNumber: seatedSpec.subRoadNumber ?? "404",
+            intersectionName:
+              seatedSpec.intersectionName ?? (isWadakuraGantry ? "和田倉門" : "行幸通り"),
+            spanWidth: seatedSpec.spanWidth ?? 19.2,
+            supportType: seatedSpec.supportType ?? "cantilever",
           }
-        : p;
+        : seatedSpec;
 
       const instance = this.signSystem.createSignInstance(
         enrichedSpec,
@@ -8265,7 +9484,19 @@ export class TokyoStationMap {
       this.removeCustomRoadSign(spec.id);
     }
 
-    const instance = this.signSystem.createSignInstance(spec, this.signPhysicsContext ?? undefined);
+    const groundY =
+      spec.position[0] < -395 ? sampleShibuyaTerrainY(spec.position[0], spec.position[2]) : 0;
+    const seatedSpec: RoadSignPlacement =
+      groundY !== 0
+        ? {
+            ...spec,
+            position: [spec.position[0], spec.position[1] + groundY, spec.position[2]],
+          }
+        : spec;
+    const instance = this.signSystem.createSignInstance(
+      seatedSpec,
+      this.signPhysicsContext ?? undefined,
+    );
     for (const col of instance.colliders) {
       this.registerCollider(col, true);
     }
@@ -8491,7 +9722,8 @@ export class TokyoStationMap {
     const children = this.group.children;
     for (let i = 0; i < children.length; i++) {
       const child = children[i];
-      const isCityGround = child.name === "CityWideGroundMesh";
+      const isCityGround =
+        child.name === "CityWideGroundMesh" || child.name === "ShibuyaTerrainMesh";
       if (isCityGround) {
         continue;
       }
@@ -8733,6 +9965,7 @@ export class TokyoStationMap {
       this.proceduralCeruleanGroup,
       this.proceduralMarkCityGroup,
       this.proceduralCenterGaiArchGroup,
+      this.proceduralHachikoStatueGroup,
     ]) {
       if (procGroup) {
         procGroup.visible = showProcedural;
@@ -9336,7 +10569,8 @@ export class TokyoStationMap {
         continue;
       }
 
-      const isCityGround = child.name === "CityWideGroundMesh";
+      const isCityGround =
+        child.name === "CityWideGroundMesh" || child.name === "ShibuyaTerrainMesh";
       if (isCityGround) {
         child.visible = true;
         visibleCount += 1;

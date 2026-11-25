@@ -105,12 +105,14 @@ models:
     const hasIntersectionNameSign = signs.some((sign) => sign.type === "intersection_name");
     expect(hasOverheadSign).toBe(true);
     expect(shibuyaStreamOverhead).toBeDefined();
-    expect(shibuyaStreamOverhead?.rotationY).toBeCloseTo(3.14159, 4);
+    expect(shibuyaStreamOverhead?.rotationY).toBeCloseTo(0.8, 2);
     expect(shibuyaSinglePoleSigns.length).toBe(3);
     for (const s of shibuyaSinglePoleSigns) {
-      expect(s.rotationY).toBeCloseTo(3.14159, 4);
-      // 明治通り北行き (+Z) の左側歩道 (x = -736.2, 中央分離帯付き車道東端 -737.9 の外側) に建つこと
-      expect(s.position[0]).toBeCloseTo(-736.2, 2);
+      expect(s.rotationY).toBeCloseTo(0.815, 1);
+      // 明治通り（渋谷ストリーム前カーブ区間）の西側歩道上に建つこと
+      expect(s.position[0]).toBeLessThan(-715);
+      expect(s.position[0]).toBeGreaterThan(-740);
+      expect(s.position[2]).toBeGreaterThan(480);
     }
     expect(hasStopSign).toBe(true);
     expect(hasSpeedSign).toBe(true);

@@ -25,6 +25,7 @@
      渋谷ストリーム固有のライムイエロー・ストリームライン＆ホワイトアルミ建築サインを配置。
 """
 
+import json
 import math
 import os
 
@@ -351,6 +352,20 @@ def setup_materials() -> dict[str, bpy.types.Material]:
             metallic=0.0,
             emission_color=(0.35, 0.85, 1.0, 1.0),
             emission_strength=0.0,
+        ),
+        # 30: ハチ公像 ブロンズ鋳造像（落ち着いた経年青銅色・低彩度金属光沢）
+        "HachikoBronze": create_material(
+            "HachikoBronze",
+            base_color=(0.26, 0.21, 0.14, 1.0),
+            roughness=0.38,
+            metallic=0.85,
+        ),
+        # 31: ハチ公像 御影石台座（ニュートラル花崗岩）
+        "HachikoGranite": create_material(
+            "HachikoGranite",
+            base_color=(0.58, 0.56, 0.53, 1.0),
+            roughness=0.72,
+            metallic=0.04,
         ),
     }
     return mats
@@ -914,6 +929,8 @@ def assign_materials_to_object(obj: bpy.types.Object, materials: dict[str, bpy.t
         "ShibuyaCenterGaiArchSign",  # 27
         "ShibuyaCenterGaiBanner",  # 28
         "ShibuyaSkySearchlightGlow",  # 29
+        "HachikoBronze",  # 30
+        "HachikoGranite",  # 31
     ]
     for k in ordered_keys:
         obj.data.materials.append(materials[k])
@@ -1896,314 +1913,13 @@ def build_shutoko_route3_viaduct(
     materials: dict[str, bpy.types.Material],
 ) -> bpy.types.Object:
     """
-    首都高速3号渋谷線（Shutoko Route 3 Shibuya Line）高架橋を構築する。
-    国道246号（玉川通り・青山通り: worldZ = 95 -> bx = 110.0）の頭上（Z = 11.2m〜16.8m）を
-    道玄坂・桜丘側（worldX = -865 -> by = -170）から渋谷駅・明治通り交差部（by = -55）を経て
-    金王坂・表参道側（worldX = -575 -> by = +120）まで全長 290m にわたり横断する重厚な都市高速高架橋：
-    - 歩道外側（bx = 95.5, 124.5）に建つラーメン門型・T字コンクリート橋脚列（走行車線を一切阻害しない）
-    - 高架裏面の主桁スチールボックスガーダー（4連）＋横桁クロスビーム格子
-    - コンクリート床版＋曲線・半透明ルーバー遮音壁（Acoustic Sound Barrier Walls）
-    - 首都高グリーンの方面案内標識門型ゲート（[3] 首都高速3号渋谷線 / 渋谷・大橋JCT・東名 / 谷町JCT・都心環状）
-    - 高架下を照らすアンバーナトリウム道路照明列（ドライバー視点で国道246号高架下の重厚感を演出）
+    首都高速3号渋谷線の実カーブ追従高架橋は tokyoStationMap.ts（ShutokoRoute3ViaductGroup）側で
+    生成するため、GLB 内ではノード名互換用の空プレースホルダーノードのみを保持する。
     """
-    mesh = bpy.data.meshes.new("ShutokoRoute3_ViaductMesh")
-    bm = bmesh.new()
-
-    bx_center = 110.0  # worldZ = 95.0 (国道246号中心)
-    by_min = -170.0  # worldX = -865.0
-    by_max = 120.0  # worldX = -575.0
-    span_len = by_max - by_min
-    by_mid = (by_min + by_max) * 0.5
-    deck_w = 21.6  # 上下4車線＋路肩幅
-
-    # 1. スチール箱桁（4本並行の重厚な主桁ガーダー: Z = 11.4m..13.2m）＋ 下フランジ鋼板
-    for gx_offset in [-7.8, -2.6, 2.6, 7.8]:
-        add_box(
-            bm,
-            center=Vector((bx_center + gx_offset, by_mid, 12.32)),
-            size=Vector((1.38, span_len, 1.76)),
-            mat_idx=2,
-        )
-        # 主桁下フランジプレート（高架下から見上げた際のリアルな鋼製I/箱桁エッジ）
-        add_box(
-            bm,
-            center=Vector((bx_center + gx_offset, by_mid, 11.42)),
-            size=Vector((1.68, span_len, 0.14)),
-            mat_idx=3,
-        )
-
-    # 高架裏面の横桁（クロスビーム格子: 10m ピッチで頭上の立体感を強調）
-    num_cross_beams = 29
-    for cb in range(num_cross_beams + 1):
-        cy = by_min + cb * (span_len / num_cross_beams)
-        add_box(
-            bm,
-            center=Vector((bx_center, cy, 12.18)),
-            size=Vector((deck_w - 1.2, 0.58, 1.32)),
-            mat_idx=3,
-        )
-        add_box(
-            bm,
-            center=Vector((bx_center, cy, 11.48)),
-            size=Vector((deck_w - 1.0, 0.72, 0.12)),
-            mat_idx=2,
-        )
-        # 高架下ナトリウム/LED道路照明器具（明治通り・国道246号交差部を含む全スパンの桁下に配置）
-        if cb % 2 == 0:
-            for lx_off in [-5.2, 5.2]:
-                add_box(
-                    bm,
-                    center=Vector((bx_center + lx_off, cy, 11.42)),
-                    size=Vector((1.24, 0.62, 0.18)),
-                    mat_idx=3,
-                )
-                add_box(
-                    bm,
-                    center=Vector((bx_center + lx_off, cy, 11.31)),
-                    size=Vector((1.02, 0.46, 0.10)),
-                    mat_idx=11,
-                )
-
-    # 2. コンクリート高架床版スラブ (Z = 13.2m..14.1m) ＆ アスファルト舗装面
-    add_box(
-        bm,
-        center=Vector((bx_center, by_mid, 13.65)),
-        size=Vector((deck_w, span_len, 0.95)),
-        mat_idx=8,
-    )
-    add_box(
-        bm,
-        center=Vector((bx_center, by_mid, 14.18)),
-        size=Vector((deck_w - 1.4, span_len, 0.16)),
-        mat_idx=2,
-    )
-    # 中央分離帯ガードレール＆白破線レーンマーク
-    add_box(
-        bm,
-        center=Vector((bx_center, by_mid, 14.65)),
-        size=Vector((0.55, span_len, 0.85)),
-        mat_idx=8,
-    )
-
-    # 3. 首都高象徴の遮音壁（Acoustic Sound Barrier Walls: 下段プレキャスト高欄＋中段吸音グリーンスリット＆透明ポリカ窓＋上段内向き吸音ルーバーフード）
-    for side_sign in [-1.0, 1.0]:
-        wall_x = bx_center + side_sign * (deck_w * 0.5 - 0.35)
-        # 下段プレキャストコンクリート高欄 (Z = 14.1m..15.25m) + 水平目地リブ
-        add_box(
-            bm,
-            center=Vector((wall_x, by_mid, 14.68)),
-            size=Vector((0.52, span_len, 1.16)),
-            mat_idx=8,
-        )
-        add_box(
-            bm,
-            center=Vector((wall_x + side_sign * 0.16, by_mid, 13.45)),
-            size=Vector((0.28, span_len, 0.36)),
-            mat_idx=3,
-        )
-        add_box(
-            bm,
-            center=Vector((wall_x + side_sign * 0.15, by_mid, 15.22)),
-            size=Vector((0.32, span_len, 0.22)),
-            mat_idx=22,  # JRGreenSteel（首都高遮音壁特有のディープグリーン帯）
-        )
-        # 中段採光ポリカーボネート透明遮音スリット窓 (Z = 15.32m..16.18m)
-        add_box(
-            bm,
-            center=Vector((wall_x, by_mid, 15.75)),
-            size=Vector((0.24, span_len, 0.86)),
-            mat_idx=1,
-        )
-        # 上段シルバー遮音ルーバーフード（内向き傾斜付き円통風防音フード: Z = 16.2m..17.15m）
-        add_box(
-            bm,
-            center=Vector((wall_x - side_sign * 0.18, by_mid, 16.58)),
-            size=Vector((0.68, span_len, 0.72)),
-            mat_idx=3,
-        )
-        add_box(
-            bm,
-            center=Vector((wall_x - side_sign * 0.36, by_mid, 16.98)),
-            size=Vector((0.52, span_len, 0.28)),
-            mat_idx=0,
-        )
-        # 遮音壁の垂直H鋼支柱（5m ピッチ = 58スパンで実写の緻密なリズムを再現）
-        num_wall_posts = 58
-        for sp in range(num_wall_posts + 1):
-            py = by_min + sp * (span_len / num_wall_posts)
-            add_box(
-                bm,
-                center=Vector((wall_x + side_sign * 0.12, py, 15.62)),
-                size=Vector((0.36, 0.24, 3.05)),
-                mat_idx=3,
-            )
-
-    # 4. 門型ラーメン・ハンチ付きコンクリート橋脚列（国道246号カーブ・明治通り・ヒカリエ連絡路を完全回避）
-    # (p_by, south_x, north_x): south/north pier worldZ = -15 + pier_x, worldX = -695 + p_by
-    pier_specs = [
-        (-135.0, 95.5, 124.5),  # worldX=-830 (玉川通り車道外側 z=80.5 / 109.5)
-        (-87.0, 95.5, 124.5),  # worldX=-782 (渋谷西口車道外側 z=80.5 / 109.5)
-        (-40.5, 95.5, 136.0),  # worldX=-735.5 (明治通り東側歩道 & R246北側歩道 z=80.5 / 121.0)
-        (23.0, 95.5, 134.5),  # worldX=-672 (R246東進カーブ外側・ヒカリエ南端手前 z=80.5 / 119.5)
-        (77.0, 95.5, 138.0),  # worldX=-618 (R246カーブ外側 z=80.5 / 123.0)
-    ]
-    for p_by, south_x, north_x in pier_specs:
-        beam_cx = (south_x + north_x) * 0.5
-        beam_sx = (north_x - south_x) + 2.8
-        # 水平ハンチ付き大梁（クロスヘッド: Z = 9.8m..11.4m, 桁下クリアランス 9.8m 確保）
-        add_box(
-            bm,
-            center=Vector((beam_cx, p_by, 10.65)),
-            size=Vector((beam_sx, 2.6, 1.65)),
-            mat_idx=8,
-        )
-        # クロスヘッド上下のコーニス段差リブ＆主桁を受ける鋼製支承（シュー）
-        add_box(
-            bm,
-            center=Vector((beam_cx, p_by, 11.42)),
-            size=Vector((beam_sx + 0.30, 2.82, 0.24)),
-            mat_idx=8,
-        )
-        for shoe_gx in [-7.8, -2.6, 2.6, 7.8]:
-            add_box(
-                bm,
-                center=Vector((bx_center + shoe_gx, p_by, 11.48)),
-                size=Vector((1.85, 1.45, 0.28)),
-                mat_idx=2,
-            )
-        # 門型ラーメン内角の45度コンクリートハンチ（斜め隅角補強で箱っぽさを解消）
-        for pier_x, inner_dir in [(south_x, 1.0), (north_x, -1.0)]:
-            haunch_cx = pier_x + inner_dir * 1.65
-            haunch_cz = 9.45
-            t_haunch = Vector((inner_dir * 1.8, 0.0, 1.15)).normalized()
-            n_haunch = Vector((-t_haunch.z, 0.0, t_haunch.x))
-            add_oriented_box(
-                bm,
-                center=Vector((haunch_cx, p_by, haunch_cz)),
-                tangent_dir=t_haunch,
-                normal_dir=n_haunch,
-                size_tangent=3.2,
-                size_normal=1.15,
-                size_z=2.35,
-                mat_idx=8,
-            )
-        # 左右のピラスターリブ付きコンクリート橋脚（Z = 0m..10.6m）
-        for pier_x, inner_dir in [(south_x, 1.0), (north_x, -1.0)]:
-            add_box(
-                bm,
-                center=Vector((pier_x, p_by, 5.3)),
-                size=Vector((2.35, 2.45, 10.6)),
-                mat_idx=8,
-            )
-            # 橋脚側面のリブ造形＆柱頭キャピタルカラー
-            add_box(
-                bm,
-                center=Vector((pier_x, p_by, 5.3)),
-                size=Vector((2.62, 1.35, 10.2)),
-                mat_idx=8,
-            )
-            add_box(
-                bm,
-                center=Vector((pier_x, p_by, 9.55)),
-                size=Vector((2.72, 2.75, 0.48)),
-                mat_idx=8,
-            )
-            # 橋脚内側に沿って降りる亜鉛めっき鋼管排水ドレンパイプ
-            add_cylinder_z(
-                bm,
-                center=Vector((pier_x + inner_dir * 1.24, p_by + 0.85, 5.4)),
-                radius=0.14,
-                height=10.6,
-                segments=10,
-                mat_idx=3,
-            )
-            # 橋脚根元のダーク基礎フーチング＆3段ゼブラ警戒カラー帯
-            add_box(
-                bm,
-                center=Vector((pier_x, p_by, 0.42)),
-                size=Vector((2.86, 2.94, 0.84)),
-                mat_idx=2,
-            )
-            for stripe_z, stripe_mat in [(1.12, 5), (1.38, 2), (1.64, 5), (1.88, 2)]:
-                add_box(
-                    bm,
-                    center=Vector((pier_x, p_by, stripe_z)),
-                    size=Vector((2.66, 2.72, 0.22)),
-                    mat_idx=stripe_mat,
-                )
-
-    # 5. 首都高速3号渋谷線 オーバーヘッド緑案内標識門型ゲート＆側面ルートサイン
-    # `shibuya_shutoko_sign.jpg` のアスペクト比に整合した標識パネル寸法（幅4.4m×高2.9m）で文字潰れ・引き伸ばしを完全防止
-    for gate_by in [-72.0, -36.0, 15.0]:
-        # 門型鉄骨トラスフレーム (Z = 16.8m..21.2m)
-        for gx in [bx_center - 10.6, bx_center + 10.6]:
-            add_box(
-                bm,
-                center=Vector((gx, gate_by, 19.0)),
-                size=Vector((0.45, 0.45, 4.6)),
-                mat_idx=3,
-            )
-        add_box(
-            bm,
-            center=Vector((bx_center, gate_by, 20.85)),
-            size=Vector((21.8, 0.55, 0.52)),
-            mat_idx=3,
-        )
-        add_box(
-            bm,
-            center=Vector((bx_center, gate_by, 18.85)),
-            size=Vector((21.6, 0.42, 0.36)),
-            mat_idx=3,
-        )
-        # 上下2連のグリーン案内標識板（引き伸ばしのない端正な比率 5.2m × 2.8m × 2枚）
-        for sign_gx in [bx_center - 4.2, bx_center + 4.2]:
-            add_box(
-                bm,
-                center=Vector((sign_gx, gate_by, 19.85)),
-                size=Vector((5.4, 0.32, 3.0)),
-                mat_idx=0,
-            )
-            add_box(
-                bm,
-                center=Vector((sign_gx, gate_by, 19.85)),
-                size=Vector((5.0, 0.42, 2.72)),
-                mat_idx=9,
-            )
-
-    # 明治通り・国道246号から視認する高架側面「首都高 3 / 渋谷 出口303」案内標識（アスペクト比整合 4.4m × 2.65m）
-    for side_x, n_sign in [
-        (bx_center - deck_w * 0.5 - 0.45, -1.0),
-        (bx_center + deck_w * 0.5 + 0.45, 1.0),
-    ]:
-        for sign_by in [-55.0, -18.0]:
-            # 背面の亜鉛めっき取付トラスフレーム
-            add_box(
-                bm,
-                center=Vector((side_x - n_sign * 0.08, sign_by, 15.65)),
-                size=Vector((0.26, 5.2, 2.4)),
-                mat_idx=3,
-            )
-            # 白外枠プレート
-            add_box(
-                bm,
-                center=Vector((side_x, sign_by, 15.65)),
-                size=Vector((0.24, 4.6, 2.85)),
-                mat_idx=0,
-            )
-            # 首都高グリーン案内プレート（文字が一切横に伸びない適正縦横比 4.25m × 2.55m）
-            add_box(
-                bm,
-                center=Vector((side_x + n_sign * 0.06, sign_by, 15.65)),
-                size=Vector((0.22, 4.25, 2.55)),
-                mat_idx=9,
-            )
-
-    bm.normal_update()
-    bm.to_mesh(mesh)
-    bm.free()
-
-    obj = bpy.data.objects.new("ShutokoRoute3_Viaduct", mesh)
-    assign_materials_to_object(obj, materials)
+    _ = materials
+    obj = bpy.data.objects.new("ShutokoRoute3_Viaduct", None)
+    obj.empty_display_type = "PLAIN_AXES"
+    obj.empty_display_size = 1.0
     bpy.context.scene.collection.objects.link(obj)
     return obj
 
@@ -2966,232 +2682,155 @@ def build_shibuya_pedestrian_deck_and_rail_overpass(
     materials: dict[str, bpy.types.Material],
 ) -> bpy.types.Object:
     """
-    渋谷駅東口歩道橋（ペデストリアンデッキ網）および JR山手線・埼京線・東京メトロ銀座線高架橋を構築する：
-    1. 渋谷駅東口歩道橋（Shibuya Station East Exit Pedestrian Deck, Z = 7.4m〜9.2m）：
-       - 渋谷ストリーム2Fデッキ（bx = 21, by = -27）から北へ延び、
-         明治通り（by = -55）および国道246号（bx = 110）の上空をロの字に跨いで
-         渋谷スクランブルスクエア（bx = 160, by = -113）・渋谷ヒカリエ（bx = 161, by = 3）・
-         渋谷サクラステージ（bx = -10, by = -117）を立体接続するガラス手すり＆白ルーフキャノピー付き歩道橋。
-       - 渋谷ストリーム前の明治通り（bx = -20..+65）ではドライバーの視界を上空へ大きく開け、
-         交差点手前（bx = 86.0）で渋谷駅東口歩道橋と首都高3号渋谷線高架橋がドラマチックに重なる構図を実現。
-    2. JR山手線・埼京線高架橋（worldX = -779 -> by = -84.0）：
-       - 渋谷ストリーム・明治通りの西側を南北に貫く鉄道高架橋と、国道246号を跨ぐグリーンスチールトラス鉄道橋。
-    3. 東京メトロ銀座線 渋谷駅新駅舎（M字アーチ屋根トレインシェッド: bx = 158, by = -55, Z = 15.2m〜19.8m）：
-       - スクランブルスクエアとヒカリエの間、明治通り上空を東西に跨ぐ象徴的な白いアーチ屋根ホーム。
+    1:1 非反転実座標系の渋谷駅東口歩道橋および東京メトロ銀座線 渋谷駅新駅舎（M字アーチ屋根）を構築する。
+    (旧直線 JR 山手線高架・直線 246 デッキは tokyoStationMap.ts 側の曲線・NNE-SSW 実軸構造へ移行済みのため除外)
     """
     mesh = bpy.data.meshes.new("ShibuyaEastDeckAndRailMesh")
     bm = bmesh.new()
 
-    deck_z = 7.8  # 桁下クリアランス 7.2m（大型車も余裕で通過可能、ドライバー視界も開放的）
+    def add_skywalk_span(
+        cx_w: float,
+        cz_w: float,
+        tx_w: float,
+        tz_w: float,
+        span_len: float,
+        width: float,
+        deck_h: float = 8.35,
+    ) -> None:
+        base_z = sample_shibuya_terrain_y(cx_w, cz_w)
+        deck_z = base_z + deck_h
+        bx = cx_w - (-750.0)
+        by = 527.6 - cz_w
+        # Blender XY 上の方向ベクトル (dbx = dwx, dby = -dwz)
+        t_dir = Vector((tx_w, -tz_w, 0.0)).normalized()
+        n_dir = Vector((-t_dir.y, t_dir.x, 0.0))
 
-    # 1. 渋谷駅東口歩道橋（明治通り＆国道246号横断ロの字スカイウォーク）
-    # (a) 渋谷ストリーム2Fデッキ北端から国道246号南側歩道へ延びる南北デッキ (bx = 22..90, by = -29.5)
-    # (b) 明治通りを東西に跨ぐ南側横断歩道橋 (bx = 86.0, by = -82..-26)
-    # (c) 国道246号を南北に跨ぐ東側横断歩道橋 (bx = 84..136, by = -29.5) ＆ 西側横断歩道橋 (bx = 84..136, by = -78.5)
-    # (d) 明治通りを東西に跨ぐ北側横断歩道橋（スクランブルスクエア〜ヒカリエ連絡デッキ: bx = 134.0, by = -95..0）
-    # (e) サクラステージ連絡西口デッキ (bx = 35.0..86.0, by = -78.5)
-    deck_segments = [
-        # (center_x, center_y, size_x, size_y)
-        (54.0, -29.5, 68.0, 5.2),  # ストリーム北連絡デッキ（明治通り東側歩道上空）
-        (86.0, -54.0, 5.6, 54.0),  # 明治通り南側横断デッキ（渋谷駅東口歩道橋）
-        (110.0, -29.5, 54.0, 5.2),  # 国道246号東側横断デッキ（ヒカリエ・ストリーム連絡）
-        (110.0, -78.5, 54.0, 5.2),  # 国道246号西側横断デッキ（スクランブルSQ・サクラステージ連絡）
-        (134.0, -48.0, 5.8, 96.0),  # 明治通り北側横断デッキ（スクランブルSQ〜ヒカリエ2F連絡）
-        (
-            46.0,
-            -78.5,
-            84.0,
-            5.2,
-        ),  # サクラステージ・フクラス北西連絡デッキ（明治通り西側歩道上空 bx=4..88）
-    ]
-
-    for dx, dy, sx, sy in deck_segments:
-        # 歩道橋白い鋼製床版スラブ
-        add_box(
+        # 歩道橋床版スラブ & 下部ダークスチール桁
+        add_oriented_box(
             bm,
-            center=Vector((dx, dy, deck_z)),
-            size=Vector((sx, sy, 0.72)),
+            center=Vector((bx, by, deck_z)),
+            tangent_dir=t_dir,
+            normal_dir=n_dir,
+            size_tangent=span_len,
+            size_normal=width,
+            size_z=0.68,
             mat_idx=0,
         )
-        # 床版下のダークスチール桁
-        add_box(
+        add_oriented_box(
             bm,
-            center=Vector((dx, dy, deck_z - 0.50)),
-            size=Vector((sx - 0.6, sy - 0.6, 0.36)),
+            center=Vector((bx, by, deck_z - 0.48)),
+            tangent_dir=t_dir,
+            normal_dir=n_dir,
+            size_tangent=max(2.0, span_len - 0.6),
+            size_normal=max(1.2, width - 0.6),
+            size_z=0.34,
             mat_idx=2,
         )
-        # 両側のガラス欄干＋ウォームLEDフットライトライン
-        is_ns = sx >= sy
-        if is_ns:
-            for side in [-1.0, 1.0]:
-                ry = dy + side * (sy * 0.5 - 0.15)
-                add_box(
-                    bm,
-                    center=Vector((dx, ry, deck_z + 0.95)),
-                    size=Vector((sx, 0.18, 1.2)),
-                    mat_idx=10,
-                )
-                add_box(
-                    bm,
-                    center=Vector((dx, ry, deck_z + 1.62)),
-                    size=Vector((sx, 0.28, 0.16)),
-                    mat_idx=0,
-                )
-            # 歩道橋の白い軽快なルーフキャノピー
-            add_box(
+        # 両側ガラス欄干＋アルミ笠木
+        for side in [-1.0, 1.0]:
+            rail_off = n_dir * (side * (width * 0.5 - 0.14))
+            add_oriented_box(
                 bm,
-                center=Vector((dx, dy, deck_z + 3.1)),
-                size=Vector((sx - 2.0, sy + 0.6, 0.26)),
+                center=Vector((bx + rail_off.x, by + rail_off.y, deck_z + 0.92)),
+                tangent_dir=t_dir,
+                normal_dir=n_dir,
+                size_tangent=span_len,
+                size_normal=0.16,
+                size_z=1.18,
+                mat_idx=10,
+            )
+            add_oriented_box(
+                bm,
+                center=Vector((bx + rail_off.x, by + rail_off.y, deck_z + 1.56)),
+                tangent_dir=t_dir,
+                normal_dir=n_dir,
+                size_tangent=span_len,
+                size_normal=0.26,
+                size_z=0.14,
                 mat_idx=0,
             )
-        else:
-            for side in [-1.0, 1.0]:
-                rx = dx + side * (sx * 0.5 - 0.15)
-                add_box(
-                    bm,
-                    center=Vector((rx, dy, deck_z + 0.95)),
-                    size=Vector((0.18, sy, 1.2)),
-                    mat_idx=10,
-                )
-                add_box(
-                    bm,
-                    center=Vector((rx, dy, deck_z + 1.62)),
-                    size=Vector((0.28, sy, 0.16)),
-                    mat_idx=0,
-                )
-            add_box(
-                bm,
-                center=Vector((dx, dy, deck_z + 3.1)),
-                size=Vector((sx + 0.6, sy - 2.0, 0.26)),
-                mat_idx=0,
-            )
-
-    # 歩道橋の円柱スチール橋脚（すべて歩道上のみ：車道 bx=98..122, by=-67..-43 およびヒカリエ連絡路 by=-37.5..-27.5 を完全回避）
-    deck_pillars = [
-        (86.0, -29.5),
-        (86.0, -78.5),
-        (134.0, -40.5),
-        (134.0, -20.5),
-        (134.0, -78.5),
-        (24.0, -29.5),
-        (24.0, -78.5),
-    ]
-    for px, py in deck_pillars:
-        add_cylinder_z(
+        # 白ルーフキャノピー
+        add_oriented_box(
             bm,
-            center=Vector((px, py, deck_z * 0.5)),
-            radius=0.58,
-            height=deck_z,
-            segments=16,
-            mat_idx=3,
-        )
-
-    # 2. 東京メトロ銀座線 渋谷駅新駅舎（明治通り上空 Z = 15.2m..19.5m を跨ぐ白いM字アーチ屋根ホーム）
-    ginza_x = 158.0  # worldZ = 143.0（スクランブルスクエアとヒカリエの間）
-    ginza_y = -55.0  # worldX = -750.0（明治通り真上）
-    ginza_span_y = 92.0
-    # 銀座線高架床版＆ガラスサイドウォール
-    add_box(
-        bm,
-        center=Vector((ginza_x, ginza_y, 14.8)),
-        size=Vector((14.5, ginza_span_y, 1.2)),
-        mat_idx=8,
-    )
-    add_box(
-        bm,
-        center=Vector((ginza_x, ginza_y, 16.8)),
-        size=Vector((13.8, ginza_span_y, 2.8)),
-        mat_idx=1,
-    )
-    # 象徴的な白アルミM字ボールト屋根＆屋上緑化プラザ
-    add_box(
-        bm,
-        center=Vector((ginza_x, ginza_y, 18.6)),
-        size=Vector((15.2, ginza_span_y + 2.0, 0.85)),
-        mat_idx=0,
-    )
-    for arch_idx in range(15):
-        ay = ginza_y - ginza_span_y * 0.5 + (arch_idx + 0.5) * (ginza_span_y / 15.0)
-        add_box(
-            bm,
-            center=Vector((ginza_x, ay, 17.2)),
-            size=Vector((15.4, 0.55, 3.6)),
+            center=Vector((bx, by, deck_z + 3.0)),
+            tangent_dir=t_dir,
+            normal_dir=n_dir,
+            size_tangent=max(2.0, span_len - 2.0),
+            size_normal=width + 0.5,
+            size_z=0.24,
             mat_idx=0,
         )
+        # 両端の歩道接地スチール橋脚（車道外側のみ）
+        for end_sign in [-1.0, 1.0]:
+            p_off = t_dir * (end_sign * (span_len * 0.5 - 1.2))
+            px_w = cx_w + p_off.x
+            pz_w = cz_w - p_off.y
+            end_ground_z = sample_shibuya_terrain_y(px_w, pz_w)
+            pier_bot = end_ground_z - 3.0
+            pier_top = deck_z - 0.2
+            pier_h = max(4.0, pier_top - pier_bot)
+            add_cylinder_z(
+                bm,
+                center=Vector((bx + p_off.x, by + p_off.y, (pier_bot + pier_top) * 0.5)),
+                radius=0.52,
+                height=pier_h,
+                segments=14,
+                mat_idx=3,
+            )
 
-    # 3. JR山手線・埼京線 渋谷駅高架橋＆国道246号ガード橋（worldX = -779 -> by = -84.0, Z = 8.4m..12.8m）
-    jr_by = -84.0
-    jr_bx_min = -120.0
-    jr_bx_max = 185.0
-    jr_len = jr_bx_max - jr_bx_min
-    jr_bx_mid = (jr_bx_min + jr_bx_max) * 0.5
-    # 鉄道高架バラスト軌道床版 (Z = 8.4m..9.8m: 国道246号の大型車も余裕でくぐれる桁下高 7.8m)
+    # 1a. 渋谷駅東口歩道橋：玉川通り/R246 跨道スパン (-775, 438)
+    add_skywalk_span(-775.0, 438.0, 0.3335, 0.9428, span_len=48.0, width=6.0, deck_h=8.35)
+    # 1b. 渋谷駅東口歩道橋：明治通り横断スパン (-776, 400)
+    add_skywalk_span(-776.0, 400.0, 0.9547, -0.2976, span_len=62.0, width=5.6, deck_h=8.35)
+
+    # 2. 東京メトロ銀座線 渋谷駅新駅舎（M字アーチ屋根ホーム）
+    # (-835, 315) -> Blender (bx = -85.0, by = 212.6), 東西スパン 122m で明治通り (-802, 315) 上空を横断
+    ginza_wx = -835.0
+    ginza_wz = 315.0
+    ginza_base_z = sample_shibuya_terrain_y(ginza_wx, ginza_wz)
+    ginza_bx = ginza_wx - (-750.0)  # -85.0
+    ginza_by = 527.6 - ginza_wz  # 212.6
+    ginza_span_x = 122.0
+    ginza_depth_y = 14.4
+
     add_box(
         bm,
-        center=Vector((jr_bx_mid, jr_by, 9.1)),
-        size=Vector((jr_len, 13.5, 1.4)),
+        center=Vector((ginza_bx, ginza_by, ginza_base_z + 14.8)),
+        size=Vector((ginza_span_x, ginza_depth_y, 1.2)),
         mat_idx=8,
     )
-    # 国道246号（bx = 85..135）および稲荷橋通り（bx = -80）を跨ぐJRグリーンスチールプレートガーダー＆ワーレントラス鉄道橋
-    for bridge_bx, bridge_span in [(110.0, 52.0), (-80.0, 28.0)]:
-        for side_y in [-6.4, 6.4]:
-            # プレートガーダー主腹板（Web）
+    add_box(
+        bm,
+        center=Vector((ginza_bx, ginza_by, ginza_base_z + 16.8)),
+        size=Vector((ginza_span_x - 0.8, ginza_depth_y - 0.7, 2.8)),
+        mat_idx=1,
+    )
+    add_box(
+        bm,
+        center=Vector((ginza_bx, ginza_by, ginza_base_z + 18.6)),
+        size=Vector((ginza_span_x + 2.0, ginza_depth_y + 0.8, 0.85)),
+        mat_idx=0,
+    )
+    for arch_idx in range(17):
+        ax = ginza_bx - ginza_span_x * 0.5 + (arch_idx + 0.5) * (ginza_span_x / 17.0)
+        add_box(
+            bm,
+            center=Vector((ax, ginza_by, ginza_base_z + 17.2)),
+            size=Vector((0.55, ginza_depth_y + 1.0, 3.6)),
+            mat_idx=0,
+        )
+    # 銀座線駅舎 東西支持橋脚（JR線路側・明治通り東側歩道に接地）
+    for pier_wx in [-884.0, -778.0]:
+        p_bx = pier_wx - (-750.0)
+        p_ground = sample_shibuya_terrain_y(pier_wx, ginza_wz)
+        p_bot = p_ground - 3.0
+        p_top = ginza_base_z + 14.5
+        for side_y in [-5.4, 5.4]:
             add_box(
                 bm,
-                center=Vector((bridge_bx, jr_by + side_y, 10.65)),
-                size=Vector((bridge_span, 0.48, 2.7)),
-                mat_idx=22,
-            )
-            # 上下フランジ鋼板（重厚なリベット鋼桁の水平エッジ）
-            for fl_z in [9.25, 12.05]:
-                add_box(
-                    bm,
-                    center=Vector((bridge_bx, jr_by + side_y, fl_z)),
-                    size=Vector((bridge_span + 0.4, 0.92, 0.32)),
-                    mat_idx=22,
-                )
-            # 垂直スチフナー補剛リブ（白い太帯ではなく同系色JRグリーン鋼材とダークフレームで実写の鈑桁ディテールを再現）
-            num_stiffeners = 16 if bridge_span > 40.0 else 10
-            bay_len = bridge_span / num_stiffeners
-            for p_i in range(num_stiffeners + 1):
-                px = bridge_bx - bridge_span * 0.5 + p_i * bay_len
-                add_box(
-                    bm,
-                    center=Vector((px, jr_by + side_y, 10.65)),
-                    size=Vector((0.24, 0.82, 2.65)),
-                    mat_idx=2 if (p_i % 4 == 0) else 22,
-                )
-                # ワーレントラス斜材（上弦と下弦を結ぶ斜め鋼材）
-                if p_i < num_stiffeners:
-                    p_mid_x = px + bay_len * 0.5
-                    dz_diag = 2.3 if (p_i % 2 == 0) else -2.3
-                    t_diag = Vector((bay_len, 0.0, dz_diag)).normalized()
-                    n_diag = Vector((0.0, 1.0, 0.0))
-                    add_oriented_box(
-                        bm,
-                        center=Vector((p_mid_x, jr_by + side_y, 10.65)),
-                        tangent_dir=t_diag,
-                        normal_dir=n_diag,
-                        size_tangent=math.hypot(bay_len, 2.3),
-                        size_normal=0.64,
-                        size_z=0.22,
-                        mat_idx=22,
-                    )
-        # 鉄道橋上部の架線柱（カテナリーポータルビーム）
-        for cat_frac in [-0.35, 0.0, 0.35]:
-            cat_x = bridge_bx + cat_frac * bridge_span
-            for side_y in [-6.5, 6.5]:
-                add_box(
-                    bm,
-                    center=Vector((cat_x, jr_by + side_y, 14.2)),
-                    size=Vector((0.32, 0.32, 4.4)),
-                    mat_idx=3,
-                )
-            add_box(
-                bm,
-                center=Vector((cat_x, jr_by, 16.2)),
-                size=Vector((0.28, 13.4, 0.28)),
-                mat_idx=3,
+                center=Vector((p_bx, ginza_by + side_y, (p_bot + p_top) * 0.5)),
+                size=Vector((1.35, 1.35, max(6.0, p_top - p_bot))),
+                mat_idx=8,
             )
 
     bm.normal_update()
@@ -5730,39 +5369,146 @@ def build_shibuya_parco_complex(
     return obj
 
 
+_STREAM_DEM_CACHE: tuple[dict, list[list[float]]] | None = None
+
+
+def sample_shibuya_terrain_y(x: float, z: float) -> float:
+    """`gsiPlateauLoader.ts` の `sampleShibuyaTerrainY` と一致する 2-pass 平滑済み地形標高（m）"""
+    global _STREAM_DEM_CACHE
+    if x >= -395.0:
+        return 0.0
+    if _STREAM_DEM_CACHE is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+        json_path = os.path.join(
+            project_root, "apps", "web", "public", "data", "tokyo_marunouchi_open_data.json"
+        )
+        with open(json_path, encoding="utf-8") as fh:
+            dem = json.load(fh)["shibuyaDem5a"]
+        grid = [[float(v) for v in row] for row in dem["elevationGrid"]]
+        rows = len(grid)
+        cols = len(grid[0]) if rows > 0 else 0
+        for _ in range(2):
+            nxt = [[0.0] * cols for _ in range(rows)]
+            for r in range(rows):
+                rm, rp = max(0, r - 1), min(rows - 1, r + 1)
+                for c in range(cols):
+                    cm, cp = max(0, c - 1), min(cols - 1, c + 1)
+                    nxt[r][c] = (
+                        grid[rm][cm]
+                        + 2.0 * grid[rm][c]
+                        + grid[rm][cp]
+                        + 2.0 * grid[r][cm]
+                        + 4.0 * grid[r][c]
+                        + 2.0 * grid[r][cp]
+                        + grid[rp][cm]
+                        + 2.0 * grid[rp][c]
+                        + grid[rp][cp]
+                    ) / 16.0
+            grid = nxt
+        _STREAM_DEM_CACHE = (dem, grid)
+
+    dem, grid = _STREAM_DEM_CACHE
+    rows, cols = len(grid), len(grid[0])
+    step = float(dem["gridStep"])
+    fx = max(0.0, min(cols - 1.0001, (x - float(dem["xMin"])) / step))
+    fz = max(0.0, min(rows - 1.0001, (z - float(dem["zMin"])) / step))
+    c0, r0 = min(cols - 1, math.floor(fx)), min(rows - 1, math.floor(fz))
+    c1, r1 = min(cols - 1, c0 + 1), min(rows - 1, r0 + 1)
+    tx, tz = fx - c0, fz - r0
+    e = (grid[r0][c0] * (1.0 - tx) + grid[r0][c1] * tx) * (1.0 - tz) + (
+        grid[r1][c0] * (1.0 - tx) + grid[r1][c1] * tx
+    ) * tz
+    y = max(-0.4, (e - 15.0) * 0.72)
+    if x > -500.0:
+        t = max(0.0, min(1.0, (x - -500.0) / (-395.0 - -500.0)))
+        y *= 0.5 * (1.0 + math.cos(math.pi * t))
+    return y
+
+
+def _transform_mesh_vertices(
+    mesh: bpy.types.Mesh,
+    verts: list[bpy.types.MeshVertex],
+    old_cx: float,
+    old_cy: float,
+    target_wx: float,
+    target_wz: float,
+    rot_z_deg: float,
+    skirt_depth: float = 3.5,
+) -> None:
+    """剛体Z回転（反転なし・det=+1）+ アンカー (-750.0, 527.6) 相対並行移動 + 地形接地・地中スカート延長"""
+    target_bx = target_wx - (-750.0)
+    target_by = 527.6 - target_wz
+    ty = sample_shibuya_terrain_y(target_wx, target_wz)
+    rad = math.radians(rot_z_deg)
+    cos_a = math.cos(rad)
+    sin_a = math.sin(rad)
+
+    for v in verts:
+        dx = v.co.x - old_cx
+        dy = v.co.y - old_cy
+        rx = dx * cos_a - dy * sin_a
+        ry = dx * sin_a + dy * cos_a
+        vz = (ty - skirt_depth) if (skirt_depth > 0.0 and v.co.z <= 0.15) else (v.co.z + ty)
+        v.co = Vector((target_bx + rx, target_by + ry, vz))
+    mesh.update()
+
+
+def reposition_mesh_obj(
+    obj: bpy.types.Object,
+    old_cx: float,
+    old_cy: float,
+    target_wx: float,
+    target_wz: float,
+    rot_z_deg: float,
+    skirt_depth: float = 3.5,
+) -> None:
+    """メッシュオブジェクト全体を 1:1 非反転座標系 + 地形標高へ剛体再配置する"""
+    if obj.type != "MESH" or not obj.data:
+        return
+    _transform_mesh_vertices(
+        obj.data,
+        list(obj.data.vertices),
+        old_cx,
+        old_cy,
+        target_wx,
+        target_wz,
+        rot_z_deg,
+        skirt_depth=skirt_depth,
+    )
+
+
 def build_shibuya_center_gai_entrance(
     materials: dict[str, bpy.types.Material],
 ) -> bpy.types.Object:
     """
-    渋谷センター街（バスケットボール通り）メイン入口アーチ看板＆ストリートバナー
-    Three.js ワールド座標 (x=-835.0, z=268.0) -> Blender 座標 (bx=283.0, by=-140.0)
-    1. スクランブル北西角の鉄骨トラスアーチゲート（スパン 8.4m、有効高 7.0m、車道横断直交配置）
-    2. ネオン発光看板「SHIBUYA CENTER-GAI バスケットボール通り」（ShibuyaQfront109Accent / BeaconRed）
-    3. センター街フラッグ・ペナントバナー
+    渋谷センター街（バスケットボール通り）メイン入口アーチ看板（1:1 非反転 実座標）
+    u = 0.08 地点 (-1035.8, 238.4) -> アンカー (-750.0, 527.6) 相対 Blender (-285.8, +289.2)
     """
     mesh = bpy.data.meshes.new("ShibuyaCenterGai_ArchMesh")
     bm = bmesh.new()
 
-    cx = 293.2448  # worldZ = 278.2448 (u=0.08)
-    cy = -146.0863  # worldX = -841.0863 (u=0.08)
+    wx, wz = -1035.8, 238.4
+    cx = wx - (-750.0)
+    cy = 527.6 - wz
+    base_z = sample_shibuya_terrain_y(wx, wz)
 
-    # センター街道路進行方向 (u=0.08: Three.js tan=(-0.505744, 0.862684) -> Blender (0.862684, -0.505744))
-    # 接線ベクトル (tangent_dir) と直交法線ベクトル (normal_dir: 道路を跨ぐ横断方向)
-    tangent_dir = Vector((0.862684, -0.505744, 0.0))
-    normal_dir = Vector((-0.505744, -0.862684, 0.0))
+    # 進行方向: スクランブル北西入口 (-1024, 249) -> (-1155, 128) (Three.js tan=(-0.73, -0.68) -> Blender (-0.73, +0.68))
+    tangent_dir = Vector((-0.73, 0.68, 0.0)).normalized()
+    normal_dir = Vector((0.68, 0.73, 0.0)).normalized()
 
-    half_span = 5.8
+    half_span = 5.4
     for side in [-1.0, 1.0]:
-        pillar_pos = Vector((cx, cy, 4.0)) + side * half_span * normal_dir
+        pillar_pos = Vector((cx, cy, base_z + 3.7)) + side * half_span * normal_dir
         add_cylinder_z(
             bm,
             center=pillar_pos,
             radius=0.28,
-            height=8.0,
+            height=9.2,
             segments=14,
             mat_idx=2,  # StreamDarkVoidSteel
         )
-        base_pos = Vector((cx, cy, 0.4)) + side * half_span * normal_dir
+        base_pos = Vector((cx, cy, base_z + 0.1)) + side * half_span * normal_dir
         add_oriented_box(
             bm,
             center=base_pos,
@@ -5770,14 +5516,13 @@ def build_shibuya_center_gai_entrance(
             normal_dir=normal_dir,
             size_tangent=0.9,
             size_normal=0.9,
-            size_z=0.8,
+            size_z=1.4,
             mat_idx=2,
         )
 
-    # 上部トラス梁（道路直交方向にスパン 11.4m）
     add_oriented_box(
         bm,
-        center=Vector((cx, cy, 7.6)),
+        center=Vector((cx, cy, base_z + 7.6)),
         tangent_dir=tangent_dir,
         normal_dir=normal_dir,
         size_tangent=0.6,
@@ -5786,9 +5531,6 @@ def build_shibuya_center_gai_entrance(
         mat_idx=3,  # StreamGalvanizedFrame
     )
 
-    # メイン看板パネル「渋谷センター街 / SHIBUYA CENTER-GAI / バスケットボール通り」
-    # 両面の看板表示面（±t面）には未反転UV [0,1]x[0,1] と ShibuyaCenterGaiArchSign を割り当て、
-    # 薄い側面・上下枠はダークスチール（mat_idx=2）にして文字の滲みを防止する。
     uv_layer = bm.loops.layers.uv.verify()
     t = tangent_dir.normalized()
     n = normal_dir.normalized()
@@ -5825,20 +5567,18 @@ def build_shibuya_center_gai_entrance(
         ]
 
         if face_axis == "normal":
-            # スクランブル交差点側 (-t) とセンター街側 (+t) が大面積表示面
             face_specs = [
-                ((0, 3, 7, 4), face_mat, uv_corners),  # -t面: 左=-hn -> 右=+hn
-                ((2, 1, 5, 6), face_mat, uv_corners),  # +t面: 左=+hn -> 右=-hn
+                ((0, 3, 7, 4), face_mat, uv_corners),
+                ((2, 1, 5, 6), face_mat, uv_corners),
                 ((0, 3, 2, 1), edge_mat, uv_corners),
                 ((4, 5, 6, 7), edge_mat, uv_corners),
                 ((0, 1, 5, 4), edge_mat, uv_corners),
                 ((2, 3, 7, 6), edge_mat, uv_corners),
             ]
         else:
-            # 通りに直交して両側面（±n面）から見える縦長フラッグバナー
             face_specs = [
-                ((1, 0, 4, 5), face_mat, uv_corners),  # -n面: 左=+ht -> 右=-ht
-                ((3, 2, 6, 7), face_mat, uv_corners),  # +n面: 左=-ht -> 右=+ht
+                ((1, 0, 4, 5), face_mat, uv_corners),
+                ((3, 2, 6, 7), face_mat, uv_corners),
                 ((0, 3, 2, 1), edge_mat, uv_corners),
                 ((4, 5, 6, 7), edge_mat, uv_corners),
                 ((1, 2, 6, 5), edge_mat, uv_corners),
@@ -5852,7 +5592,7 @@ def build_shibuya_center_gai_entrance(
                 f.loops[li][uv_layer].uv = uv
 
     add_sign_panel_box(
-        panel_center=Vector((cx, cy, 6.8)),
+        panel_center=Vector((cx, cy, base_z + 6.8)),
         size_t=0.42,
         size_n=6.4,
         size_z=1.4,
@@ -5860,10 +5600,9 @@ def build_shibuya_center_gai_entrance(
         face_mat=27,  # ShibuyaCenterGaiArchSign
         edge_mat=2,  # StreamDarkVoidSteel
     )
-    # 看板上部ブルーアクセント
     add_oriented_box(
         bm,
-        center=Vector((cx, cy, 7.7)),
+        center=Vector((cx, cy, base_z + 7.7)),
         tangent_dir=tangent_dir,
         normal_dir=normal_dir,
         size_tangent=0.5,
@@ -5871,10 +5610,6 @@ def build_shibuya_center_gai_entrance(
         size_z=0.28,
         mat_idx=10,  # ShibuyaSkyEdgeGlow
     )
-
-    # Why not straight-line f_dist flag posts:
-    # センター街は Catmull-Rom 曲線道路のため直線接線方向のオフセット柱は湾曲区間の車道へ突き出す。
-    # 沿道バナーは Three.js 側のスプライン追従フラッグに一本化する。
 
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     bm.normal_update()
@@ -5887,8 +5622,201 @@ def build_shibuya_center_gai_entrance(
     return obj
 
 
+def build_shibuya_hachiko_statue(
+    materials: dict[str, bpy.types.Material],
+) -> bpy.types.Object:
+    """
+    渋谷駅ハチ公前広場 忠犬ハチ公像（彫塑シルエット秋田犬ブロンズ像＋白御影石段状台座＋地中スカート）を構築する。
+    実在GPS (35.65906°N, 139.70065°E) -> world (-984.4, terrainY + 0.023, 324.6) ->
+    アンカー (-750.0, 527.6) 相対 Blender (-234.4, +203.0) でスクランブル交差点（北西）へ正対配置。
+    """
+    mesh = bpy.data.meshes.new("ShibuyaHachiko_StatueMesh")
+    bm = bmesh.new()
+
+    wx, wz = -984.4, 324.6
+    bx = wx - (-750.0)
+    by = 527.6 - wz
+    base_z = sample_shibuya_terrain_y(wx, wz) + 0.023
+
+    # 正面（北西 Scramble Crossing 側: Blender (-0.707, +0.707)）への基底ベクトル
+    fwd = Vector((-1.0, 1.0, 0.0)).normalized()
+    right = Vector((1.0, 1.0, 0.0)).normalized()
+    up = Vector((0.0, 0.0, 1.0))
+
+    def pt_local(rx: float, fy: float, uz: float) -> Vector:
+        return Vector((bx, by, base_z)) + right * rx + fwd * fy + up * uz
+
+    def add_oriented_ellipsoid(
+        center_local: tuple[float, float, float],
+        radii: tuple[float, float, float],
+        tilt_pitch_deg: float = 0.0,
+        tilt_roll_deg: float = 0.0,
+        mat_idx: int = 30,
+        subdivisions: int = 2,
+    ) -> None:
+        res = bmesh.ops.create_icosphere(bm, subdivisions=subdivisions, radius=1.0)
+        verts = res["verts"]
+        p_rad = math.radians(tilt_pitch_deg)
+        r_rad = math.radians(tilt_roll_deg)
+        cp, sp = math.cos(p_rad), math.sin(p_rad)
+        cr, sr = math.cos(r_rad), math.sin(r_rad)
+        c_pos = pt_local(*center_local)
+        for v in verts:
+            lx = v.co.x * radii[0]
+            ly = v.co.y * radii[1]
+            lz = v.co.z * radii[2]
+            # Roll around forward axis (local Y)
+            rx0 = lx * cr - lz * sr
+            rz0 = lx * sr + lz * cr
+            # Pitch around right axis (local X)
+            fy1 = ly * cp - rz0 * sp
+            uz1 = ly * sp + rz0 * cp
+            v.co = c_pos + right * rx0 + fwd * fy1 + up * uz1
+        visited = set()
+        for v in verts:
+            for f in v.link_faces:
+                if f not in visited:
+                    visited.add(f)
+                    f.material_index = mat_idx
+
+    def add_oriented_limb(
+        p0_local: tuple[float, float, float],
+        p1_local: tuple[float, float, float],
+        r0: float,
+        r1: float,
+        mat_idx: int = 30,
+        segments: int = 12,
+    ) -> None:
+        p0 = pt_local(*p0_local)
+        p1 = pt_local(*p1_local)
+        axis = p1 - p0
+        if axis.length < 1e-4:
+            return
+        d = axis.normalized()
+        ref = up if abs(d.z) < 0.9 else fwd
+        u_ax = d.cross(ref).normalized()
+        v_ax = d.cross(u_ax).normalized()
+        ring0, ring1 = [], []
+        for i in range(segments):
+            ang = 2.0 * math.pi * i / segments
+            radial = u_ax * math.cos(ang) + v_ax * math.sin(ang)
+            ring0.append(bm.verts.new(p0 + radial * r0))
+            ring1.append(bm.verts.new(p1 + radial * r1))
+        for i in range(segments):
+            ni = (i + 1) % segments
+            f = bm.faces.new([ring0[i], ring0[ni], ring1[ni], ring1[i]])
+            f.material_index = mat_idx
+        f_bot = bm.faces.new(list(reversed(ring0)))
+        f_bot.material_index = mat_idx
+        f_top = bm.faces.new(ring1)
+        f_top.material_index = mat_idx
+
+    # 1. 御影石台座（地中スカート -1.5m + 二段基壇 + 台座 + 銘板）
+    add_oriented_box(
+        bm,
+        center=pt_local(0.0, 0.0, -0.75),
+        tangent_dir=fwd,
+        normal_dir=right,
+        size_tangent=1.84,
+        size_normal=1.64,
+        size_z=1.50,
+        mat_idx=31,  # HachikoGranite
+    )
+    add_oriented_box(
+        bm,
+        center=pt_local(0.0, 0.0, 0.14),
+        tangent_dir=fwd,
+        normal_dir=right,
+        size_tangent=1.76,
+        size_normal=1.56,
+        size_z=0.28,
+        mat_idx=31,
+    )
+    add_oriented_box(
+        bm,
+        center=pt_local(0.0, 0.0, 0.68),
+        tangent_dir=fwd,
+        normal_dir=right,
+        size_tangent=1.34,
+        size_normal=1.18,
+        size_z=0.82,
+        mat_idx=31,
+    )
+    # 銅製銘板
+    add_oriented_box(
+        bm,
+        center=pt_local(0.0, 0.68, 0.68),
+        tangent_dir=fwd,
+        normal_dir=right,
+        size_tangent=0.06,
+        size_normal=0.58,
+        size_z=0.38,
+        mat_idx=30,  # HachikoBronze
+    )
+
+    # 2. お座りポーズのブロンズ秋田犬ハチ公本体 (Z = 1.09m .. 2.02m)
+    z0 = 1.09
+    # 後躯（座った腰部・太腿）
+    add_oriented_ellipsoid(
+        (0.0, -0.18, z0 + 0.18), (0.20, 0.24, 0.18), tilt_pitch_deg=-15.0, mat_idx=30
+    )
+    # 厚みのある胸郭・前胴体
+    add_oriented_ellipsoid(
+        (0.0, 0.08, z0 + 0.34), (0.19, 0.26, 0.22), tilt_pitch_deg=32.0, mat_idx=30
+    )
+    # 首筋
+    add_oriented_limb((0.0, 0.20, z0 + 0.44), (0.0, 0.31, z0 + 0.62), 0.14, 0.125, mat_idx=30)
+    # 頭部・頬ボリューム
+    add_oriented_ellipsoid(
+        (0.0, 0.33, z0 + 0.68), (0.145, 0.165, 0.145), tilt_pitch_deg=-5.0, mat_idx=30
+    )
+    # 秋田犬の精悍な口吻（マズル）＆鼻先
+    add_oriented_ellipsoid(
+        (0.0, 0.49, z0 + 0.65), (0.075, 0.11, 0.068), tilt_pitch_deg=-6.0, mat_idx=30
+    )
+    add_oriented_ellipsoid((0.0, 0.58, z0 + 0.66), (0.032, 0.032, 0.028), mat_idx=2, subdivisions=1)
+    # 右耳（凛と立つ三角耳）・左耳（特徴的な垂れ耳）
+    add_oriented_limb(
+        (-0.095, 0.31, z0 + 0.78), (-0.115, 0.33, z0 + 0.92), 0.052, 0.018, mat_idx=30, segments=8
+    )
+    add_oriented_limb(
+        (0.095, 0.31, z0 + 0.78), (0.155, 0.34, z0 + 0.72), 0.052, 0.020, mat_idx=30, segments=8
+    )
+    # 前脚2本（真っ直ぐ台座に着く力強い前肢 + 足先）
+    for sx in [-0.11, 0.11]:
+        add_oriented_limb((sx, 0.22, z0 + 0.30), (sx, 0.27, z0 + 0.04), 0.068, 0.052, mat_idx=30)
+        add_oriented_ellipsoid(
+            (sx, 0.30, z0 + 0.035), (0.055, 0.075, 0.036), mat_idx=30, subdivisions=1
+        )
+    # 後脚（折りたたんだ脛＋足先）
+    for sx in [-0.15, 0.15]:
+        add_oriented_ellipsoid(
+            (sx, -0.05, z0 + 0.06), (0.065, 0.16, 0.06), mat_idx=30, subdivisions=1
+        )
+    # 太い巻き尾（3セグメントの背負い巻き尾）
+    add_oriented_limb(
+        (0.0, -0.36, z0 + 0.14), (0.0, -0.44, z0 + 0.30), 0.06, 0.055, mat_idx=30, segments=10
+    )
+    add_oriented_limb(
+        (0.0, -0.44, z0 + 0.30), (0.0, -0.34, z0 + 0.44), 0.055, 0.048, mat_idx=30, segments=10
+    )
+    add_oriented_limb(
+        (0.0, -0.34, z0 + 0.44), (0.04, -0.22, z0 + 0.38), 0.048, 0.032, mat_idx=30, segments=10
+    )
+
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.normal_update()
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new("ShibuyaHachiko_Statue", mesh)
+    assign_materials_to_object(obj, materials)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
 def generate_shibuya_stream():
-    """渋谷ストリームおよび渋谷駅周辺主要ランドマーク群・首都高3号渋谷線高架橋の3Dモデル全体を生成し GLB としてエクスポートする"""
+    """渋谷ストリーム・主要ランドマーク群・センター街・ハチ公像を 1:1 非反転 実座標＋地形標高へ生成・配置して GLB エクスポートする"""
     clean_scene()
     materials = setup_materials()
 
@@ -5898,65 +5826,89 @@ def generate_shibuya_stream():
     bpy.context.scene.collection.objects.link(root)
 
     podium = build_low_rise_podium_and_plaza(materials)
-    podium.parent = root
-
     mid_void = build_mid_void_and_hotel_band(materials)
-    mid_void.parent = root
-
     high_rise = build_high_rise_tower(materials)
-    high_rise.parent = root
-
     stream_signage = build_stream_architectural_signage(materials)
-    stream_signage.parent = root
+    for stream_part, sk in [
+        (podium, 3.5),
+        (mid_void, 0.0),
+        (high_rise, 0.0),
+        (stream_signage, 0.0),
+    ]:
+        reposition_mesh_obj(stream_part, 0.0, 0.0, -750.0, 527.6, 135.0, skirt_depth=sk)
+        stream_part.parent = root
 
     shutoko_viaduct = build_shutoko_route3_viaduct(materials)
     shutoko_viaduct.parent = root
 
     scramble_square = build_shibuya_scramble_square_tower(materials)
+    reposition_mesh_obj(scramble_square, 160.0, -114.3, -835.7, 391.1, -90.0)
     scramble_square.parent = root
 
     hikarie = build_shibuya_hikarie_tower(materials)
+    reposition_mesh_obj(hikarie, 161.8, 1.3, -723.6, 327.9, -90.0)
     hikarie.parent = root
 
     pedestrian_deck = build_shibuya_pedestrian_deck_and_rail_overpass(materials)
     pedestrian_deck.parent = root
 
     sakura_stage = build_shibuya_sakura_stage_tower(materials)
+    reposition_mesh_obj(sakura_stage, -9.2, -110.3, -908.7, 613.0, -90.0)
     sakura_stage.parent = root
 
     fukuras = build_shibuya_fukuras_tower(materials)
+    reposition_mesh_obj(fukuras, 61.0, -111.3, -1026.3, 443.3, -90.0)
     fukuras.parent = root
 
     miyashita_park = build_shibuya_miyashita_park_complex(materials)
+    reposition_mesh_obj(miyashita_park, 334.9, -0.2, -895.0, 47.2, 90.0)
     miyashita_park.parent = root
 
     qfront_109 = build_shibuya_qfront_109_complex(materials)
+    qf_verts = [v for v in qfront_109.data.vertices if v.co.y > -150.0]
+    s109_verts = [v for v in qfront_109.data.vertices if v.co.y <= -150.0]
+    _transform_mesh_vertices(
+        qfront_109.data, qf_verts, 303.0, -120.0, -1009.0, 235.8, 114.6, skirt_depth=3.5
+    )
+    _transform_mesh_vertices(
+        qfront_109.data, s109_verts, 278.0, -184.0, -1192.0, 266.0, -113.0, skirt_depth=3.5
+    )
     qfront_109.parent = root
 
     magnet = build_shibuya_magnet_and_station_front(materials)
+    reposition_mesh_obj(magnet, 303.9, -85.0, -950.0, 224.0, 90.0)
     magnet.parent = root
 
     mark_city = build_shibuya_mark_city_complex(materials)
+    reposition_mesh_obj(mark_city, 173.0, -183.5, -1154.9, 424.4, -90.0)
     mark_city.parent = root
 
     toei_bic = build_shibuya_toei_plaza_bic_camera(materials)
+    reposition_mesh_obj(toei_bic, 289.9, -28.1, -770.0, 202.0, -90.0)
     toei_bic.parent = root
 
     cerulean = build_shibuya_cerulean_tower(materials)
+    reposition_mesh_obj(cerulean, -30.0, -206.0, -1093.8, 616.4, -90.0)
     cerulean.parent = root
 
     parco = build_shibuya_parco_complex(materials)
+    reposition_mesh_obj(parco, 403.1, -139.2, -1154.9, -8.3, -90.0)
     parco.parent = root
 
     center_gai = build_shibuya_center_gai_entrance(materials)
     center_gai.parent = root
+
+    hachiko_statue = build_shibuya_hachiko_statue(materials)
+    hachiko_statue.parent = root
 
     print("Preserving procedural and cylindrical UV coordinates for all mesh objects...")
     for m_obj in bpy.data.objects:
         if m_obj.type == "MESH" and m_obj.data.uv_layers:
             m_obj.data.uv_layers.active_index = 0
 
-    print("High-precision Shibuya Station District & Shutoko Viaduct modeling complete! Hierarchy:")
+    print(
+        "High-precision Shibuya Station District (1:1 non-mirrored) modeling complete! Hierarchy:"
+    )
     for obj in bpy.data.objects:
         p_name = obj.parent.name if obj.parent else "None"
         print(f"  - {obj.name} (Type: {obj.type}, Parent: {p_name})")
@@ -5986,7 +5938,7 @@ def generate_shibuya_stream():
 
 
 def render_360_review(review_dir: str):
-    """360度マルチアングル（16視点：渋谷ストリーム・首都高3号渋谷線・スクランブルSQ・ヒカリエ・サクラステージ・フクラス・MIYASHITA PARK・QFRONT/109を含む）の検証レンダリング画像を出力する"""
+    """360度マルチアングル＆主要ランドマーク（ハチ公像・スクランブル・QFRONT・109・ストリーム）検証レンダリング"""
     os.makedirs(review_dir, exist_ok=True)
     scene = bpy.context.scene
     avail_engines = [
@@ -6027,116 +5979,32 @@ def render_360_review(review_dir: str):
 
     cam_data = bpy.data.cameras.new("ReviewCamera")
     cam_data.lens = 35.0
-    cam_data.clip_end = 2000.0
+    cam_data.clip_end = 2500.0
     cam_obj = bpy.data.objects.new("ReviewCamera", cam_data)
     scene.collection.objects.link(cam_obj)
     scene.camera = cam_obj
 
+    def bpos(wx: float, wz: float, h: float) -> Vector:
+        return Vector((wx - (-750.0), 527.6 - wz, sample_shibuya_terrain_y(wx, wz) + h))
+
     views = [
-        ("00_front_meijidori", Vector((0.0, -245.0, 92.0)), Vector((40.0, -30.0, 88.0)), 32.0),
-        ("01_diag_front_right", Vector((245.0, -225.0, 105.0)), Vector((65.0, -45.0, 95.0)), 32.0),
-        ("02_right_north_246", Vector((350.0, -55.0, 105.0)), Vector((120.0, -55.0, 75.0)), 30.0),
-        ("03_diag_back_right", Vector((245.0, 165.0, 105.0)), Vector((65.0, -20.0, 95.0)), 32.0),
-        ("04_back_east_hikarie", Vector((45.0, 235.0, 95.0)), Vector((55.0, -30.0, 90.0)), 32.0),
-        ("05_diag_back_left", Vector((-165.0, 185.0, 95.0)), Vector((35.0, -25.0, 88.0)), 32.0),
-        ("06_left_south_ebisu", Vector((-235.0, -55.0, 92.0)), Vector((55.0, -55.0, 88.0)), 32.0),
-        ("07_diag_front_left", Vector((-175.0, -245.0, 95.0)), Vector((45.0, -65.0, 88.0)), 32.0),
+        ("00_overview_southeast", bpos(-550.0, 720.0, 220.0), bpos(-930.0, 340.0, 50.0), 26.0),
+        ("01_overview_northeast", bpos(-540.0, 20.0, 220.0), bpos(-950.0, 340.0, 50.0), 26.0),
+        ("02_overview_northwest", bpos(-1380.0, -40.0, 220.0), bpos(-950.0, 340.0, 50.0), 26.0),
+        ("03_overview_southwest", bpos(-1380.0, 760.0, 220.0), bpos(-950.0, 340.0, 50.0), 26.0),
+        ("04_birdseye_shibuya", bpos(-950.0, 340.0, 540.0), bpos(-950.0, 340.0, 10.0), 24.0),
+        ("05_stream_front_meiji", bpos(-680.0, 465.0, 4.0), bpos(-750.0, 527.6, 55.0), 24.0),
         (
-            "08_birdseye_district",
-            Vector((-160.0, -250.0, 320.0)),
-            Vector((110.0, -55.0, 85.0)),
-            28.0,
-        ),
-        (
-            "09_driver_eye_meijidori_north",
-            Vector((-27.0, -50.0, 1.8)),
-            Vector((135.0, -55.0, 38.0)),
-            22.0,
-        ),
-        (
-            "10_driver_eye_under_shutoko_246",
-            Vector((122.0, -35.0, 2.2)),
-            Vector((122.0, 85.0, 7.5)),
-            22.0,
-        ),
-        (
-            "11_closeup_scramble_sky_and_hikarie",
-            Vector((-35.0, -55.0, 135.0)),
-            Vector((160.0, -55.0, 140.0)),
+            "06_scramble_qfront_centergai",
+            bpos(-965.0, 305.0, 3.0),
+            bpos(-1020.0, 236.0, 18.0),
             24.0,
         ),
-        (
-            "12_driver_eye_sakura_stage_and_fukuras",
-            Vector((-35.0, -48.0, 2.2)),
-            Vector((35.0, -115.0, 42.0)),
-            22.0,
-        ),
-        (
-            "13_driver_eye_miyashita_and_qfront_109",
-            Vector((185.0, -55.0, 2.4)),
-            Vector((263.0, -60.0, 32.0)),
-            22.0,
-        ),
-        (
-            "14_closeup_qfront_and_shibuya109",
-            Vector((215.0, -90.0, 28.0)),
-            Vector((278.0, -165.0, 48.0)),
-            26.0,
-        ),
-        (
-            "15_closeup_miyashita_park_arches",
-            Vector((270.0, -65.0, 34.0)),
-            Vector((335.0, 0.0, 26.0)),
-            26.0,
-        ),
-        (
-            "16_driver_eye_scramble_crossing_and_magnet",
-            Vector((263.0, -120.0, 3.0)),
-            Vector((304.0, -84.8, 24.0)),
-            24.0,
-        ),
-        (
-            "17_driver_eye_dogenzaka_mark_city",
-            Vector((255.0, -150.0, 3.5)),
-            Vector((195.0, -180.0, 35.0)),
-            24.0,
-        ),
-        (
-            "18_driver_eye_miyamasuzaka_toei_bic",
-            Vector((263.0, -55.0, 3.0)),
-            Vector((290.0, -28.0, 26.0)),
-            24.0,
-        ),
-        (
-            "19_closeup_shibuya_parco_and_spiral",
-            Vector((330.0, -110.0, 60.0)),
-            Vector((403.0, -140.0, 50.0)),
-            28.0,
-        ),
-        (
-            "20_closeup_cerulean_tower_and_helipad",
-            Vector((30.0, -170.0, 120.0)),
-            Vector((-30.0, -203.0, 140.0)),
-            28.0,
-        ),
-        (
-            "21_driver_eye_center_gai_entrance_arch",
-            Vector((255.0, -119.0, 2.5)),
-            Vector((293.24, -146.09, 7.0)),
-            24.0,
-        ),
-        (
-            "22_closeup_shibuya_scramble_square_urban_core",
-            Vector((130.0, -180.0, 18.0)),
-            Vector((165.0, -138.0, 16.0)),
-            24.0,
-        ),
-        (
-            "23_closeup_shibuya109_entrance_steps_and_canopy",
-            Vector((260.0, -165.0, 4.0)),
-            Vector((278.0, -184.0, 8.0)),
-            24.0,
-        ),
+        ("07_shibuya109_east_yfork", bpos(-1125.0, 272.0, 3.5), bpos(-1192.0, 266.0, 32.0), 24.0),
+        ("08_hachiko_closeup_front", bpos(-988.5, 320.5, 1.9), bpos(-984.4, 324.6, 1.4), 38.0),
+        ("09_hachiko_closeup_side", bpos(-981.0, 321.5, 2.0), bpos(-984.4, 324.6, 1.3), 38.0),
+        ("10_scramble_sq_hikarie", bpos(-795.0, 380.0, 15.0), bpos(-835.7, 391.1, 80.0), 22.0),
+        ("11_cerulean_sakura_fukuras", bpos(-975.0, 515.0, 18.0), bpos(-1085.0, 600.0, 70.0), 22.0),
     ]
 
     for name, cam_pos, target_pos, lens in views:

@@ -167,13 +167,13 @@ export interface OpenWorldStreamingStatus {
 export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
   {
     id: "shibuya-core",
-    nameJa: "渋谷ストリーム・明治通り中央",
-    nameEn: "Shibuya Stream & Meiji-dori Core",
-    nameZh: "涩谷Stream・明治通核心区",
+    nameJa: "渋谷ストリーム・スクランブル交差点・駅周辺",
+    nameEn: "Shibuya Stream, Scramble Crossing & Station Core",
+    nameZh: "涩谷Stream・全向路口・车站核心区",
     zone: "shibuya",
-    centerX: -750,
-    centerZ: -15,
-    bounds: { minX: -960, maxX: -610, minZ: -115, maxZ: 115 },
+    centerX: -850,
+    centerZ: 420,
+    bounds: { minX: -1180, maxX: -610, minZ: 220, maxZ: 640 },
     estimatedMemoryMb: 34,
     associatedGlbModelIds: ["shibuya_stream", "shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: true,
@@ -184,22 +184,22 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     nameEn: "Shibuya South, Namikibashi & Sakuragaoka",
     nameZh: "涩谷南・并木桥・樱丘环线",
     zone: "shibuya",
-    centerX: -750,
-    centerZ: -195,
-    bounds: { minX: -960, maxX: -610, minZ: -320, maxZ: -115 },
+    centerX: -820,
+    centerZ: 760,
+    bounds: { minX: -1200, maxX: -540, minZ: 640, maxZ: 920 },
     estimatedMemoryMb: 18,
     associatedGlbModelIds: ["shibuya_stream", "street_tree"],
     isPrimaryHub: false,
   },
   {
     id: "shibuya-north",
-    nameJa: "渋谷北・スクランブルSQ・ヒカリエ・センター街・PARCO・宮下公園",
-    nameEn: "Shibuya North, Scramble Sq, Hikarie, Center-Gai, PARCO & Miyashita",
-    nameZh: "涩谷北・Scramble广场・Hikarie・中心街・PARCO・宫下公园",
+    nameJa: "渋谷北・センター街・公園通り・PARCO・宮下公園",
+    nameEn: "Shibuya North, Center-Gai, Koen-dori, PARCO & Miyashita",
+    nameZh: "涩谷北・中心街・公园通・PARCO・宫下公园",
     zone: "shibuya",
-    centerX: -750,
-    centerZ: 285,
-    bounds: { minX: -960, maxX: -610, minZ: 115, maxZ: 460 },
+    centerX: -980,
+    centerZ: 50,
+    bounds: { minX: -1350, maxX: -610, minZ: -160, maxZ: 220 },
     estimatedMemoryMb: 26,
     associatedGlbModelIds: ["shibuya_stream", "shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: true,
@@ -211,8 +211,8 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     nameZh: "国道246号・青山通西（金王坂〜表参道）",
     zone: "corridor",
     centerX: -545,
-    centerZ: 95,
-    bounds: { minX: -610, maxX: -465, minZ: -260, maxZ: 340 },
+    centerZ: 200,
+    bounds: { minX: -610, maxX: -465, minZ: 60, maxZ: 340 },
     estimatedMemoryMb: 16,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
@@ -224,8 +224,8 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     nameZh: "国道246号・青山通东（赤坂方向）",
     zone: "corridor",
     centerX: -395,
-    centerZ: 95,
-    bounds: { minX: -465, maxX: -320, minZ: -260, maxZ: 340 },
+    centerZ: 200,
+    bounds: { minX: -465, maxX: -320, minZ: 60, maxZ: 340 },
     estimatedMemoryMb: 16,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
@@ -288,9 +288,9 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     nameEn: "Shibuya West, Shoto, Shinsen & Yamate-dori",
     nameZh: "涩谷西・松涛・神泉・山手通",
     zone: "shibuya",
-    centerX: -1280,
-    centerZ: 70,
-    bounds: { minX: -1600, maxX: -960, minZ: -320, maxZ: 460 },
+    centerX: -1450,
+    centerZ: 380,
+    bounds: { minX: -1800, maxX: -1180, minZ: -160, maxZ: 920 },
     estimatedMemoryMb: 24,
     associatedGlbModelIds: ["shibuya_stream", "shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: false,
@@ -301,9 +301,9 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     nameEn: "Harajuku, Meiji-dori North, Omotesando & Yoyogi",
     nameZh: "原宿・明治通北・表参道・代代木",
     zone: "shibuya",
-    centerX: -1100,
-    centerZ: 830,
-    bounds: { minX: -1600, maxX: -610, minZ: 460, maxZ: 1200 },
+    centerX: -860,
+    centerZ: -320,
+    bounds: { minX: -1600, maxX: -610, minZ: -800, maxZ: -160 },
     estimatedMemoryMb: 20,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
@@ -314,9 +314,9 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     nameEn: "Ebisu, Meiji-dori South, Daikanyama & Hiroo",
     nameZh: "惠比寿・明治通南・代官山・广尾",
     zone: "shibuya",
-    centerX: -1100,
-    centerZ: -760,
-    bounds: { minX: -1600, maxX: -610, minZ: -1200, maxZ: -320 },
+    centerX: -720,
+    centerZ: 1050,
+    bounds: { minX: -1600, maxX: -320, minZ: 920, maxZ: 1400 },
     estimatedMemoryMb: 18,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
@@ -327,9 +327,9 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     nameEn: "Roppongi-dori, Nishi-Azabu & Roppongi Hills",
     nameZh: "六本木通・西麻布・六本木之丘",
     zone: "corridor",
-    centerX: -365,
-    centerZ: -530,
-    bounds: { minX: -610, maxX: -120, minZ: -900, maxZ: -260 },
+    centerX: -400,
+    centerZ: 480,
+    bounds: { minX: -610, maxX: -120, minZ: 340, maxZ: 920 },
     estimatedMemoryMb: 24,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
@@ -340,9 +340,9 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     nameEn: "Omotesando North, Gaienmae & Jingu Gaien",
     nameZh: "表参道北・外苑前・神宫外苑",
     zone: "corridor",
-    centerX: -465,
-    centerZ: 770,
-    bounds: { minX: -610, maxX: -320, minZ: 340, maxZ: 1200 },
+    centerX: -480,
+    centerZ: -120,
+    bounds: { minX: -610, maxX: -320, minZ: -600, maxZ: 60 },
     estimatedMemoryMb: 18,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
@@ -881,6 +881,8 @@ export class OpenWorldStreamingSystem {
           options?.onProgress?.(progress, this.getStatus());
         }
 
+        const currentZone = this.chunks.get(this.currentChunkId)?.definition.zone ?? "shibuya";
+
         // 残りの進行方向プリフェッチ対象チャンクをバックグラウンドキューに積む
         for (const item of scoredChunks) {
           const isAlreadyPriority = this.priorityTargetChunkIds.has(item.id);
@@ -888,8 +890,15 @@ export class OpenWorldStreamingSystem {
             continue;
           }
           const runtime = this.chunks.get(item.id)!;
+          const isBlockedCrossCityFar = this.isCrossCityPrefetchBlocked(
+            currentZone,
+            runtime.definition.zone,
+            item.scoreInfo.distanceFromVehicleM,
+          );
           const shouldQueueForPrefetch =
-            item.scoreInfo.isWithinPrefetchCone && runtime.state === "unloaded";
+            !isBlockedCrossCityFar &&
+            item.scoreInfo.isWithinPrefetchCone &&
+            runtime.state === "unloaded";
           if (shouldQueueForPrefetch) {
             runtime.state = "queued";
           }
@@ -1035,6 +1044,7 @@ export class OpenWorldStreamingSystem {
       params;
 
     this.currentChunkId = resolveChunkIdAtPosition(vehicleX, vehicleZ);
+    const currentZone = this.chunks.get(this.currentChunkId)?.definition.zone ?? "shibuya";
 
     // 1. 全チャンクの距離・進行方向予測スコアを更新し、優先度上位のチャンクのみをアクティブ/キュー対象として選定
     // Why not shouldBeActiveOrQueued だけで全対象チャンクを無制限に queued にするか:
@@ -1063,12 +1073,19 @@ export class OpenWorldStreamingSystem {
       chunk.distanceFromVehicleM = score.distanceFromVehicleM;
       chunk.distanceFromPredictedM = score.distanceFromPredictedM;
 
+      const isBlockedCrossCityFar = this.isCrossCityPrefetchBlocked(
+        currentZone,
+        chunk.definition.zone,
+        score.distanceFromVehicleM,
+      );
       const isCurrentOrActiveZone =
         chunk.definition.id === this.currentChunkId || score.isWithinActiveRadius;
       const isWithinUnloadBoundary = score.distanceFromVehicleM <= this.budget.unloadRadiusM;
       const shouldBeCandidate =
         chunk.definition.id === this.currentChunkId ||
-        ((isCurrentOrActiveZone || score.isWithinPrefetchCone) && isWithinUnloadBoundary);
+        (!isBlockedCrossCityFar &&
+          (isCurrentOrActiveZone || score.isWithinPrefetchCone) &&
+          isWithinUnloadBoundary);
       scoredChunks.push({ chunk, shouldBeCandidate, isCurrentOrActiveZone });
     }
 
@@ -1273,6 +1290,21 @@ export class OpenWorldStreamingSystem {
     this.evictSingleChunk(chunk);
     this.emitStatus();
     return true;
+  }
+
+  /**
+   * 東京⇄渋谷の遠方越境プリフェッチ抑止判定。
+   * 廊下セクター ("corridor") を跨いで反対都市のチャンクが遠方から先読みされるのを防ぐ。
+   */
+  private isCrossCityPrefetchBlocked(
+    currentZone: WorldChunkDefinition["zone"],
+    targetZone: WorldChunkDefinition["zone"],
+    distanceFromVehicleM: number,
+  ): boolean {
+    const isOppositeCity =
+      (currentZone === "tokyo" && targetZone === "shibuya") ||
+      (currentZone === "shibuya" && targetZone === "tokyo");
+    return isOppositeCity && distanceFromVehicleM > this.budget.activeRadiusM;
   }
 
   private computeEstimatedMemoryUsedMb(): number {

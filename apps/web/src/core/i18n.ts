@@ -735,6 +735,14 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
     en: "Route 246 / Aoyama-dori / Tamagawa-dori (Shibuya Stream North)",
     zh: "国道246号・青山通・玉川通 (涩谷Stream北交叉口)",
   },
+  "国道246号・青山通り・金王坂 (渋谷駅東口〜宮益坂上)": {
+    en: "Route 246 / Aoyama-dori / Kon-ozaka (Shibuya Sta. East–Miyamasuzaka-ue)",
+    zh: "国道246号・青山通・金王坂 (涩谷站东口〜宫益坂上)",
+  },
+  "国道246号（青山通り・渋谷駅東口連絡路）": {
+    en: "Route 246 (Aoyama-dori / Shibuya Sta. East Connector)",
+    zh: "国道246号 (青山通・涩谷站东口联络路)",
+  },
   "渋谷川遊歩道・稲荷橋広場通り (渋谷区道)": {
     en: "Shibuya River Promenade / Inaribashi Plaza St. (Shibuya Ward Rd)",
     zh: "涩谷川步道・稻荷桥广场通 (涩谷区道)",
@@ -742,6 +750,18 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
   "明治通り (都道305号芝新宿王子線・渋谷駅東口)": {
     en: "Meiji-dori Ave. (Pref. Rte 305 Shibuya East)",
     zh: "明治通 (东京都道305号・涩谷站东口)",
+  },
+  "明治通り（都道305号）": {
+    en: "Meiji-dori Ave. (Pref. Rte 305)",
+    zh: "明治通 (东京都道305号)",
+  },
+  "明治通り（並木橋・恵比寿方面カーブ区間）": {
+    en: "Meiji-dori Ave. (Namikibashi / Ebisu Curve)",
+    zh: "明治通 (并木桥・惠比寿方向弯道)",
+  },
+  "明治通り（宮下公園・原宿方面カーブ区間）": {
+    en: "Meiji-dori Ave. (Miyashita Park / Harajuku Curve)",
+    zh: "明治通 (宫下公园・原宿方向弯道)",
   },
   "青山通り・国道246号 (赤坂・青山・渋谷連絡線)": {
     en: "Aoyama-dori / Route 246 (Akasaka–Shibuya)",
@@ -755,6 +775,10 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
     en: "Shibuya Scramble Crossing (Hachiko / QFRONT / 109)",
     zh: "涩谷十字路口 (八公前・QFRONT・109前交叉口)",
   },
+  "渋谷スクランブル交差点連絡路 (109前〜スクランブル中心〜JR渋谷駅ガード下〜宮益坂下)": {
+    en: "Shibuya Scramble Crossing Corridor (109–Crossing–JR Underpass–Miyamasuzaka)",
+    zh: "涩谷全向十字路口联络路 (109前〜十字路口中心〜JR涩谷站下穿〜宫益坂下)",
+  },
   "渋谷スクランブル交差点連絡路 (109前〜スクランブル中心〜ハチ公前北〜宮益坂下連絡路)": {
     en: "Shibuya Scramble Crossing Corridor (109–Crossing–Hachiko–Miyamasuzaka)",
     zh: "涩谷全向十字路口联络路 (109前〜十字路口中心〜八公前北〜宫益坂下联络路)",
@@ -767,15 +791,43 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
     en: "Dogenzaka Ave. (Pref. Rte 413 / SHIBUYA109–Dogenzaka-ue)",
     zh: "道玄坂 (东京都道413号・SHIBUYA109〜道玄坂上坡道段)",
   },
+  "道玄坂（都道413号・SHIBUYA109〜道玄坂上坂道区間）": {
+    en: "Dogenzaka Ave. (Pref. Rte 413 / SHIBUYA109–Dogenzaka-ue)",
+    zh: "道玄坂 (东京都道413号・SHIBUYA109〜道玄坂上坡道段)",
+  },
+  "文化村通り (SHIBUYA109〜東急本店〜松濤二丁目)": {
+    en: "Bunkamura-dori Ave. (SHIBUYA109–Tokyu Honten–Shoto 2-Chome)",
+    zh: "文化村通 (SHIBUYA109〜东急总店〜松涛二丁目)",
+  },
   "文化村通り (渋谷109〜東急本店〜松濤二丁目連絡路)": {
     en: "Bunkamura-dori Ave. (SHIBUYA109–Tokyu Honten–Shoto)",
     zh: "文化村通 (涩谷109〜东急总店〜松涛二丁目联络路)",
+  },
+  "文化村通り（渋谷109〜東急本店〜松濤二丁目連絡路）": {
+    en: "Bunkamura-dori Ave. (SHIBUYA109–Tokyu Honten–Shoto)",
+    zh: "文化村通 (涩谷109〜东急总店〜松涛二丁目联络路)",
+  },
+  "渋谷公園通り (スクランブル〜西武・モディ〜PARCO〜渋谷区役所・NHK方面)": {
+    en: "Shibuya Koen-dori Ave. (Scramble–MODI–PARCO–Ward Office / NHK)",
+    zh: "涩谷公园通 (十字路口〜MODI〜PARCO〜涩谷区役所・NHK方向)",
   },
   "渋谷公園通り (神南一丁目〜PARCO〜渋谷区役所・NHK方面)": {
     en: "Shibuya Koen-dori Ave. (Jinnan / PARCO / Ward Office / NHK)",
     zh: "涩谷公园通 (神南一丁目〜PARCO〜涩谷区役所・NHK方向)",
   },
+  "渋谷公園通り（神南一丁目〜PARCO〜渋谷区役所・NHK方面）": {
+    en: "Shibuya Koen-dori Ave. (Jinnan / PARCO / Ward Office / NHK)",
+    zh: "涩谷公园通 (神南一丁目〜PARCO〜涩谷区役所・NHK方向)",
+  },
+  "井の頭通り・オルガン坂 (宇田川町交番〜PARCO前〜明治通り)": {
+    en: "Inokashira-dori / Organ-zaka (Udagawacho Koban–PARCO–Meiji-dori)",
+    zh: "井之头通・风琴坂 (宇田川町交番〜PARCO前〜明治通)",
+  },
   "井の頭通り・オルガン坂 (スクランブル北西〜宇田川町〜PARCO前)": {
+    en: "Inokashira-dori / Organ-zaka (Udagawacho / PARCO)",
+    zh: "井之头通・风琴坂 (十字路口西北〜宇田川町〜PARCO前)",
+  },
+  "井の頭通り・オルガン坂（スクランブル北西〜宇田川町〜PARCO前）": {
     en: "Inokashira-dori / Organ-zaka (Udagawacho / PARCO)",
     zh: "井之头通・风琴坂 (十字路口西北〜宇田川町〜PARCO前)",
   },
@@ -783,21 +835,53 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
     en: "Tamagawa-dori / Route 246 West (Cerulean–Shinsen–Yamate)",
     zh: "玉川通・国道246号西进 (蓝塔〜道玄坂上〜神泉町〜山手通)",
   },
+  "玉川通り・国道246号西進（明治通り〜セルリアンタワー〜道玄坂上〜神泉町〜山手通り）": {
+    en: "Tamagawa-dori / Route 246 West (Meiji-dori–Cerulean–Shinsen–Yamate)",
+    zh: "玉川通・国道246号西进 (明治通〜蓝塔〜道玄坂上〜神泉町〜山手通)",
+  },
   "円山町・神泉仲通り (道玄坂上〜神泉駅前〜松濤二丁目)": {
     en: "Maruyamacho / Shinsen Naka-dori St. (Shinsen Sta. / Shoto)",
     zh: "圆山町・神泉仲通 (道玄坂上〜神泉站前〜松涛二丁目)",
+  },
+  "円山町・神泉仲通り（道玄坂上〜神泉駅前〜松濤二丁目）": {
+    en: "Maruyamacho / Shinsen Naka-dori St. (Shinsen Sta. / Shoto)",
+    zh: "圆山町・神泉仲通 (道玄坂上〜神泉站前〜松涛二丁目)",
+  },
+  "桜丘さくら坂 (サクラステージ〜セルリアンタワー〜玉川通り周回路)": {
+    en: "Sakuragaoka Sakurazaka St. (Sakura Stage–Cerulean–Route 246 Loop)",
+    zh: "樱丘樱坂 (Sakura Stage〜蓝塔〜玉川通环路)",
   },
   "桜丘さくら坂 (セルリアンタワー〜インフォスタワー〜玉川通り周回路)": {
     en: "Sakuragaoka Sakurazaka St. (Cerulean / Infoss Loop)",
     zh: "樱丘樱坂 (蓝塔〜Infoss塔〜玉川通环路)",
   },
+  "桜丘さくら坂（サクラステージ〜インフォスタワー〜玉川通り周回路）": {
+    en: "Sakuragaoka Sakurazaka St. (Sakura Stage–Infoss Loop)",
+    zh: "樱丘樱坂 (Sakura Stage〜Infoss塔〜玉川通环路)",
+  },
+  "宮益坂 (都道413号・宮益坂下〜宮益坂上・国道246号合流)": {
+    en: "Miyamasuzaka Ave. (Pref. Rte 413 / Miyamasuzaka-shita–Route 246)",
+    zh: "宫益坂 (东京都道413号・宫益坂下〜宫益坂上・国道246号合流)",
+  },
   "宮益坂 (都道413号・宮益坂下〜宮益坂上〜表参道方面)": {
     en: "Miyamasuzaka Ave. (Pref. Rte 413 / Miyamasuzaka–Omotesando)",
     zh: "宫益坂 (东京都道413号・宫益坂下〜宫益坂上〜表参道方向)",
   },
+  "宮益坂（都道413号・渋谷駅東口〜宮益坂上〜表参道方面）": {
+    en: "Miyamasuzaka Ave. (Pref. Rte 413 / Shibuya East–Omotesando)",
+    zh: "宫益坂 (东京都道413号・涩谷站东口〜宫益坂上〜表参道方向)",
+  },
   "神南二丁目連絡路 (宮下公園北〜勤労福祉会館前)": {
     en: "Jinnan 2-Chome Connector (Miyashita Park North–Hall)",
     zh: "神南二丁目联络路 (宫下公园北〜勤劳福利会馆前)",
+  },
+  "神南二丁目連絡路（宮下公園北〜勤労福祉会館前）": {
+    en: "Jinnan 2-Chome Connector (Miyashita Park North–Hall)",
+    zh: "神南二丁目联络路 (宫下公园北〜勤劳福利会馆前)",
+  },
+  "首都高速3号渋谷線 (玉川通り・渋谷高架橋・六本木通り直上)": {
+    en: "Shutoko Expwy Route 3 Shibuya Line (Tamagawa–Shibuya Viaduct–Roppongi)",
+    zh: "首都高速3号涩谷线 (玉川通・涩谷高架桥・六本木通正上方)",
   },
   "首都高速3号渋谷線 (国道246号・渋谷高架橋)": {
     en: "Shutoko Expwy Route 3 Shibuya Line (Route 246 Viaduct)",
@@ -807,6 +891,10 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
     en: "Meiji-dori Ave. (Pref. Rte 305 / GSI Shibuya Exp.)",
     zh: "明治通・东京都道305号 (GSI experimental_rdcl 涩谷区间)",
   },
+  "渋谷センター街・バスケットボール通り (スクランブル北西〜宇田川町交番〜文化村通り合流)": {
+    en: "Shibuya Center-Gai / Basketball St. (Scramble NW–Udagawacho–Bunkamura-dori)",
+    zh: "涩谷中心街・篮球街 (十字路口西北〜宇田川町交番〜文化村通合流)",
+  },
   "渋谷センター街・バスケットボール通り (スクランブル北西〜宇田川町交番・井の頭通り合流)": {
     en: "Shibuya Center-Gai / Basketball St. (Scramble NW–Udagawacho–Inokashira)",
     zh: "涩谷中心街・篮球街 (十字路口西北〜宇田川町交番・井之头通合流)",
@@ -815,6 +903,10 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
     en: "Shibuya Center-Gai / Basketball St. (Scramble NW–Udagawacho–Inokashira)",
     zh: "涩谷中心街・篮球街 (十字路口西北〜宇田川町交番・井之头通合流)",
   },
+  "ヒカリエ東側アクセス道路 (宮益坂東〜ヒカリエ東〜金王坂下)": {
+    en: "Hikarie East Access St. (Miyamasuzaka East–Hikarie East–Kon-ozaka-shita)",
+    zh: "Hikarie东侧通道 (宫益坂东〜Hikarie东〜金王坂下)",
+  },
   "ヒカリエ前通り・金王坂連絡路 (宮益坂下〜ヒカリエ前〜金王坂・国道246号)": {
     en: "Hikarie-mae St. & Kon-ozaka Connector (Miyamasuzaka–Hikarie–Route 246)",
     zh: "Hikarie前通・金王坂联络路 (宫益坂下〜Hikarie前〜金王坂・国道246号)",
@@ -822,6 +914,14 @@ const ROAD_DISPLAY_NAME_TRANSLATIONS: Readonly<Record<string, { en: string; zh: 
   "ヒカリエ前通り・金王坂連絡路（宮益坂下〜ヒカリエ前〜金王坂・国道246号）": {
     en: "Hikarie-mae St. & Kon-ozaka Connector (Miyamasuzaka–Hikarie–Route 246)",
     zh: "Hikarie前通・金王坂联络路 (宫益坂下〜Hikarie前〜金王坂・国道246号)",
+  },
+  "六本木通り (都道412号・渋谷駅東口〜渋谷二丁目〜六本木方面)": {
+    en: "Roppongi-dori Ave. (Pref. Rte 412 / Shibuya East–Roppongi)",
+    zh: "六本木通 (东京都道412号・涩谷站东口〜涩谷二丁目〜六本木方向)",
+  },
+  "六本木通り（渋谷駅東口〜西麻布〜六本木・外苑東連絡）": {
+    en: "Roppongi-dori Ave. (Shibuya East–Nishi-Azabu–Roppongi)",
+    zh: "六本木通 (涩谷站东口〜西麻布〜六本木・外苑东联络)",
   },
 };
 
@@ -1882,74 +1982,74 @@ export function getNavigationMapLabels(
     const isEnglish = locale === "en";
     if (isEnglish) {
       return [
-        { text: "Shibuya Stream", x: -695, z: -15, color: "#fde047" },
-        { text: "Scramble Sq / SHIBUYA SKY", x: -808, z: 145, color: "#93c5fd" },
-        { text: "Shibuya Hikarie", x: -692, z: 162, color: "#e2e8f0" },
-        { text: "Sakura Stage", x: -808, z: -28, color: "#fca5a5" },
-        { text: "Shutoko Expwy Rte 3", x: -750, z: 108, color: "#34d399" },
-        { text: "MIYASHITA PARK", x: -695, z: 248, color: "#a7f3d0" },
-        { text: "Cerulean Tower", x: -898, z: -45, color: "#c4b5fd" },
-        { text: "Shibuya River", x: -726, z: -85, color: "#7dd3fc" },
-        { text: "Meiji-dori Ave", x: -750, z: 30, color: "#86efac" },
-        { text: "Route 246 (Aoyama)", x: -660, z: 95, color: "#86efac" },
-        { text: "Harajuku / Omotesando", x: -750, z: 550, color: "#f472b6" },
-        { text: "Ebisu Station", x: -750, z: -800, color: "#fb923c" },
-        { text: "Yamate-dori (Ring 6)", x: -1350, z: 95, color: "#60a5fa" },
-        { text: "Roppongi Hills", x: -380, z: -420, color: "#38bdf8" },
-        { text: "Center-Gai / Basketball St.", x: -850, z: 292, color: "#f59e0b" },
-        { text: "Shibuya PARCO", x: -824, z: 375, color: "#cbd5e1" },
-        { text: "Scramble Crossing", x: -815, z: 248, color: "#38bdf8" },
-        { text: "SHIBUYA109", x: -884, z: 263, color: "#f472b6" },
-        { text: "Dogenzaka St.", x: -955, z: 200, color: "#fb923c" },
-        { text: "Bunkamura-dori", x: -965, z: 350, color: "#c084fc" },
+        { text: "Shibuya Stream", x: -750, z: 527.6, color: "#fde047" },
+        { text: "Scramble Sq / SHIBUYA SKY", x: -835.7, z: 391.1, color: "#93c5fd" },
+        { text: "Shibuya Hikarie", x: -723.6, z: 327.9, color: "#e2e8f0" },
+        { text: "Sakura Stage", x: -908.7, z: 613.0, color: "#fca5a5" },
+        { text: "Shutoko Expwy Rte 3", x: -920, z: 495, color: "#34d399" },
+        { text: "MIYASHITA PARK", x: -895.0, z: 47.2, color: "#a7f3d0" },
+        { text: "Cerulean Tower", x: -1093.8, z: 616.4, color: "#c4b5fd" },
+        { text: "Shibuya River", x: -640, z: 635, color: "#7dd3fc" },
+        { text: "Meiji-dori Ave", x: -678, z: 518.2, color: "#86efac" },
+        { text: "Route 246 (Aoyama)", x: -607.1, z: 349.8, color: "#86efac" },
+        { text: "Harajuku / Omotesando", x: -779.4, z: -352.5, color: "#f472b6" },
+        { text: "Ebisu Station", x: -390, z: 980, color: "#fb923c" },
+        { text: "Yamate-dori (Ring 6)", x: -1625, z: 740, color: "#60a5fa" },
+        { text: "Roppongi / Nishi-Azabu", x: -380, z: 400, color: "#38bdf8" },
+        { text: "Center-Gai / Basketball St.", x: -1090, z: 188, color: "#f59e0b" },
+        { text: "Shibuya PARCO", x: -1154.9, z: -8.3, color: "#cbd5e1" },
+        { text: "Scramble Crossing", x: -990.7, z: 275.8, color: "#38bdf8" },
+        { text: "SHIBUYA109", x: -1182, z: 266, color: "#f472b6" },
+        { text: "Dogenzaka St.", x: -1300, z: 385, color: "#fb923c" },
+        { text: "Bunkamura-dori", x: -1290, z: 170, color: "#c084fc" },
       ];
     }
     const isChinese = locale === "zh";
     if (isChinese) {
       return [
-        { text: "涩谷Stream", x: -695, z: -15, color: "#fde047" },
-        { text: "涩谷Scramble广场 (SHIBUYA SKY)", x: -808, z: 145, color: "#93c5fd" },
-        { text: "涩谷Hikarie", x: -692, z: 162, color: "#e2e8f0" },
-        { text: "涩谷Sakura Stage", x: -808, z: -28, color: "#fca5a5" },
-        { text: "首都高速3号涩谷线", x: -750, z: 108, color: "#34d399" },
-        { text: "MIYASHITA PARK (宫下公园)", x: -695, z: 248, color: "#a7f3d0" },
-        { text: "东急蓝塔 (Cerulean)", x: -898, z: -45, color: "#c4b5fd" },
-        { text: "涩谷川步道", x: -726, z: -85, color: "#7dd3fc" },
-        { text: "明治通", x: -750, z: 30, color: "#86efac" },
-        { text: "国道246号 (青山通)", x: -660, z: 95, color: "#86efac" },
-        { text: "原宿・表参道", x: -750, z: 550, color: "#f472b6" },
-        { text: "惠比寿站", x: -750, z: -800, color: "#fb923c" },
-        { text: "山手通 (环状6号)", x: -1350, z: 95, color: "#60a5fa" },
-        { text: "六本木之丘", x: -380, z: -420, color: "#38bdf8" },
-        { text: "涩谷中心街 (篮球街)", x: -850, z: 292, color: "#f59e0b" },
-        { text: "涩谷PARCO", x: -824, z: 375, color: "#cbd5e1" },
-        { text: "涩谷全向十字路口", x: -815, z: 248, color: "#38bdf8" },
-        { text: "SHIBUYA109", x: -884, z: 263, color: "#f472b6" },
-        { text: "道玄坂", x: -955, z: 200, color: "#fb923c" },
-        { text: "文化村通", x: -965, z: 350, color: "#c084fc" },
+        { text: "涩谷Stream", x: -750, z: 527.6, color: "#fde047" },
+        { text: "涩谷Scramble广场 (SHIBUYA SKY)", x: -835.7, z: 391.1, color: "#93c5fd" },
+        { text: "涩谷Hikarie", x: -723.6, z: 327.9, color: "#e2e8f0" },
+        { text: "涩谷Sakura Stage", x: -908.7, z: 613.0, color: "#fca5a5" },
+        { text: "首都高速3号涩谷线", x: -920, z: 495, color: "#34d399" },
+        { text: "MIYASHITA PARK (宫下公园)", x: -895.0, z: 47.2, color: "#a7f3d0" },
+        { text: "东急蓝塔 (Cerulean)", x: -1093.8, z: 616.4, color: "#c4b5fd" },
+        { text: "涩谷川步道", x: -640, z: 635, color: "#7dd3fc" },
+        { text: "明治通", x: -678, z: 518.2, color: "#86efac" },
+        { text: "国道246号 (青山通)", x: -607.1, z: 349.8, color: "#86efac" },
+        { text: "原宿・表参道", x: -779.4, z: -352.5, color: "#f472b6" },
+        { text: "惠比寿站", x: -390, z: 980, color: "#fb923c" },
+        { text: "山手通 (环状6号)", x: -1625, z: 740, color: "#60a5fa" },
+        { text: "六本木・西麻布", x: -380, z: 400, color: "#38bdf8" },
+        { text: "涩谷中心街 (篮球街)", x: -1090, z: 188, color: "#f59e0b" },
+        { text: "涩谷PARCO", x: -1154.9, z: -8.3, color: "#cbd5e1" },
+        { text: "涩谷全向十字路口", x: -990.7, z: 275.8, color: "#38bdf8" },
+        { text: "SHIBUYA109", x: -1182, z: 266, color: "#f472b6" },
+        { text: "道玄坂", x: -1300, z: 385, color: "#fb923c" },
+        { text: "文化村通", x: -1290, z: 170, color: "#c084fc" },
       ];
     }
     return [
-      { text: "渋谷ストリーム", x: -695, z: -15, color: "#fde047" },
-      { text: "渋谷スクランブルSQ (SHIBUYA SKY)", x: -808, z: 145, color: "#93c5fd" },
-      { text: "渋谷ヒカリエ", x: -692, z: 162, color: "#e2e8f0" },
-      { text: "渋谷サクラステージ", x: -808, z: -28, color: "#fca5a5" },
-      { text: "首都高3号渋谷線 (高架)", x: -750, z: 108, color: "#34d399" },
-      { text: "MIYASHITA PARK", x: -695, z: 248, color: "#a7f3d0" },
-      { text: "セルリアンタワー", x: -898, z: -45, color: "#c4b5fd" },
-      { text: "渋谷川プロムナード", x: -726, z: -85, color: "#7dd3fc" },
-      { text: "明治通り", x: -750, z: 30, color: "#86efac" },
-      { text: "国道246号 (青山通り)", x: -660, z: 95, color: "#86efac" },
-      { text: "原宿・表参道", x: -750, z: 550, color: "#f472b6" },
-      { text: "恵比寿駅", x: -750, z: -800, color: "#fb923c" },
-      { text: "山手通り (環状6号)", x: -1350, z: 95, color: "#60a5fa" },
-      { text: "六本木ヒルズ", x: -380, z: -420, color: "#38bdf8" },
-      { text: "渋谷センター街 (バスケ通り)", x: -850, z: 292, color: "#f59e0b" },
-      { text: "渋谷PARCO", x: -824, z: 375, color: "#cbd5e1" },
-      { text: "スクランブル交差点", x: -815, z: 248, color: "#38bdf8" },
-      { text: "SHIBUYA109", x: -884, z: 263, color: "#f472b6" },
-      { text: "道玄坂", x: -955, z: 200, color: "#fb923c" },
-      { text: "文化村通り", x: -965, z: 350, color: "#c084fc" },
+      { text: "渋谷ストリーム", x: -750, z: 527.6, color: "#fde047" },
+      { text: "渋谷スクランブルSQ (SHIBUYA SKY)", x: -835.7, z: 391.1, color: "#93c5fd" },
+      { text: "渋谷ヒカリエ", x: -723.6, z: 327.9, color: "#e2e8f0" },
+      { text: "渋谷サクラステージ", x: -908.7, z: 613.0, color: "#fca5a5" },
+      { text: "首都高3号渋谷線 (高架)", x: -920, z: 495, color: "#34d399" },
+      { text: "MIYASHITA PARK", x: -895.0, z: 47.2, color: "#a7f3d0" },
+      { text: "セルリアンタワー", x: -1093.8, z: 616.4, color: "#c4b5fd" },
+      { text: "渋谷川プロムナード", x: -640, z: 635, color: "#7dd3fc" },
+      { text: "明治通り", x: -678, z: 518.2, color: "#86efac" },
+      { text: "国道246号 (青山通り)", x: -607.1, z: 349.8, color: "#86efac" },
+      { text: "原宿・表参道", x: -779.4, z: -352.5, color: "#f472b6" },
+      { text: "恵比寿駅", x: -390, z: 980, color: "#fb923c" },
+      { text: "山手通り (環状6号)", x: -1625, z: 740, color: "#60a5fa" },
+      { text: "六本木・西麻布", x: -380, z: 400, color: "#38bdf8" },
+      { text: "渋谷センター街 (バスケ通り)", x: -1090, z: 188, color: "#f59e0b" },
+      { text: "渋谷PARCO", x: -1154.9, z: -8.3, color: "#cbd5e1" },
+      { text: "スクランブル交差点", x: -990.7, z: 275.8, color: "#38bdf8" },
+      { text: "SHIBUYA109", x: -1182, z: 266, color: "#f472b6" },
+      { text: "道玄坂", x: -1300, z: 385, color: "#fb923c" },
+      { text: "文化村通り", x: -1290, z: 170, color: "#c084fc" },
     ];
   }
 

@@ -53,6 +53,8 @@ export interface JapaneseIntersectionConfig {
   crosswalkW?: boolean;
   hasGuideDots?: boolean;
   baseY?: number;
+  elevationSampler?: (x: number, z: number) => number;
+  skipRoadCollider?: boolean;
 }
 
 export interface JapaneseRoadSegmentConfig {
@@ -72,7 +74,10 @@ export interface JapaneseRoadSegmentConfig {
   hasCenterLine?: boolean; // 中央線描画の有無（既定: true。スクランブル交差点直下等で中央線を抑止）
   hasShoulderLines?: boolean; // 路側帯実線描画の有無（既定: true）
   hasYellowCenterLine?: boolean; // 黄色追越禁止中央線の有無
+  hasDoubleYellowCenterLine?: boolean; // 橙黄色二本線センターライン（宮益坂等の片側2車線以上はみ出し禁止）
   hasWhiteDashedLines?: boolean; // 白破線車線境界線の有無
+  elevationSampler?: (x: number, z: number) => number; // 3D起伏地形への追従サンプラー
+  skipRoadCollider?: boolean; // 連続Terrain Trimesh側で走行路面コライダーを担う場合に車道直方体コライダーを抑止する
   hasCrosswalk?: boolean; // 横断歩道の有無
   hasCrosswalks?: boolean; // 横断歩道の有無（別名）
   hasStopLines?: boolean; // 停止線描画の有無（既定: true）
