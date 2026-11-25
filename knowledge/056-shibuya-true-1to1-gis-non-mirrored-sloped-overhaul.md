@@ -52,3 +52,17 @@ trust_signals:
   - `just format-code && just verify-all && just build-pages` が exit code 0（`actionlint`, `pinact run --check`, `tsc --noEmit`, `oxlint --deny-warnings`, `oxfmt --check`, `ruff`, `vitest run` 全 25 ファイル / 220 テスト通過、Vite 本番＆GitHub Pages ビルド成功）。
 - **本番プレビュー 15 地点ブラウザ視覚検証 (`http://localhost:4173`, 昼・夜)**:
   - 渋谷ストリーム前、スクランブル交差点→QFRONT/センター街、SHIBUYA 109・Y 字路御影石ノーズ、ハチ公広場（Blender 樹木・ブロンズ像・バス停シェルター）、宮益坂上り（二重黄線・1F 庇/袖看板）、金王坂上り、宮益坂上見下ろし、セルリアンタワー前（車線連続性）、JR 山手線ガード下（桁裏 I 型リブ・温白色 LED・御影石腰壁）、首都高3号高架下（スリム温白色リセス照明）、道玄坂上り、文化村通り（新規商業ビル・1F 庇）、公園通り（神南一丁目信号・袖看板）、渋谷東口歩道橋＆東口バス停シェルター、夜間スクランブル交差点（1F 店舗・袖看板・LED ビジョン夜間発光）の全 15 枚を目視確認し、コンソールエラー 0 件・HTTP 404 0 件を確認した。
+
+
+---
+
+## 4. 追記修正（実サイト車線破綻 6 件の解消）
+
+公開環境（`https://kexi.github.io/antigravity-deep-drive/`）の実画面確認で見つかった 6 件の車線・道路破綻を以下のとおり追加修正した。
+
+1. **稲荷橋広場 (`ShibuyaInaribashiPlaza`) の回転角・範囲修正**: `PlaneGeometry(18, 52)` を `rotateY(0.82)` で明治通り・渋谷川と平行に揃え、明治通り車道への斜め飛び出しを解消。
+2. **立体中央分離帯の横断歩道・停止線手前トリム**: `roadBuilder.ts` で横断歩道・停止線アプローチ区間（`ivStart + 7.2` / `ivEnd - 7.2`）を `medianIntervals` から差し引き、中央分離帯コンクリート島・両側白線・`MedianGuidePost` の横断歩道貫通を防止。
+3. **明治通り 2 車線と青看板・路面矢印の整合**: `RoadLaneArrowType` に `"straight-right"` を追加し、明治通り（片側 2 車線）で第 1 車線 `straight-right` / 第 2 車線 `straight-left` を描画、併せて `createOverheadGuideSign`・`createLaneDirectionSign`・`assets.yml` / `defaultAssetsYaml.ts` を 2 車線構成へ統一。
+4. **渋谷駅東口以東の国道 246 号 × 六本木通り二重重複の解消**: `nav-road-shibuya-roppongi-dori` を東口から `+16°` 東南東寄り経路へ分離し、`startTrimMeters = 42.0` / `medianExclusionZones` 半径 `42m` で車線・分離帯・標示の二重重複を根絶。
+5. **`medianExclusionZones` と `markingExclusionZones` の独立分離**: `roadBuilder.ts` における無条件結合を廃止し、玉川通り等の T 字路車線標示ギャップ縮小（`8m`）が中央分離帯除外（`15m`）で上書きされないようにした。
+6. **渋谷交差点パッドと曲線道路アスファルトの高さ逆転解消**: 渋谷交差点パッドおよび 109 Y 字路の `baseY` を `0.0155` に引き上げ、全渋谷曲線道路アスファルト（`<= 0.0144`）より確実に上層で接合するよう統一。

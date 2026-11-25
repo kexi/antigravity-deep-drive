@@ -3,7 +3,12 @@ import type RAPIER from "@dimforge/rapier3d-compat";
 import { JapaneseRoadMaterial } from "./japaneseRoadMaterial";
 import { PuddleMaterial } from "../shaders/puddleShader";
 import { Procedural3DTextureGenerator } from "../textures/procedural3DTexture";
-import { RoadMarkings, computeRoadLaneLayout, type RoadLaneLayout } from "./roadMarkings";
+import {
+  RoadMarkings,
+  computeRoadLaneLayout,
+  type RoadLaneArrowType,
+  type RoadLaneLayout,
+} from "./roadMarkings";
 import { applyRoadProp3DTexture, RoadProps } from "./roadProps";
 import {
   buildIntersectionCornerSidewalks,
@@ -166,7 +171,8 @@ export class JapaneseRoadBuilder {
     interGroup.position.set(config.x, centerTerrainY + baseY, config.z);
 
     const padMat = sharedPadMaterial ?? this.intersectionAsphaltMaterial;
-    const padGeo = new THREE.PlaneGeometry(config.widthX, config.depthZ, 8, 8);
+    const padSubdivs = sampleY ? 12 : 8;
+    const padGeo = new THREE.PlaneGeometry(config.widthX, config.depthZ, padSubdivs, padSubdivs);
     padGeo.rotateX(-Math.PI / 2);
     if (sampleY) {
       const posAttr = padGeo.getAttribute("position");
@@ -1923,17 +1929,22 @@ if (curbCamDist < 36.0) {
       return geom;
     };
 
-    const exclusions = [
-      ...(config.medianExclusionZones ?? []),
-      ...(config.markingExclusionZones ?? []),
-    ];
-    const isPointInExclusion = (px: number, pz: number, padding = 0): boolean =>
-      exclusions.some((ex) => Math.hypot(px - ex.x, pz - ex.z) < ex.radius + padding);
+    type ExclusionZoneSpec = { x: number; z: number; radius: number };
+    const medianExclusions: ReadonlyArray<ExclusionZoneSpec> = config.medianExclusionZones ?? [];
+    const markingExclusions: ReadonlyArray<ExclusionZoneSpec> =
+      config.markingExclusionZones ?? config.medianExclusionZones ?? [];
+    const isPointInExclusion = (
+      px: number,
+      pz: number,
+      zones: ReadonlyArray<ExclusionZoneSpec>,
+      padding = 0,
+    ): boolean => zones.some((ex) => Math.hypot(px - ex.x, pz - ex.z) < ex.radius + padding);
 
     const computeActiveArcIntervals = (
       trimStart: number,
       trimEnd: number,
       minSpanLength: number,
+      zones: ReadonlyArray<ExclusionZoneSpec>,
     ): Array<{ start: number; end: number }> => {
       const maxArc = totalSplineLength - trimEnd;
       const intervals: Array<{ start: number; end: number }> = [];
@@ -1941,7 +1952,7 @@ if (curbCamDist < 36.0) {
       let activeStart: number | null = null;
       for (let arc = trimStart; arc <= maxArc; arc += sampleStep) {
         const framePos = getInterpolatedFrame(arc).pos;
-        const blocked = isPointInExclusion(framePos.x, framePos.z);
+        const blocked = isPointInExclusion(framePos.x, framePos.z, zones);
         if (!blocked && activeStart === null) {
           activeStart = arc;
         } else if (blocked && activeStart !== null) {
@@ -1957,7 +1968,40 @@ if (curbCamDist < 36.0) {
       return intervals;
     };
 
-    const activeRoadIntervals = computeActiveArcIntervals(startMarkingTrim, endMarkingTrim, 4.0);
+    const subtractArcRanges = (
+      baseIntervals: ReadonlyArray<{ start: number; end: number }>,
+      cutRanges: ReadonlyArray<readonly [number, number]>,
+      minLen = 6.0,
+    ): Array<{ start: number; end: number }> => {
+      const sortedCuts = [...cutRanges]
+        .map(([a, b]) => [Math.min(a, b), Math.max(a, b)] as const)
+        .sort((a, b) => a[0] - b[0]);
+      const result: Array<{ start: number; end: number }> = [];
+      for (const iv of baseIntervals) {
+        let cursor = iv.start;
+        for (const [cutStart, cutEnd] of sortedCuts) {
+          if (cutEnd <= cursor || cutStart >= iv.end) {
+            continue;
+          }
+          const clippedEnd = Math.min(iv.end, cutStart);
+          if (clippedEnd - cursor >= minLen) {
+            result.push({ start: cursor, end: clippedEnd });
+          }
+          cursor = Math.max(cursor, cutEnd);
+        }
+        if (iv.end - cursor >= minLen) {
+          result.push({ start: cursor, end: iv.end });
+        }
+      }
+      return result;
+    };
+
+    const activeRoadIntervals = computeActiveArcIntervals(
+      startMarkingTrim,
+      endMarkingTrim,
+      4.0,
+      markingExclusions,
+    );
     const shouldAddCrosswalks = Boolean(config.hasCrosswalk || config.hasCrosswalks);
     const shouldAddStopLinesForSpan = config.hasStopLines ?? true;
     const getLongitudinalMarkingSpan = (
@@ -1976,25 +2020,124 @@ if (curbCamDist < 36.0) {
       const fStartStop = getInterpolatedFrame(iv.start + 6.3);
       const hasStartMarking =
         !shouldSkipStart &&
-        ((shouldAddCrosswalks && !isPointInExclusion(fStartCross.pos.x, fStartCross.pos.z, 2.0)) ||
+        ((shouldAddCrosswalks &&
+          !isPointInExclusion(fStartCross.pos.x, fStartCross.pos.z, markingExclusions, 2.0)) ||
           (shouldAddStopLinesForSpan &&
-            !isPointInExclusion(fStartStop.pos.x, fStartStop.pos.z, 2.0)));
+            !isPointInExclusion(fStartStop.pos.x, fStartStop.pos.z, markingExclusions, 2.0)));
       const fEndCross = getInterpolatedFrame(iv.end - 3.5);
       const fEndStop = getInterpolatedFrame(iv.end - 6.3);
       const hasEndMarking =
         !shouldSkipEnd &&
-        ((shouldAddCrosswalks && !isPointInExclusion(fEndCross.pos.x, fEndCross.pos.z, 2.0)) ||
-          (shouldAddStopLinesForSpan && !isPointInExclusion(fEndStop.pos.x, fEndStop.pos.z, 2.0)));
+        ((shouldAddCrosswalks &&
+          !isPointInExclusion(fEndCross.pos.x, fEndCross.pos.z, markingExclusions, 2.0)) ||
+          (shouldAddStopLinesForSpan &&
+            !isPointInExclusion(fEndStop.pos.x, fEndStop.pos.z, markingExclusions, 2.0)));
       const trimmedStart = hasStartMarking ? iv.start + 6.8 : iv.start;
       const trimmedEnd = hasEndMarking ? iv.end - 6.8 : iv.end;
       return trimmedEnd - trimmedStart >= 4.0 ? { start: trimmedStart, end: trimmedEnd } : iv;
     };
 
-    // 中央分離帯区間（medianWidth > 0 のときは交差点開口部・排他半径を除いた立体中央分離帯アイランドを構築）
+    // 横断歩道・停止線・進路変更禁止黄色実線の配置対象を先に収集し、中央分離帯・白破線重複・歩道切下げスロープ・点字ブロック・ガードレール開口と 100% 同期させる
+    const lanesPerDir = config.lanesPerDirection;
+    const shouldAddStopLines = config.hasStopLines ?? true;
+    interface CurvedApproachSpec {
+      ivIdx: number;
+      ivLen: number;
+      name: string;
+      sCross: number;
+      sStop: number;
+      isStart: boolean;
+      hasCrosswalk: boolean;
+      hasStopLine: boolean;
+      ivStart: number;
+      ivEnd: number;
+    }
+    const validCurvedApproaches: CurvedApproachSpec[] = [];
+    const curvedCrosswalkArcs: number[] = [];
+    const yellowNoLaneChangeByLane = new Map<string, Array<[number, number]>>();
+
+    for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
+      const iv = activeRoadIntervals[ivIdx];
+      const ivLen = iv.end - iv.start;
+      const isLongEnough = ivLen >= 28.0;
+      if (!isLongEnough) {
+        continue;
+      }
+
+      const rawApproaches = [
+        { name: "Start", sCross: iv.start + 3.5, sStop: iv.start + 6.3, isStart: true },
+        { name: "End", sCross: iv.end - 3.5, sStop: iv.end - 6.3, isStart: false },
+      ];
+      for (const app of rawApproaches) {
+        const shouldSkipStart = app.isStart && ivIdx === 0 && Boolean(config.skipStartCrosswalk);
+        const shouldSkipEnd =
+          !app.isStart &&
+          ivIdx === activeRoadIntervals.length - 1 &&
+          Boolean(config.skipEndCrosswalk);
+        if (shouldSkipStart || shouldSkipEnd) {
+          continue;
+        }
+
+        const fCross = getInterpolatedFrame(app.sCross);
+        const fStop = getInterpolatedFrame(app.sStop);
+        const hasCrosswalk =
+          shouldAddCrosswalks &&
+          !isPointInExclusion(fCross.pos.x, fCross.pos.z, markingExclusions, 2.0);
+        const hasStopLine =
+          shouldAddStopLines &&
+          !isPointInExclusion(fStop.pos.x, fStop.pos.z, markingExclusions, 2.0);
+
+        if (hasCrosswalk) {
+          curvedCrosswalkArcs.push(app.sCross);
+        }
+
+        if (hasStopLine && lanesPerDir >= 2 && ivLen >= 40.0) {
+          const sYellowStart = app.isStart ? app.sStop : Math.max(iv.start, app.sStop - 18.0);
+          const sYellowEnd = app.isStart ? Math.min(iv.end, app.sStop + 18.0) : app.sStop;
+          const yellowDirSign = app.isStart ? -1 : 1;
+          for (let lane = 1; lane < lanesPerDir; lane++) {
+            const key = `${yellowDirSign}_${lane}`;
+            const list = yellowNoLaneChangeByLane.get(key) ?? [];
+            list.push([sYellowStart - 0.6, sYellowEnd + 0.6]);
+            yellowNoLaneChangeByLane.set(key, list);
+          }
+        }
+
+        validCurvedApproaches.push({
+          ivIdx,
+          ivLen,
+          name: app.name,
+          sCross: app.sCross,
+          sStop: app.sStop,
+          isStart: app.isStart,
+          hasCrosswalk,
+          hasStopLine,
+          ivStart: iv.start,
+          ivEnd: iv.end,
+        });
+      }
+    }
+
+    const approachCutRanges: Array<[number, number]> = [];
+    for (const app of validCurvedApproaches) {
+      if (!app.hasCrosswalk && !app.hasStopLine) {
+        continue;
+      }
+      if (app.isStart) {
+        approachCutRanges.push([app.ivStart - 0.5, app.ivStart + 7.2]);
+      } else {
+        approachCutRanges.push([app.ivEnd - 7.2, app.ivEnd + 0.5]);
+      }
+    }
+
+    // 中央分離帯区間（medianWidth > 0 のときは交差点開口部・排他半径・横断歩道/停止線アプローチを除いた立体中央分離帯アイランドを構築）
     const hasRaisedMedian = medianW > 0;
     const medianHeight = Math.max(0.16, config.curbHeight + 0.02);
+    const rawMedianIntervals = hasRaisedMedian
+      ? computeActiveArcIntervals(startMarkingTrim, endMarkingTrim, 8.0, medianExclusions)
+      : [];
     const medianIntervals = hasRaisedMedian
-      ? computeActiveArcIntervals(startMarkingTrim, endMarkingTrim, 8.0)
+      ? subtractArcRanges(rawMedianIntervals, approachCutRanges, 6.0)
       : [];
 
     if (hasRaisedMedian) {
@@ -2184,85 +2327,6 @@ if (curbCamDist < 36.0) {
           edgeMesh.receiveShadow = true;
           group.add(edgeMesh);
         }
-      }
-    }
-
-    // 横断歩道・停止線・進路変更禁止黄色実線の配置対象を先に収集し、白破線重複および歩道切下げスロープ・点字ブロック・ガードレール開口と 100% 同期させる
-    const lanesPerDir = config.lanesPerDirection;
-    const shouldAddStopLines = config.hasStopLines ?? true;
-    interface CurvedApproachSpec {
-      ivIdx: number;
-      ivLen: number;
-      name: string;
-      sCross: number;
-      sStop: number;
-      isStart: boolean;
-      hasCrosswalk: boolean;
-      hasStopLine: boolean;
-      ivStart: number;
-      ivEnd: number;
-    }
-    const validCurvedApproaches: CurvedApproachSpec[] = [];
-    const curvedCrosswalkArcs: number[] = [];
-    const yellowNoLaneChangeByLane = new Map<string, Array<[number, number]>>();
-
-    for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
-      const iv = activeRoadIntervals[ivIdx];
-      const ivLen = iv.end - iv.start;
-      const isLongEnough = ivLen >= 28.0;
-      if (!isLongEnough) {
-        continue;
-      }
-
-      const rawApproaches = [
-        { name: "Start", sCross: iv.start + 3.5, sStop: iv.start + 6.3, isStart: true },
-        { name: "End", sCross: iv.end - 3.5, sStop: iv.end - 6.3, isStart: false },
-      ];
-      for (const app of rawApproaches) {
-        const shouldSkipStart = app.isStart && ivIdx === 0 && Boolean(config.skipStartCrosswalk);
-        const shouldSkipEnd =
-          !app.isStart &&
-          ivIdx === activeRoadIntervals.length - 1 &&
-          Boolean(config.skipEndCrosswalk);
-        if (shouldSkipStart || shouldSkipEnd) {
-          continue;
-        }
-
-        const fCross = getInterpolatedFrame(app.sCross);
-        const fStop = getInterpolatedFrame(app.sStop);
-        const hasCrosswalk =
-          shouldAddCrosswalks && !isPointInExclusion(fCross.pos.x, fCross.pos.z, 2.0);
-        const hasStopLine =
-          shouldAddStopLines && !isPointInExclusion(fStop.pos.x, fStop.pos.z, 2.0);
-
-        if (hasCrosswalk) {
-          curvedCrosswalkArcs.push(app.sCross);
-        }
-
-        if (hasStopLine && lanesPerDir >= 2 && ivLen >= 40.0) {
-          const sYellowStart = app.isStart ? app.sStop : Math.max(iv.start, app.sStop - 18.0);
-          const sYellowEnd = app.isStart ? Math.min(iv.end, app.sStop + 18.0) : app.sStop;
-          const yellowDirSign = app.isStart ? -1 : 1;
-          for (let lane = 1; lane < lanesPerDir; lane++) {
-            const key = `${yellowDirSign}_${lane}`;
-            const list = yellowNoLaneChangeByLane.get(key) ?? [];
-            list.push([sYellowStart - 0.6, sYellowEnd + 0.6]);
-            yellowNoLaneChangeByLane.set(key, list);
-          }
-        }
-
-        validCurvedApproaches.push({
-          ivIdx,
-          ivLen,
-          name: app.name,
-          sCross: app.sCross,
-          sStop: app.sStop,
-          isStart: app.isStart,
-          hasCrosswalk,
-          hasStopLine,
-          ivStart: iv.start,
-          ivEnd: iv.end,
-        });
       }
     }
 
@@ -2654,7 +2718,12 @@ if (curbCamDist < 36.0) {
               continue;
             }
             const fArrow = getInterpolatedFrame(sArrow);
-            const isArrowBlocked = isPointInExclusion(fArrow.pos.x, fArrow.pos.z, 2.0);
+            const isArrowBlocked = isPointInExclusion(
+              fArrow.pos.x,
+              fArrow.pos.z,
+              markingExclusions,
+              2.0,
+            );
             if (isArrowBlocked) {
               continue;
             }
@@ -2667,8 +2736,14 @@ if (curbCamDist < 36.0) {
                 ? -(medianW * 0.5 + (lane - 0.5) * config.laneWidth)
                 : +(medianW * 0.5 + (lane - 0.5) * config.laneWidth);
 
-              const arrowType: "straight" | "straight-left" | "right" =
-                lane === 1 ? "right" : lane === lanesPerDir ? "straight-left" : "straight";
+              const arrowType: RoadLaneArrowType =
+                lane === 1
+                  ? lanesPerDir >= 3
+                    ? "right"
+                    : "straight-right"
+                  : lane === lanesPerDir
+                    ? "straight-left"
+                    : "straight";
 
               const ax = fArrow.pos.x + fArrow.normal.x * laneCenterOffset;
               const az = fArrow.pos.z + fArrow.normal.z * laneCenterOffset;
@@ -2787,7 +2862,7 @@ if (curbCamDist < 36.0) {
           const lightOff = la.sideSign * (halfDriveable + 1.25);
           const lightPosX = fLight.pos.x + fLight.normal.x * lightOff;
           const lightPosZ = fLight.pos.z + fLight.normal.z * lightOff;
-          const isLightBlocked = isPointInExclusion(lightPosX, lightPosZ, 3.0);
+          const isLightBlocked = isPointInExclusion(lightPosX, lightPosZ, markingExclusions, 3.0);
           if (isLightBlocked) {
             continue;
           }

@@ -585,6 +585,7 @@ export class RoadSignSystem {
           intersectionName: spec.intersectionName ?? "行幸通り",
           spanWidth: spec.spanWidth ?? 19.2,
           supportType: spec.supportType ?? "cantilever",
+          lanesPerDirection: spec.arrowDirections?.length === 2 ? 2 : 3,
         });
 
       case "speed_limit":

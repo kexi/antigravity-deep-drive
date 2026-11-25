@@ -3,7 +3,7 @@ import { Procedural3DTextureGenerator } from "../textures/procedural3DTexture";
 
 export type RoadMarking3DTextureVariant = "white-paint" | "yellow-paint" | "braille";
 
-export type RoadLaneArrowType = "straight" | "straight-left" | "right";
+export type RoadLaneArrowType = "straight" | "straight-left" | "straight-right" | "right";
 
 export interface RoadLaneSpec {
   laneIndex: number;
@@ -815,7 +815,7 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
   public createLaneArrowMarking(
     x: number,
     z: number,
-    type: "straight" | "straight-left" | "right" = "straight",
+    type: RoadLaneArrowType = "straight",
     rotationY = 0,
   ): THREE.Group {
     const group = new THREE.Group();
@@ -833,7 +833,8 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
     stem.position.set(0, 0, 0.6);
     group.add(stem);
 
-    const hasStraight = type === "straight" || type === "straight-left";
+    const hasStraight =
+      type === "straight" || type === "straight-left" || type === "straight-right";
     if (hasStraight) {
       // 直進矢尻（3角形）
       const headShape = new THREE.Shape();
@@ -874,20 +875,23 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
       group.add(leftHead);
     }
 
-    const isRight = type === "right";
-    if (isRight) {
-      const branchGeo = new THREE.PlaneGeometry(0.95, 0.38);
+    const isRightOnly = type === "right";
+    const isStraightRight = type === "straight-right";
+    if (isRightOnly || isStraightRight) {
+      const branchZ = isStraightRight ? 0.2 : -0.8;
+      const shapeY = isStraightRight ? -0.2 : 0.8;
+      const branchGeo = new THREE.PlaneGeometry(0.95, 0.36);
       branchGeo.rotateX(-Math.PI / 2);
       const branch = new THREE.Mesh(branchGeo, this.whitePaintMat);
       branch.name = "LaneArrow_RightBranch";
       branch.userData.markingType = "LaneArrow";
-      branch.position.set(0.5, 0, -0.8);
+      branch.position.set(0.5, 0, branchZ);
       group.add(branch);
 
       const rightHeadShape = new THREE.Shape();
-      rightHeadShape.moveTo(1.5, 0.8);
-      rightHeadShape.lineTo(0.9, 1.35);
-      rightHeadShape.lineTo(0.9, 0.25);
+      rightHeadShape.moveTo(1.48, shapeY);
+      rightHeadShape.lineTo(0.88, shapeY + 0.55);
+      rightHeadShape.lineTo(0.88, shapeY - 0.55);
       rightHeadShape.closePath();
       const rightHeadGeo = new THREE.ShapeGeometry(rightHeadShape);
       rightHeadGeo.rotateX(-Math.PI / 2);

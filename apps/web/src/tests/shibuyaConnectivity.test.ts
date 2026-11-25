@@ -709,4 +709,196 @@ describe("渋谷・道玄坂・センター街マップ接続性と走行可能�
       expect(found, `${label} (${sx}, ${sz}) signal placed`).toBe(true);
     }
   }, 45_000);
+
+  it("回帰テスト5: 稲荷橋広場非侵食・中央分離帯横断歩道手前トリム・明治通り2車線整合・R246×六本木通り離隔・排他ゾーン分離・交差点パッド標高を保証する", async () => {
+    await RAPIER.init();
+    const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    const scene = new THREE.Scene();
+    const cityMap = new TokyoStationMap(scene, world, RAPIER, { deferGlbLoads: true });
+    scene.updateMatrixWorld(true);
+
+    // 1. ShibuyaInaribashiPlaza が明治通り車道（halfDriveable = 8.7m）へ侵食しないこと
+    const corridors = getOpenDataCurvedRoadCorridors();
+    const meijiSpec = corridors.find((c) => c.id === "nav-road-meiji-dori")!;
+    const meijiCurve = new THREE.CatmullRomCurve3(
+      meijiSpec.points.map((p) => new THREE.Vector3(p.x, 0, p.z)),
+      false,
+      "centripetal",
+      0.5,
+    );
+    const meijiSamples = meijiCurve.getPoints(120);
+    const inaribashi = scene.getObjectByName("ShibuyaInaribashiPlaza") as THREE.Mesh;
+    expect(inaribashi).toBeDefined();
+    const plazaPos = inaribashi.geometry.getAttribute("position");
+    const vTmp = new THREE.Vector3();
+    for (let i = 0; i < plazaPos.count; i++) {
+      vTmp.fromBufferAttribute(plazaPos, i).applyMatrix4(inaribashi.matrixWorld);
+      const dist = minDistanceToSplineXZ(vTmp.x, vTmp.z, meijiSamples);
+      expect(
+        dist,
+        `Inaribashi vertex ${i} (${vTmp.x.toFixed(1)}, ${vTmp.z.toFixed(1)})`,
+      ).toBeGreaterThan(10.0);
+    }
+
+    // 2. 明治通り曲線道路で立体中央分離帯・縁白線・ガイドポストが横断歩道・停止線と重ならないこと＋2車線矢印整合
+    const meijiGroup = scene.getObjectByName(`CurvedRoadSegment_${meijiSpec.displayName}`)!;
+    expect(meijiGroup).toBeDefined();
+    const crosswalkOrStopBoxes: THREE.Box3[] = [];
+    const crosswalkOrStopVerts: Array<{ x: number; z: number }> = [];
+    const medianCurbOrEdgeVerts: Array<{ x: number; z: number }> = [];
+    const medianPostPositions: THREE.Vector3[] = [];
+    const arrowNames: string[] = [];
+
+    const collectMeshWorldVerts = (mesh: THREE.Mesh, out: Array<{ x: number; z: number }>) => {
+      const pos = mesh.geometry?.getAttribute("position");
+      if (!pos) return;
+      for (let i = 0; i < pos.count; i++) {
+        vTmp.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+        out.push({ x: vTmp.x, z: vTmp.z });
+      }
+    };
+
+    meijiGroup.traverse((obj) => {
+      if (
+        obj instanceof THREE.Mesh &&
+        (obj.name.startsWith("CurvedCrosswalk_") || obj.name.startsWith("CurvedStopLine_"))
+      ) {
+        crosswalkOrStopBoxes.push(new THREE.Box3().setFromObject(obj));
+        collectMeshWorldVerts(obj, crosswalkOrStopVerts);
+      } else if (
+        obj instanceof THREE.Mesh &&
+        (obj.name.startsWith("CurvedCentralMedian_Curb_") ||
+          obj.name.startsWith("CurvedMarking_MedianEdge_"))
+      ) {
+        collectMeshWorldVerts(obj, medianCurbOrEdgeVerts);
+      } else if (obj.name === "MedianGuidePost") {
+        medianPostPositions.push(obj.getWorldPosition(new THREE.Vector3()));
+      } else if (obj.name.startsWith("LaneArrowGroup_")) {
+        arrowNames.push(obj.name);
+      }
+    });
+
+    expect(crosswalkOrStopVerts.length).toBeGreaterThan(0);
+    expect(medianCurbOrEdgeVerts.length).toBeGreaterThan(0);
+    let minMedianToCrosswalkDist = Infinity;
+    for (const mv of medianCurbOrEdgeVerts) {
+      for (const cw of crosswalkOrStopVerts) {
+        const d = Math.hypot(mv.x - cw.x, mv.z - cw.z);
+        if (d < minMedianToCrosswalkDist) {
+          minMedianToCrosswalkDist = d;
+        }
+      }
+    }
+    expect(minMedianToCrosswalkDist).toBeGreaterThan(0.45);
+    for (const pPos of medianPostPositions) {
+      for (const cwBox of crosswalkOrStopBoxes) {
+        const dx = Math.max(cwBox.min.x - pPos.x, 0, pPos.x - cwBox.max.x);
+        const dz = Math.max(cwBox.min.z - pPos.z, 0, pPos.z - cwBox.max.z);
+        expect(Math.hypot(dx, dz)).toBeGreaterThan(0.5);
+      }
+    }
+
+    // 3. 明治通り 2車線矢印 & 看板整合
+    expect(arrowNames).toContain("LaneArrowGroup_straight-right");
+    expect(arrowNames).toContain("LaneArrowGroup_straight-left");
+    expect(arrowNames).not.toContain("LaneArrowGroup_right");
+
+    const { assetManager } = await import("../assets/assetManager");
+    const meijiSigns = assetManager
+      .getSigns()
+      .filter((s) =>
+        [
+          "overhead_guide_shibuya_stream",
+          "lane_direction_meiji_dori",
+          "overhead_guide_shibuya_246_shutoko",
+        ].includes(s.id),
+      );
+    expect(meijiSigns.length).toBe(3);
+    for (const s of meijiSigns) {
+      expect(s.arrowDirections?.length, `${s.id} 2-lane arrows`).toBe(2);
+    }
+
+    // 4. R246 と六本木通りが東口 (-762.8, 435.5) 以東 x >= -690 で 20.4m 以上離隔していること
+    const r246Spec = corridors.find((c) => c.id === "nav-road-route246")!;
+    const roppongiSpec = corridors.find((c) => c.id === "nav-road-shibuya-roppongi-dori")!;
+    const r246Pts = new THREE.CatmullRomCurve3(
+      r246Spec.points.map((p) => new THREE.Vector3(p.x, 0, p.z)),
+      false,
+      "centripetal",
+      0.5,
+    ).getPoints(100);
+    const roppongiPts = new THREE.CatmullRomCurve3(
+      roppongiSpec.points.map((p) => new THREE.Vector3(p.x, 0, p.z)),
+      false,
+      "centripetal",
+      0.5,
+    ).getPoints(100);
+    for (const rp of roppongiPts) {
+      if (rp.x >= -690) {
+        expect(minDistanceToSplineXZ(rp.x, rp.z, r246Pts)).toBeGreaterThanOrEqual(20.4);
+      }
+    }
+
+    // 5. medianExclusionZones と markingExclusionZones が独立評価されること
+    const { JapaneseRoadBuilder } = await import("../roads/roadBuilder");
+    const rb = new JapaneseRoadBuilder();
+    const isolatedRes = rb.buildPolylineSegment(
+      {
+        name: "ExclusionSplitTest",
+        lanesPerDirection: 2,
+        laneWidth: 3.4,
+        shoulderWidth: 1.2,
+        medianWidth: 1.2,
+        medianExclusionZones: [{ x: 0, z: 0, radius: 18 }],
+        markingExclusionZones: [{ x: 0, z: 0, radius: 6 }],
+        sidewalkWidth: 0,
+        curbHeight: 0.15,
+        length: 120,
+        startTrimMeters: 4,
+        endTrimMeters: 4,
+        hasWhiteDashedLines: true,
+        hasCrosswalks: false,
+        hasStopLines: false,
+      },
+      [
+        { x: 0, z: -60 },
+        { x: 0, z: 0 },
+        { x: 0, z: 60 },
+      ],
+      world,
+      RAPIER,
+    );
+    const dashInsideMedianExcl: THREE.Vector3[] = [];
+    const medianPostInsideMedianExcl: THREE.Vector3[] = [];
+    isolatedRes.group.updateMatrixWorld(true);
+    isolatedRes.group.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && obj.name.startsWith("CurvedMarking_LaneDivider_")) {
+        const pos = obj.geometry?.getAttribute("position");
+        if (pos) {
+          for (let i = 0; i < pos.count; i++) {
+            vTmp.fromBufferAttribute(pos, i).applyMatrix4(obj.matrixWorld);
+            if (Math.abs(vTmp.z) < 17) {
+              dashInsideMedianExcl.push(vTmp.clone());
+            }
+          }
+        }
+      } else if (obj.name === "MedianGuidePost") {
+        obj.getWorldPosition(vTmp);
+        if (Math.hypot(vTmp.x, vTmp.z) < 18) {
+          medianPostInsideMedianExcl.push(vTmp.clone());
+        }
+      }
+    });
+    expect(dashInsideMedianExcl.length).toBeGreaterThan(0);
+    expect(medianPostInsideMedianExcl).toEqual([]);
+
+    // 6. 渋谷交差点パッド Y が全渋谷曲線道路アスファルトより高いこと
+    const shibuyaInterPad = scene.getObjectByName("Intersection_-990.7_275.8")!;
+    expect(shibuyaInterPad).toBeDefined();
+    expect(shibuyaInterPad.position.y).toBeCloseTo(
+      sampleShibuyaTerrainY(-990.7, 275.8) + 0.0155,
+      3,
+    );
+    expect(cityMap).toBeDefined();
+  }, 45_000);
 });

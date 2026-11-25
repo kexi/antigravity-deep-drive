@@ -360,7 +360,7 @@ signs:
     roadNumber: "246"
     subRoadNumber: "305"
     intersectionName: "渋谷ストリーム前"
-    arrowDirections: ["直進", "左折", "右折"]
+    arrowDirections: ["直進・左折", "直進・右折"]
 
   - id: "intersection_name_shibuya_stream"
     type: "intersection_name"
@@ -373,7 +373,7 @@ signs:
     type: "lane_direction"
     position: [-738.0, 0.0, 476.8]
     rotationY: 0.81
-    arrowDirections: ["直進・左折", "直進", "右折"]
+    arrowDirections: ["直進・左折", "直進・右折"]
 
   - id: "street_name_meiji_dori"
     type: "street_name"
@@ -404,7 +404,7 @@ signs:
     roadNumber: "246"
     subRoadNumber: "305"
     intersectionName: "渋谷駅東口"
-    arrowDirections: ["左折", "直進", "右折"]
+    arrowDirections: ["直進・左折", "直進・右折"]
 
   - id: "overhead_guide_shibuya_miyamasu"
     type: "overhead_guide"

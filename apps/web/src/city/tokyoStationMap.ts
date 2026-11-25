@@ -978,7 +978,7 @@ export class TokyoStationMap {
     const yForkGroup = new THREE.Group();
     yForkGroup.name = "Intersection_-1159_272";
     yForkGroup.userData.isRoadInfrastructure = true;
-    yForkGroup.position.set(0, 0.0115, 0);
+    yForkGroup.position.set(0, 0.0155, 0);
 
     const drapeHorizontalShape = (geom: THREE.BufferGeometry): void => {
       const posAttr = geom.getAttribute("position");
@@ -1654,10 +1654,10 @@ export class TokyoStationMap {
           { x: -380.0, z: 98.0, radius: 22 },
         ];
       } else if (curvedCorridor.id === "nav-road-shibuya-roppongi-dori") {
-        startTrimMeters = 18.0;
+        startTrimMeters = 42.0;
         endTrimMeters = 18.0;
         medianExclusionZones = [
-          { x: -762.8, z: 435.5, radius: 24 },
+          { x: -762.8, z: 435.5, radius: 42 },
           { x: -380.0, z: 400.0, radius: 20 },
         ];
       } else if (curvedCorridor.id === "nav-road-shibuya-miyamasuzaka") {
@@ -1937,6 +1937,7 @@ export class TokyoStationMap {
           z: spec.iz,
           widthX: spec.widthX,
           depthZ: spec.depthZ,
+          baseY: isShibuyaIntersection ? 0.0155 : 0.0115,
           lanesX: spec.lanesX,
           lanesZ: spec.lanesZ,
           hasCrosswalks: spec.hasCrosswalks,
@@ -2833,11 +2834,11 @@ export class TokyoStationMap {
       puddleThreshold: 0.44,
     });
     this.puddleMaterials.push(inaribashiPlazaMat);
-    const inaribashiCenterX = -720.0;
-    const inaribashiCenterZ = 516.0;
-    const inaribashiGeo = new THREE.PlaneGeometry(24, 64, 4, 8);
+    const inaribashiCenterX = -727.5;
+    const inaribashiCenterZ = 510.0;
+    const inaribashiGeo = new THREE.PlaneGeometry(18, 52, 4, 8);
     inaribashiGeo.rotateX(-Math.PI / 2);
-    inaribashiGeo.rotateY(-0.74);
+    inaribashiGeo.rotateY(0.82);
     const inaribashiPosAttr = inaribashiGeo.getAttribute("position");
     for (let i = 0; i < inaribashiPosAttr.count; i++) {
       const lx = inaribashiPosAttr.getX(i);
@@ -2849,7 +2850,7 @@ export class TokyoStationMap {
     inaribashiGeo.computeVertexNormals();
     const inaribashiMesh = new THREE.Mesh(inaribashiGeo, inaribashiPlazaMat);
     inaribashiMesh.name = "ShibuyaInaribashiPlaza";
-    inaribashiMesh.position.set(inaribashiCenterX, streamGroundY + 0.022, inaribashiCenterZ);
+    inaribashiMesh.position.set(inaribashiCenterX, streamGroundY + 0.015, inaribashiCenterZ);
     inaribashiMesh.userData.isLargeStructure = true;
     inaribashiMesh.receiveShadow = true;
     this.group.add(inaribashiMesh);

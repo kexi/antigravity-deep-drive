@@ -206,6 +206,7 @@ if (signCamDist < 42.0) {
       intersectionName?: string;
       spanWidth?: number;
       supportType?: "portal" | "cantilever";
+      lanesPerDirection?: number;
     } = {},
   ): THREE.Group {
     const group = new THREE.Group();
@@ -628,33 +629,68 @@ if (signCamDist < 42.0) {
           lCtx!.roundRect(14, 14, 740, 356, 20);
           lCtx!.stroke();
 
-          lCtx!.setLineDash([24, 16]);
-          lCtx!.lineWidth = 8;
-          for (const divX of [256, 512]) {
+          const isTwoLanePortal = (options.lanesPerDirection ?? 3) === 2;
+          if (isTwoLanePortal) {
+            lCtx!.setLineDash([24, 16]);
+            lCtx!.lineWidth = 8;
             lCtx!.beginPath();
-            lCtx!.moveTo(divX, 30);
-            lCtx!.lineTo(divX, 354);
+            lCtx!.moveTo(384, 30);
+            lCtx!.lineTo(384, 354);
             lCtx!.stroke();
+            lCtx!.setLineDash([]);
+
+            lCtx!.fillStyle = "#ffffff";
+            lCtx!.textAlign = "center";
+            lCtx!.font = "bold 34px sans-serif";
+            lCtx!.fillText(options.leftText ?? "左折・直進", 192, 78, 340);
+            lCtx!.fillText(options.straightText ?? "直進・右折", 576, 78, 340);
+
+            lCtx!.font = "bold 20px sans-serif";
+            lCtx!.fillText(options.leftEn ?? "Left / Straight", 192, 114, 340);
+            lCtx!.fillText(options.straightEn ?? "Straight / Right", 576, 114, 340);
+
+            // 左車線: 直進＋左折
+            this.drawArrow(lCtx!, 214, 332, 214, 162, "#ffffff", 22);
+            this.drawTurnArrowLeft(lCtx!, 214, 268, 118, 210, "#ffffff");
+
+            // 右車線: 直進＋右折 + 路線バッジ
+            this.drawArrow(lCtx!, 554, 332, 554, 162, "#ffffff", 22);
+            this.drawTurnArrow(lCtx!, 554, 268, 650, 210, "#ffffff");
+            this.drawRouteBadge(
+              lCtx!,
+              472,
+              286,
+              options.subRoadNumber ?? options.roadNumber ?? "1",
+            );
+          } else {
+            lCtx!.setLineDash([24, 16]);
+            lCtx!.lineWidth = 8;
+            for (const divX of [256, 512]) {
+              lCtx!.beginPath();
+              lCtx!.moveTo(divX, 30);
+              lCtx!.lineTo(divX, 354);
+              lCtx!.stroke();
+            }
+            lCtx!.setLineDash([]);
+
+            lCtx!.fillStyle = "#ffffff";
+            lCtx!.textAlign = "center";
+            lCtx!.font = "bold 31px sans-serif";
+            lCtx!.fillText(options.leftText ?? "日比谷・霞が関", 128, 78, 224);
+            lCtx!.fillText(options.straightText ?? "皇居・内堀通", 384, 78, 224);
+            lCtx!.fillText(options.rightText ?? "大手町・東京駅", 640, 78, 224);
+
+            lCtx!.font = "bold 19px sans-serif";
+            lCtx!.fillText(options.leftEn ?? "Hibiya", 128, 112, 224);
+            lCtx!.fillText(options.straightEn ?? "Uchibori-dori", 384, 112, 224);
+            lCtx!.fillText(options.rightEn ?? "Otemachi", 640, 112, 224);
+
+            this.drawArrow(lCtx!, 142, 330, 142, 165, "#ffffff", 20);
+            this.drawTurnArrowLeft(lCtx!, 142, 265, 68, 205, "#ffffff");
+            this.drawArrow(lCtx!, 384, 330, 384, 155, "#ffffff", 24);
+            this.drawRouteBadge(lCtx!, 384, 255, options.roadNumber ?? "1");
+            this.drawTurnArrow(lCtx!, 608, 330, 688, 205, "#ffffff");
           }
-          lCtx!.setLineDash([]);
-
-          lCtx!.fillStyle = "#ffffff";
-          lCtx!.textAlign = "center";
-          lCtx!.font = "bold 31px sans-serif";
-          lCtx!.fillText(options.leftText ?? "日比谷・霞が関", 128, 78, 224);
-          lCtx!.fillText(options.straightText ?? "皇居・内堀通", 384, 78, 224);
-          lCtx!.fillText(options.rightText ?? "大手町・東京駅", 640, 78, 224);
-
-          lCtx!.font = "bold 19px sans-serif";
-          lCtx!.fillText(options.leftEn ?? "Hibiya", 128, 112, 224);
-          lCtx!.fillText(options.straightEn ?? "Uchibori-dori", 384, 112, 224);
-          lCtx!.fillText(options.rightEn ?? "Otemachi", 640, 112, 224);
-
-          this.drawArrow(lCtx!, 142, 330, 142, 165, "#ffffff", 20);
-          this.drawTurnArrowLeft(lCtx!, 142, 265, 68, 205, "#ffffff");
-          this.drawArrow(lCtx!, 384, 330, 384, 155, "#ffffff", 24);
-          this.drawRouteBadge(lCtx!, 384, 255, options.roadNumber ?? "1");
-          this.drawTurnArrow(lCtx!, 608, 330, 688, 205, "#ffffff");
         }
         laneTex = new THREE.CanvasTexture(laneCanvas);
       } else {
@@ -1794,7 +1830,7 @@ if (signCamDist < 42.0) {
           // 右レーン: 右折専用
           this.drawTurnArrow(ctx!, 400, 300, 470, 145, "#ffffff");
         } else {
-          // 2車線区切り破線（中央1本：左レーン＝直進＋左折、右レーン＝右折専用）
+          // 2車線区切り破線（中央1本：左レーン＝直進＋左折、右レーン＝直進＋右折）
           ctx!.setLineDash([22, 16]);
           ctx!.lineWidth = 8;
           ctx!.beginPath();
@@ -1807,8 +1843,9 @@ if (signCamDist < 42.0) {
           this.drawArrow(ctx!, 148, 300, 148, 75, "#ffffff", 18);
           this.drawTurnArrowLeft(ctx!, 148, 210, 68, 140, "#ffffff");
 
-          // 右レーン: 右折専用
-          this.drawTurnArrow(ctx!, 354, 300, 434, 145, "#ffffff");
+          // 右レーン: 直進＋右折
+          this.drawArrow(ctx!, 364, 300, 364, 75, "#ffffff", 18);
+          this.drawTurnArrow(ctx!, 364, 210, 444, 140, "#ffffff");
         }
       }
 

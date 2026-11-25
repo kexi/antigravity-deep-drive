@@ -378,8 +378,8 @@ describe("車両およびゲームシステムの仕様検証", () => {
 
     const plazaBox = new THREE.Box3().setFromObject(inaribashiPlaza);
     const riverBox = new THREE.Box3().setFromObject(shibuyaRiverWater);
-    expect(plazaBox.min.z).toBeCloseTo(484.3, 0);
-    expect(plazaBox.max.z).toBeCloseTo(547.7, 0);
+    expect(plazaBox.min.z).toBeCloseTo(485.7, 0);
+    expect(plazaBox.max.z).toBeCloseTo(534.3, 0);
     expect(riverBox.min.z).toBeCloseTo(519.3, 0);
     expect(riverBox.max.z).toBeCloseTo(869.3, 0);
     // 稲荷橋広場に隣接する渋谷川開渠が南東 (+Z側) へ流下すること
