@@ -1,9 +1,11 @@
 import * as THREE from "three";
 import { Procedural3DTextureGenerator } from "../textures/procedural3DTexture";
+import { resolveDefaultLaneArrow } from "./lanes/laneProfile";
+import type { LaneArrowType } from "./lanes/laneSchema";
 
 export type RoadMarking3DTextureVariant = "white-paint" | "yellow-paint" | "braille";
 
-export type RoadLaneArrowType = "straight" | "straight-left" | "straight-right" | "right";
+export type RoadLaneArrowType = LaneArrowType;
 
 export interface RoadLaneSpec {
   laneIndex: number;
@@ -64,21 +66,8 @@ export function computeRoadLaneLayout(config: {
 
   const shoulderLineOffsets: [number, number] = [-halfCarriagewayWidth, halfCarriagewayWidth];
 
-  const resolveArrowType = (laneIdx: number, totalLanes: number): RoadLaneArrowType => {
-    const isSingleLane = totalLanes <= 1;
-    if (isSingleLane) {
-      return "straight-left";
-    }
-    const isInnerRightTurnLane = laneIdx === 0;
-    if (isInnerRightTurnLane) {
-      return "right";
-    }
-    const isOuterLeftTurnLane = laneIdx === totalLanes - 1;
-    if (isOuterLeftTurnLane) {
-      return "straight-left";
-    }
-    return "straight";
-  };
+  const resolveArrowType = (laneIdx: number, totalLanes: number): RoadLaneArrowType =>
+    resolveDefaultLaneArrow(laneIdx, totalLanes);
 
   const lanes: RoadLaneSpec[] = [];
   // 自車方向（inbound: +Z 進行、日本の左側通行では x > 0）
@@ -193,12 +182,15 @@ export class RoadMarkings {
   private whitePaintMat: THREE.MeshStandardMaterial;
   private yellowPaintMat: THREE.MeshStandardMaterial;
   private brailleTileMat: THREE.MeshStandardMaterial;
+  private speedLimitMatCache = new Map<number, THREE.MeshStandardMaterial>();
+  private stopTextMatCache: THREE.MeshStandardMaterial | null = null;
 
   constructor() {
     // Why not: polygonOffset を設定しないと、同一平面付近の路面や交差標示同士でカメラ俯角が浅いときに
     // 深度バッファの量子化誤差による Z ファイティング（チラつき・縞模様）が発生するため、polygonOffset で手前へバイアスする。
     // また JIS K 5665 路面標示用塗料（ガラスビーズ混入）の再帰反射輝度を emissive で担保し、
     // 濡れたアスファルト路面や浅い俯角でも白線・黄線が黒いシルエットにならず鮮明に視認できるようにする。
+    // side: THREE.DoubleSide により急勾配・曲線リボンでもカリングによる白線消失を防止する。
     this.whitePaintMat = new THREE.MeshStandardMaterial({
       name: "RoadMarking_WhitePaint",
       color: 0xf8fafc,
@@ -206,9 +198,10 @@ export class RoadMarkings {
       emissiveIntensity: 0.42,
       roughness: 0.46,
       metalness: 0.08,
+      side: THREE.DoubleSide,
       polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
     });
     this.applyRoadMarking3DTexture(this.whitePaintMat, "white-paint");
 
@@ -219,9 +212,10 @@ export class RoadMarkings {
       emissiveIntensity: 0.45,
       roughness: 0.48,
       metalness: 0.08,
+      side: THREE.DoubleSide,
       polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
     });
     this.applyRoadMarking3DTexture(this.yellowPaintMat, "yellow-paint");
 
@@ -834,7 +828,10 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
     group.add(stem);
 
     const hasStraight =
-      type === "straight" || type === "straight-left" || type === "straight-right";
+      type === "straight" ||
+      type === "straight-left" ||
+      type === "straight-right" ||
+      type === "straight-left-right";
     if (hasStraight) {
       // 直進矢尻（3角形）
       const headShape = new THREE.Shape();
@@ -852,20 +849,27 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
       group.add(head);
     }
 
-    const isStraightLeft = type === "straight-left";
-    if (isStraightLeft) {
+    const hasLeft =
+      type === "left" ||
+      type === "straight-left" ||
+      type === "left-right" ||
+      type === "straight-left-right";
+    if (hasLeft) {
+      const isLeftOnlyOrSplit = !hasStraight;
+      const branchZ = isLeftOnlyOrSplit ? -0.8 : 0.2;
+      const shapeY = isLeftOnlyOrSplit ? 0.8 : -0.2;
       const branchGeo = new THREE.PlaneGeometry(0.9, 0.35);
       branchGeo.rotateX(-Math.PI / 2);
       const branch = new THREE.Mesh(branchGeo, this.whitePaintMat);
       branch.name = "LaneArrow_LeftBranch";
       branch.userData.markingType = "LaneArrow";
-      branch.position.set(-0.5, 0, 0.2);
+      branch.position.set(-0.5, 0, branchZ);
       group.add(branch);
 
       const leftHeadShape = new THREE.Shape();
-      leftHeadShape.moveTo(-1.45, -0.2);
-      leftHeadShape.lineTo(-0.85, 0.35);
-      leftHeadShape.lineTo(-0.85, -0.75);
+      leftHeadShape.moveTo(-1.45, shapeY);
+      leftHeadShape.lineTo(-0.85, shapeY + 0.55);
+      leftHeadShape.lineTo(-0.85, shapeY - 0.55);
       leftHeadShape.closePath();
       const leftHeadGeo = new THREE.ShapeGeometry(leftHeadShape);
       leftHeadGeo.rotateX(-Math.PI / 2);
@@ -875,11 +879,15 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
       group.add(leftHead);
     }
 
-    const isRightOnly = type === "right";
-    const isStraightRight = type === "straight-right";
-    if (isRightOnly || isStraightRight) {
-      const branchZ = isStraightRight ? 0.2 : -0.8;
-      const shapeY = isStraightRight ? -0.2 : 0.8;
+    const hasRight =
+      type === "right" ||
+      type === "straight-right" ||
+      type === "left-right" ||
+      type === "straight-left-right";
+    if (hasRight) {
+      const isRightWithoutStraight = !hasStraight;
+      const branchZ = isRightWithoutStraight ? -0.8 : 0.2;
+      const shapeY = isRightWithoutStraight ? 0.8 : -0.2;
       const branchGeo = new THREE.PlaneGeometry(0.95, 0.36);
       branchGeo.rotateX(-Math.PI / 2);
       const branch = new THREE.Mesh(branchGeo, this.whitePaintMat);
@@ -928,40 +936,45 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
 
     const hasDocument = typeof document !== "undefined";
     if (hasDocument) {
-      const canvas = document.createElement("canvas");
-      canvas.width = 256;
-      canvas.height = 512;
-      const ctx = canvas.getContext("2d");
-      const hasCtx = Boolean(ctx);
-      if (hasCtx) {
-        ctx!.clearRect(0, 0, 256, 512);
-        // 運転席からの俯角で正立・等比に見えるよう縦方向に引き伸ばした法定白色ペイント数字
-        ctx!.save();
-        ctx!.scale(1.0, 2.2);
-        ctx!.fillStyle = "#f8fafc";
-        ctx!.font = "bold 148px sans-serif";
-        ctx!.textAlign = "center";
-        ctx!.textBaseline = "middle";
-        ctx!.fillText(`${speedLimit}`, 128, 116);
-        ctx!.restore();
-      }
+      let mat = this.speedLimitMatCache.get(speedLimit);
+      if (!mat) {
+        const canvas = document.createElement("canvas");
+        canvas.width = 256;
+        canvas.height = 512;
+        const ctx = canvas.getContext("2d");
+        const hasCtx = Boolean(ctx);
+        if (hasCtx) {
+          ctx!.clearRect(0, 0, 256, 512);
+          // 運転席からの俯角で正立・等比に見えるよう縦方向に引き伸ばした法定白色ペイント数字
+          ctx!.save();
+          ctx!.scale(1.0, 2.2);
+          ctx!.fillStyle = "#f8fafc";
+          ctx!.font = "bold 148px sans-serif";
+          ctx!.textAlign = "center";
+          ctx!.textBaseline = "middle";
+          ctx!.fillText(`${speedLimit}`, 128, 116);
+          ctx!.restore();
+        }
 
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      const mat = new THREE.MeshStandardMaterial({
-        color: 0xf8fafc,
-        emissive: 0xe2e8f0,
-        emissiveIntensity: 0.42,
-        map: tex,
-        transparent: true,
-        roughness: 0.46,
-        metalness: 0.08,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -3,
-        polygonOffsetUnits: -3,
-      });
-      this.applyRoadMarking3DTexture(mat, "white-paint");
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        mat = new THREE.MeshStandardMaterial({
+          color: 0xf8fafc,
+          emissive: 0xe2e8f0,
+          emissiveIntensity: 0.42,
+          map: tex,
+          transparent: true,
+          side: THREE.DoubleSide,
+          roughness: 0.46,
+          metalness: 0.08,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -3,
+          polygonOffsetUnits: -3,
+        });
+        this.applyRoadMarking3DTexture(mat, "white-paint");
+        this.speedLimitMatCache.set(speedLimit, mat);
+      }
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 4.2), mat);
       plane.name = "SpeedMarking_Plane";
       plane.userData.markingType = "SpeedMarking";
@@ -973,6 +986,73 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
       const fallback = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 3.6), this.whitePaintMat);
       fallback.name = "SpeedMarking_FallbackPlane";
       fallback.userData.markingType = "SpeedMarking";
+      fallback.userData.paintColor = "white";
+      fallback.rotation.x = -Math.PI / 2;
+      group.add(fallback);
+    }
+
+    return group;
+  }
+
+  /**
+   * 指示標示（路面文字標示）: 「止まれ」（細街路・非優先道路の一時停止線手前ペイント）
+   * How: 標識令に準拠し、停止線手前（約 2.5m〜3.5m）の進行車線中央へ白色縦長文字「止まれ」を描画する。
+   */
+  public createStopTextRoadMarking(x: number, z: number, rotationY = 0): THREE.Group {
+    const group = new THREE.Group();
+    group.name = "StopTextGroup";
+    group.userData.markingType = "StopText";
+    group.userData.paintColor = "white";
+    group.position.set(x, 0.024, z);
+    group.rotation.y = rotationY;
+
+    const hasDocument = typeof document !== "undefined";
+    if (hasDocument) {
+      if (!this.stopTextMatCache) {
+        const canvas = document.createElement("canvas");
+        canvas.width = 512;
+        canvas.height = 512;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, 512, 512);
+          ctx.save();
+          ctx.scale(1.0, 2.0);
+          ctx.fillStyle = "#f8fafc";
+          ctx.font = "bold 124px 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("止まれ", 256, 128);
+          ctx.restore();
+        }
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const mat = new THREE.MeshStandardMaterial({
+          color: 0xf8fafc,
+          emissive: 0xe2e8f0,
+          emissiveIntensity: 0.42,
+          map: tex,
+          transparent: true,
+          side: THREE.DoubleSide,
+          roughness: 0.46,
+          metalness: 0.08,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -3,
+          polygonOffsetUnits: -3,
+        });
+        this.applyRoadMarking3DTexture(mat, "white-paint");
+        this.stopTextMatCache = mat;
+      }
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 2.6), this.stopTextMatCache);
+      plane.name = "StopText_Plane";
+      plane.userData.markingType = "StopText";
+      plane.userData.paintColor = "white";
+      plane.rotation.x = -Math.PI / 2;
+      group.add(plane);
+    } else {
+      const fallback = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 2.4), this.whitePaintMat);
+      fallback.name = "StopText_FallbackPlane";
+      fallback.userData.markingType = "StopText";
       fallback.userData.paintColor = "white";
       fallback.rotation.x = -Math.PI / 2;
       group.add(fallback);
@@ -1024,6 +1104,10 @@ if (uMarkingVariant != 2 && markCamDist < 65.0) {
 
   public getWhitePaintMaterial(): THREE.MeshStandardMaterial {
     return this.whitePaintMat;
+  }
+
+  public getYellowPaintMaterial(): THREE.MeshStandardMaterial {
+    return this.yellowPaintMat;
   }
 
   public getBrailleTileMaterial(): THREE.MeshStandardMaterial {

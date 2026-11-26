@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { Procedural3DTextureGenerator } from "../textures/procedural3DTexture";
+import type { LaneArrowType } from "./lanes/laneSchema";
 import { applyRoadProp3DTexture } from "./roadProps";
 
 export type RoadSign3DTextureMode = "pole" | "sign-back" | "sign-face";
@@ -1772,14 +1773,25 @@ if (signCamDist < 42.0) {
   /**
    * 11. 規制標識: 「進行方向別通行区分」(327の7: 交差点手前の車線別進行方向表示板)
    * How: 道路交通法第35条第1項および標識令（327の7）に準拠し、
-   * 実際の片側車線数（lanesPerDirection = 2 または 3）と路面進行方向矢印（RoadMarkings.createLaneArrowMarking）に一致させて
-   * 2車線時は「直進・左折 ｜ 右折」、3車線時は「直進・左折 ｜ 直進 ｜ 右折」を描画する。
+   * 統一車線システム（RoadLaneProfile）から渡される左→右車線順の矢印配列（または車線数）を
+   * 1:1 で描画することで、路面進行方向矢印（RoadMarkings）と標識の食い違いを構造的に根絶する。
    */
-  public createLaneDirectionSign(x: number, z: number, lanesPerDirection = 2): THREE.Group {
+  public createLaneDirectionSign(
+    x: number,
+    z: number,
+    lanesOrArrows: number | ReadonlyArray<LaneArrowType> = 2,
+  ): THREE.Group {
     const group = new THREE.Group();
-    const resolvedLanes = lanesPerDirection >= 3 ? 3 : 2;
+    const resolvedArrows: LaneArrowType[] =
+      Array.isArray(lanesOrArrows) && lanesOrArrows.length > 0
+        ? [...lanesOrArrows]
+        : (lanesOrArrows as number) >= 3
+          ? ["straight-left", "straight", "right"]
+          : ["straight-left", "straight-right"];
+    const resolvedLanes = resolvedArrows.length;
     group.name = `LaneDirectionSign_${resolvedLanes}Lanes`;
     group.userData.lanesPerDirection = resolvedLanes;
+    group.userData.laneArrows = resolvedArrows;
     group.position.set(x, 0, z);
 
     // 看板上端 (y = 3.85 + 0.575 = 4.425m) より下で支柱を止める
@@ -1789,63 +1801,69 @@ if (signCamDist < 42.0) {
     const signGroup = new THREE.Group();
     signGroup.position.set(0, 3.85, 0);
 
-    const width = 1.65;
+    const width = resolvedLanes >= 4 ? 2.05 : 1.65;
     const height = 1.15;
 
     const hasDocument = typeof document !== "undefined";
     if (hasDocument) {
       const canvas = document.createElement("canvas");
-      canvas.width = 512;
+      canvas.width = resolvedLanes >= 4 ? 640 : 512;
       canvas.height = 360;
       const ctx = canvas.getContext("2d");
       const hasCtx = Boolean(ctx);
       if (hasCtx) {
+        const cw = canvas.width;
         ctx!.fillStyle = "#00428a";
-        ctx!.fillRect(0, 0, 512, 360);
+        ctx!.fillRect(0, 0, cw, 360);
 
         ctx!.strokeStyle = "#ffffff";
         ctx!.lineWidth = 10;
-        ctx!.strokeRect(8, 8, 496, 344);
+        ctx!.strokeRect(8, 8, cw - 16, 344);
 
-        const isThreeLane = resolvedLanes >= 3;
-        if (isThreeLane) {
-          // 3車線区切り破線（2本：左レーン＝直進＋左折、中央レーン＝直進、右レーン＝右折）
-          ctx!.setLineDash([22, 16]);
-          ctx!.lineWidth = 8;
-          for (const divX of [170, 342]) {
-            ctx!.beginPath();
-            ctx!.moveTo(divX, 24);
-            ctx!.lineTo(divX, 336);
-            ctx!.stroke();
-          }
-          ctx!.setLineDash([]);
-
-          // 左レーン: 直進＋左折
-          this.drawArrow(ctx!, 105, 300, 105, 75, "#ffffff", 16);
-          this.drawTurnArrowLeft(ctx!, 105, 210, 42, 140, "#ffffff");
-
-          // 中央レーン: 直進
-          this.drawArrow(ctx!, 256, 300, 256, 75, "#ffffff", 20);
-
-          // 右レーン: 右折専用
-          this.drawTurnArrow(ctx!, 400, 300, 470, 145, "#ffffff");
-        } else {
-          // 2車線区切り破線（中央1本：左レーン＝直進＋左折、右レーン＝直進＋右折）
-          ctx!.setLineDash([22, 16]);
-          ctx!.lineWidth = 8;
+        const colW = cw / resolvedLanes;
+        ctx!.setLineDash([22, 16]);
+        ctx!.lineWidth = 8;
+        for (let i = 1; i < resolvedLanes; i++) {
+          const divX = Math.round(colW * i);
           ctx!.beginPath();
-          ctx!.moveTo(256, 24);
-          ctx!.lineTo(256, 336);
+          ctx!.moveTo(divX, 24);
+          ctx!.lineTo(divX, 336);
           ctx!.stroke();
-          ctx!.setLineDash([]);
+        }
+        ctx!.setLineDash([]);
 
-          // 左レーン: 直進＋左折
-          this.drawArrow(ctx!, 148, 300, 148, 75, "#ffffff", 18);
-          this.drawTurnArrowLeft(ctx!, 148, 210, 68, 140, "#ffffff");
+        const reach = Math.min(72, colW * 0.34);
+        const shaftW = resolvedLanes >= 3 ? 16 : 18;
+        for (let i = 0; i < resolvedLanes; i++) {
+          const arrow = resolvedArrows[i];
+          const cx = Math.round(colW * (i + 0.5));
+          const hasStraight =
+            arrow === "straight" ||
+            arrow === "straight-left" ||
+            arrow === "straight-right" ||
+            arrow === "straight-left-right";
+          const hasLeft =
+            arrow === "left" ||
+            arrow === "straight-left" ||
+            arrow === "left-right" ||
+            arrow === "straight-left-right";
+          const hasRight =
+            arrow === "right" ||
+            arrow === "straight-right" ||
+            arrow === "left-right" ||
+            arrow === "straight-left-right";
 
-          // 右レーン: 直進＋右折
-          this.drawArrow(ctx!, 364, 300, 364, 75, "#ffffff", 18);
-          this.drawTurnArrow(ctx!, 364, 210, 444, 140, "#ffffff");
+          if (hasStraight) {
+            this.drawArrow(ctx!, cx, 300, cx, 75, "#ffffff", shaftW);
+          }
+          if (hasLeft) {
+            const stemY = hasStraight ? 210 : 300;
+            this.drawTurnArrowLeft(ctx!, cx, stemY, cx - reach, 140, "#ffffff");
+          }
+          if (hasRight) {
+            const stemY = hasStraight ? 210 : 300;
+            this.drawTurnArrow(ctx!, cx, stemY, cx + reach, 145, "#ffffff");
+          }
         }
       }
 

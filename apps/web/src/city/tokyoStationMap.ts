@@ -17,6 +17,15 @@ import type {
   RoadExclusionCorridor,
 } from "../roads/types";
 import { computeRoadCrossSection } from "../roads/roadCrossSection";
+import {
+  buildRectanglePolygon,
+  resolveJunctionTopology,
+  type JunctionConnectionArc,
+  type JunctionTopology,
+  type LaneGraph,
+  type LaneGraphEdge,
+  type Point2D,
+} from "../roads/lanes";
 import { logger } from "../core/logger";
 import { PuddleMaterial, type PuddleEnvironmentSyncParams } from "../shaders/puddleShader";
 import {
@@ -111,6 +120,12 @@ export class TokyoStationMap {
   public readonly signSystem: RoadSignSystem;
 
   private roadBuilder: JapaneseRoadBuilder;
+  private laneGraph: LaneGraph = {
+    version: "1.0.0",
+    edges: [],
+    junctions: [],
+    junctionArcs: [],
+  };
   private signPhysicsContext: SignPhysicsContext | null = null;
   private customSignInstances = new Map<string, CreatedRoadSignInstance>();
   private roadOverrides = new Map<string, RoadDefinition>();
@@ -490,6 +505,10 @@ export class TokyoStationMap {
     }
     const registeredStraightRoads: StraightRoadRecord[] = [];
     const pendingIntersections: PendingIntersectionSpec[] = [];
+    const collectedLaneEdges: LaneGraphEdge[] = [];
+    const collectedJunctionTopologies: JunctionTopology[] = [];
+    const collectedJunctionArcs: JunctionConnectionArc[] = [];
+    let straightRoadCounter = 0;
 
     // ヘルパー: 道路セグメントを構築しマテリアル・コライダー・空間メタデータを登録する
     const addRoadSegment = (
@@ -497,7 +516,14 @@ export class TokyoStationMap {
       center: THREE.Vector3,
       rotationY: number,
     ): void => {
-      const res = this.roadBuilder.buildSegment(config, world, rapier, center, rotationY);
+      const segRoadId = config.roadId ?? `${config.name ?? "straight"}-${straightRoadCounter++}`;
+      const res = this.roadBuilder.buildSegment(
+        { ...config, roadId: segRoadId },
+        world,
+        rapier,
+        center,
+        rotationY,
+      );
       this.removeAttachedLights(res.group);
       res.group.userData.roadName = config.name;
       this.group.add(res.group);
@@ -510,6 +536,7 @@ export class TokyoStationMap {
       this.puddleMaterials.push(...res.puddleMaterials);
       this.colliders.push(...res.colliders);
       this.obstacleColliderHandles.push(...res.obstacleColliderHandles);
+      collectedLaneEdges.push(...res.laneGraphEdges);
 
       const cross = computeRoadCrossSection(config);
       const isEastWest = Math.abs(Math.sin(rotationY)) > 0.7;
@@ -1599,6 +1626,12 @@ export class TokyoStationMap {
       })),
     ];
 
+    // 全交差点の境界ポリゴンを事前生成し、すべての曲線道路標示が交差点内部へ侵入しないよう自動クリッピングする
+    const junctionBoundaryPolygons: ReadonlyArray<ReadonlyArray<Point2D>> = [
+      ...pendingIntersections.map((p) => buildRectanglePolygon(p.ix, p.iz, p.widthX, p.depthZ)),
+      buildRectanglePolygon(-1159.4, 272.4, 24, 24), // SHIBUYA109前 Y字路コア
+    ];
+
     for (let corridorIdx = 0; corridorIdx < corridorDescriptors.length; corridorIdx++) {
       const desc = corridorDescriptors[corridorIdx];
       const curvedCorridor = desc.corridor;
@@ -1771,6 +1804,7 @@ export class TokyoStationMap {
 
       const polyRes = this.roadBuilder.buildPolylineSegment(
         {
+          roadId: curvedCorridor.id,
           name: curvedCorridor.displayName,
           lanesPerDirection: spec.lanesPerDir,
           laneWidth: spec.laneWidth,
@@ -1778,6 +1812,7 @@ export class TokyoStationMap {
           medianWidth: spec.medianWidth,
           medianExclusionZones,
           markingExclusionZones,
+          junctionPolygons: junctionBoundaryPolygons,
           sidewalkExclusionCorridors,
           sidewalkExclusionBoxes,
           sidewalkExclusionZones,
@@ -1833,7 +1868,19 @@ export class TokyoStationMap {
       this.puddleMaterials.push(...polyRes.puddleMaterials);
       this.colliders.push(...polyRes.colliders);
       this.obstacleColliderHandles.push(...polyRes.obstacleColliderHandles);
+      collectedLaneEdges.push(...polyRes.laneGraphEdges);
     }
+
+    const curvedTopologyInputs = corridorDescriptors.map((desc) => ({
+      id: desc.id,
+      samples: desc.samples,
+      carriagewayWidth: desc.spec.halfWidth * 2,
+      lanesPerDirection: desc.spec.lanesPerDir,
+      laneWidth: desc.spec.laneWidth,
+      medianWidth: desc.spec.medianWidth,
+      hasStopText:
+        desc.spec.isHikarieAccess || desc.spec.isSakurazakaLoop || desc.spec.isInokashiraOrgan,
+    }));
 
     // --- Q. 予約済み全交差点の自動アーム解決＆統一構築（隅切り R 歩道・T字路閉鎖辺連続歩道・安全コライダー） ---
     for (const spec of pendingIntersections) {
@@ -1931,6 +1978,29 @@ export class TokyoStationMap {
       const armCount = [arms.north, arms.south, arms.east, arms.west].filter(Boolean).length;
       const shouldBuildCorners = spec.hasCornerSidewalks ?? armCount >= 2;
       const isShibuyaIntersection = spec.ix < -395;
+      const isScrambleIntersection = Math.hypot(spec.ix - -990.7, spec.iz - 275.8) < 2.0;
+      const junctionId = `Intersection_${spec.ix}_${spec.iz}`;
+      const junctionTopology = resolveJunctionTopology({
+        id: junctionId,
+        name: junctionId,
+        x: spec.ix,
+        z: spec.iz,
+        widthX: spec.widthX,
+        depthZ: spec.depthZ,
+        lanesX: spec.lanesX,
+        lanesZ: spec.lanesZ,
+        isScramble: isScrambleIntersection,
+        hasCrosswalks: spec.hasCrosswalks,
+        hasCenterDiamond: spec.hasCenterDiamond,
+        hasGuideDots: spec.hasGuideDots,
+        crosswalkN: spec.crosswalkN ?? (armCount > 0 ? Boolean(arms.north) : true),
+        crosswalkS: spec.crosswalkS ?? (armCount > 0 ? Boolean(arms.south) : true),
+        crosswalkE: spec.crosswalkE ?? (armCount > 0 ? Boolean(arms.east) : true),
+        crosswalkW: spec.crosswalkW ?? (armCount > 0 ? Boolean(arms.west) : true),
+        straightRoads: registeredStraightRoads,
+        curvedCorridors: curvedTopologyInputs,
+      });
+
       const interRes = this.roadBuilder.buildIntersection(
         {
           x: spec.ix,
@@ -1943,6 +2013,8 @@ export class TokyoStationMap {
           hasCrosswalks: spec.hasCrosswalks,
           hasCenterDiamond: spec.hasCenterDiamond,
           hasGuideDots: spec.hasGuideDots,
+          isScramble: isScrambleIntersection,
+          junctionTopology,
           crosswalkN: spec.crosswalkN,
           crosswalkS: spec.crosswalkS,
           crosswalkE: spec.crosswalkE,
@@ -1962,7 +2034,35 @@ export class TokyoStationMap {
       this.puddleMaterials.push(...interRes.puddleMaterials);
       this.colliders.push(...interRes.colliders);
       this.obstacleColliderHandles.push(...interRes.obstacleColliderHandles);
+      collectedJunctionTopologies.push(interRes.junctionTopology);
+      collectedJunctionArcs.push(...interRes.junctionArcs);
     }
+
+    this.laneGraph = {
+      version: "1.0.0",
+      edges: collectedLaneEdges,
+      junctions: collectedJunctionTopologies,
+      junctionArcs: collectedJunctionArcs,
+    };
+    logger.info("roads", "lane_graph.built", "統一車線グラフを構築", {
+      edgeCount: collectedLaneEdges.length,
+      junctionCount: collectedJunctionTopologies.length,
+      junctionArcCount: collectedJunctionArcs.length,
+    });
+  }
+
+  /**
+   * 統一車線システムが生成した都市全体の構造化車線グラフ（LaneGraph）を取得する
+   */
+  public getLaneGraph(): LaneGraph {
+    return this.laneGraph;
+  }
+
+  /**
+   * 都市内の全交差点トポロジー一覧を取得する
+   */
+  public getJunctionTopologies(): ReadonlyArray<JunctionTopology> {
+    return this.laneGraph.junctions;
   }
 
   /**

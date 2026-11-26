@@ -1,4 +1,5 @@
 import type * as THREE from "three";
+import type { JunctionTopology, Point2D, RoadLaneCatalogEntry } from "./lanes/laneSchema";
 
 /**
  * 日本の道路仕様・パラメータ型定義
@@ -52,13 +53,20 @@ export interface JapaneseIntersectionConfig {
   crosswalkE?: boolean;
   crosswalkW?: boolean;
   hasGuideDots?: boolean;
+  isScramble?: boolean;
+  junctionTopology?: JunctionTopology;
   baseY?: number;
   elevationSampler?: (x: number, z: number) => number;
   skipRoadCollider?: boolean;
 }
 
 export interface JapaneseRoadSegmentConfig {
+  roadId?: string;
   name?: string;
+  laneProfileOverride?: RoadLaneCatalogEntry;
+  hasStopText?: boolean;
+  junctionPolygons?: ReadonlyArray<ReadonlyArray<Point2D>>;
+  crossingCorridors?: ReadonlyArray<RoadExclusionCorridor>;
   lanesPerDirection: number; // 片側車線数 (例: 2 = 往復4車線, 3 = 往復6車線)
   laneWidth: number; // 1車線の標準幅員 (日本標準: 3.0m - 3.5m)
   shoulderWidth: number; // 路肩・側帯幅員 (日本標準: 0.5m - 1.25m)

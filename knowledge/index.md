@@ -69,3 +69,4 @@ trust_signals:
 - [054-shibuya-swarm-photorealistic-convergence-and-ux.md](./054-shibuya-swarm-photorealistic-convergence-and-ux.md): 渋谷エリア並列 /swarm 収束改修：3Dランドマーク・PLATEAU/GIS境界・道路街区連続性・URL/ギアUX・E2E検証
 - [055-road-and-sidewalk-architecture-overhaul.md](./055-road-and-sidewalk-architecture-overhaul.md): 道路作成システム・歩道断面幾何学・交差点隅切りの統合刷新
 - [056-shibuya-true-1to1-gis-non-mirrored-sloped-overhaul.md](./056-shibuya-true-1to1-gis-non-mirrored-sloped-overhaul.md): 渋谷エリア非鏡像 1:1 GIS 座標系・DEM5A 谷地形・構造物リアル化オーバーホール
+- [057-unified-lane-profile-junction-topology-and-batched-markings.md](./057-unified-lane-profile-junction-topology-and-batched-markings.md): 統一車線プロファイル・交差点トポロジー自動クリッピング・バッチ路面標示アーキテクチャ

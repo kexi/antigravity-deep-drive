@@ -6,6 +6,7 @@ import {
   type RoadSignType,
 } from "../assets/schema";
 import { logger } from "../core/logger";
+import type { LaneArrowType } from "./lanes/laneSchema";
 import { JapaneseRoadSigns } from "./roadSigns";
 
 export type SignShapeKind =
@@ -635,9 +636,38 @@ export class RoadSignSystem {
         return this.signs.createOneWaySign(x, z, spec.auxiliaryText ?? "自転車を除く");
 
       case "lane_direction": {
-        const isThreeLane = spec.arrowDirections?.length === 3;
-        const resolvedLanes = isThreeLane ? 3 : 2;
-        return this.signs.createLaneDirectionSign(x, z, resolvedLanes);
+        const parseArrowLabel = (raw: string): LaneArrowType => {
+          const s = raw.trim().toLowerCase();
+          if (
+            s === "straight-left-right" ||
+            (s.includes("直進") && s.includes("左") && s.includes("右"))
+          ) {
+            return "straight-left-right";
+          }
+          if (s === "straight-left" || (s.includes("直進") && s.includes("左"))) {
+            return "straight-left";
+          }
+          if (s === "straight-right" || (s.includes("直進") && s.includes("右"))) {
+            return "straight-right";
+          }
+          if (s === "left-right" || (s.includes("左") && s.includes("右"))) {
+            return "left-right";
+          }
+          if (s === "left" || s.includes("左")) {
+            return "left";
+          }
+          if (s === "right" || s.includes("右")) {
+            return "right";
+          }
+          return "straight";
+        };
+        const hasExplicitArrows =
+          Array.isArray(spec.arrowDirections) && spec.arrowDirections.length >= 2;
+        if (hasExplicitArrows) {
+          const mappedArrows = spec.arrowDirections!.map(parseArrowLabel);
+          return this.signs.createLaneDirectionSign(x, z, mappedArrows);
+        }
+        return this.signs.createLaneDirectionSign(x, z, 2);
       }
 
       case "intersection_name":

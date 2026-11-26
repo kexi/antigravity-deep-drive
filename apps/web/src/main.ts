@@ -42,6 +42,7 @@ import {
 } from "./core/shaderPrebuilder";
 import { RoadSignCreatorUI } from "./roads/roadSignCreatorUI";
 import { RoadProps } from "./roads/roadProps";
+import { buildLaneDebugOverlayGroup } from "./roads/lanes";
 import { MotionBlurPass } from "./shaders/motionBlur";
 import { DepthFogPass } from "./shaders/depthFog";
 import { LensFlarePass } from "./shaders/lensFlare";
@@ -571,6 +572,38 @@ async function bootstrap() {
 
   // 4. 車両物理 & 3Dモデル構築（デフォルト: 渋谷ストリーム前・明治通りからスタート）
   const urlParams = new URLSearchParams(window.location.search);
+  const laneGraph = cityMap.getLaneGraph();
+  (window as unknown as { __DEEP_DRIVE_LANE_GRAPH__?: unknown }).__DEEP_DRIVE_LANE_GRAPH__ =
+    laneGraph;
+  let laneDebugOverlayGroup: THREE.Group | null = null;
+  const setDebugLanesVisible = (enabled: boolean): boolean => {
+    if (enabled && !laneDebugOverlayGroup) {
+      laneDebugOverlayGroup = buildLaneDebugOverlayGroup(laneGraph, {
+        elevationSampler: (x, z) => (x < -395 ? sampleShibuyaTerrainY(x, z) : 0),
+      });
+      scene.add(laneDebugOverlayGroup);
+    }
+    if (laneDebugOverlayGroup) {
+      laneDebugOverlayGroup.visible = enabled;
+    }
+    return enabled;
+  };
+  const isDebugLanesQuery =
+    urlParams.get("debugLanes") === "1" || urlParams.get("debugLanes") === "true";
+  if (isDebugLanesQuery) {
+    setDebugLanesVisible(true);
+    logger.info(
+      "roads",
+      "lane_debug.enabled",
+      "URLクエリ ?debugLanes=1 により車線デバッグ可視化オーバーレイを有効化",
+      {
+        edgeCount: laneGraph.edges.length,
+        junctionCount: laneGraph.junctions.length,
+        junctionArcCount: laneGraph.junctionArcs.length,
+      },
+      { trace: bootTrace },
+    );
+  }
   const initialLocationQuery = parseUrlLocationQuery(window.location.search, "shibuya");
   let currentDriveArea: DriveAreaId = initialLocationQuery.area;
   const hasValidQueryLatLon = initialLocationQuery.hasLatLonQuery;
@@ -2272,6 +2305,9 @@ async function bootstrap() {
     weatherSystem,
     scene,
     renderer,
+    cityMap,
+    laneGraph,
+    setDebugLanesVisible,
   };
 
   logger.info(

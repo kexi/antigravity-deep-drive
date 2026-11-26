@@ -3,12 +3,7 @@ import type RAPIER from "@dimforge/rapier3d-compat";
 import { JapaneseRoadMaterial } from "./japaneseRoadMaterial";
 import { PuddleMaterial } from "../shaders/puddleShader";
 import { Procedural3DTextureGenerator } from "../textures/procedural3DTexture";
-import {
-  RoadMarkings,
-  computeRoadLaneLayout,
-  type RoadLaneArrowType,
-  type RoadLaneLayout,
-} from "./roadMarkings";
+import { RoadMarkings, computeRoadLaneLayout, type RoadLaneLayout } from "./roadMarkings";
 import { applyRoadProp3DTexture, RoadProps } from "./roadProps";
 import {
   buildIntersectionCornerSidewalks,
@@ -24,6 +19,29 @@ import {
   type RoadCrossSectionSpec,
   type RoadFrame,
 } from "./roadCrossSection";
+import {
+  MARKING_Y_LAYERS,
+  MarkingGeometryBatcher,
+  addChevronZebraZone,
+  addDashedRibbon,
+  addSolidRibbon,
+  buildArbitraryAngleJunctionMarkings,
+  buildJunctionTurnGuideArcsMesh,
+  buildRoadLaneProfile,
+  computeClippedMarkingIntervals,
+  evaluateLaneCrossSectionAt,
+  extractJunctionConnectionArcs,
+  extractRoadLaneGraphEdges,
+  interpolateRoadFrame,
+  isPointInPolygon2D,
+  lookupRoadLaneCatalogEntry,
+  resolveDriverLeftToRightArrows,
+  resolveJunctionTopology,
+  type JunctionConnectionArc,
+  type JunctionTopology,
+  type LaneGraphEdge,
+  type RoadLaneProfile,
+} from "./lanes";
 import type { JapaneseIntersectionConfig, JapaneseRoadSegmentConfig } from "./types";
 
 /**
@@ -125,6 +143,7 @@ export class JapaneseRoadBuilder {
   ): THREE.Group {
     const group = this.markings.createScrambleDiagonalCrosswalks(padSize);
     if (elevationSampler) {
+      group.userData.usesTerrainElevation = true;
       this.drapeObjectOverElevation(group, centerX, centerZ, elevationSampler, baseGroundY);
     }
     return group;
@@ -161,6 +180,8 @@ export class JapaneseRoadBuilder {
     puddleMaterials: PuddleMaterial[];
     colliders: RAPIER.Collider[];
     obstacleColliderHandles: number[];
+    junctionTopology: JunctionTopology;
+    junctionArcs: JunctionConnectionArc[];
   } {
     const baseY = config.baseY ?? 0.0115;
     const sampleY = config.elevationSampler;
@@ -168,6 +189,7 @@ export class JapaneseRoadBuilder {
     const interGroup = new THREE.Group();
     interGroup.name = config.name ?? `Intersection_${config.x}_${config.z}`;
     interGroup.userData.isRoadInfrastructure = true;
+    interGroup.userData.usesTerrainElevation = Boolean(sampleY);
     interGroup.position.set(config.x, centerTerrainY + baseY, config.z);
 
     const padMat = sharedPadMaterial ?? this.intersectionAsphaltMaterial;
@@ -199,23 +221,91 @@ export class JapaneseRoadBuilder {
     const lanesX = config.lanesX ?? 2;
     const lanesZ = config.lanesZ ?? 2;
     const hasCrosswalks = config.hasCrosswalks ?? true;
+    const hasCenterDiamond = config.hasCenterDiamond ?? (lanesX >= 2 && lanesZ >= 2);
+    const hasGuideDots = config.hasGuideDots ?? true;
 
-    const interMarkings = this.buildIntersectionMarkingGroup(config.widthX, config.depthZ, {
-      lanesX,
-      lanesZ,
-      hasCrosswalks,
-      hasCenterDiamond: config.hasCenterDiamond ?? (lanesX >= 2 && lanesZ >= 2),
-      hasGuideDots: config.hasGuideDots ?? true,
-      crosswalkN: resolvedCrosswalkN,
-      crosswalkS: resolvedCrosswalkS,
-      crosswalkE: resolvedCrosswalkE,
-      crosswalkW: resolvedCrosswalkW,
-    });
-    if (sampleY) {
-      this.drapeObjectOverElevation(interMarkings, config.x, config.z, sampleY, centerTerrainY);
+    const junctionTopology: JunctionTopology =
+      config.junctionTopology ??
+      resolveJunctionTopology({
+        id: interGroup.name,
+        name: interGroup.name,
+        x: config.x,
+        z: config.z,
+        widthX: config.widthX,
+        depthZ: config.depthZ,
+        lanesX,
+        lanesZ,
+        isScramble: config.isScramble,
+        hasCrosswalks,
+        hasCenterDiamond,
+        hasGuideDots,
+        crosswalkN: resolvedCrosswalkN,
+        crosswalkS: resolvedCrosswalkS,
+        crosswalkE: resolvedCrosswalkE,
+        crosswalkW: resolvedCrosswalkW,
+      });
+    interGroup.userData.junctionTopology = junctionTopology;
+
+    const hasObliqueArms =
+      Boolean(config.junctionTopology) &&
+      junctionTopology.arms.some((arm) => {
+        const mod = Math.abs(arm.angleRad) % (Math.PI * 0.5);
+        const distToCardinal = Math.min(mod, Math.PI * 0.5 - mod);
+        return distToCardinal > 0.22;
+      });
+
+    let interMarkings: THREE.Group;
+    if (hasObliqueArms && hasCrosswalks) {
+      interMarkings = buildArbitraryAngleJunctionMarkings(
+        junctionTopology,
+        this.markings.getWhitePaintMaterial(),
+        {
+          elevationSampler: sampleY,
+          centerTerrainY,
+        },
+      );
+    } else {
+      interMarkings = this.buildIntersectionMarkingGroup(config.widthX, config.depthZ, {
+        lanesX,
+        lanesZ,
+        hasCrosswalks,
+        hasCenterDiamond,
+        hasGuideDots,
+        crosswalkN: resolvedCrosswalkN,
+        crosswalkS: resolvedCrosswalkS,
+        crosswalkE: resolvedCrosswalkE,
+        crosswalkW: resolvedCrosswalkW,
+      });
+      if (sampleY) {
+        this.drapeObjectOverElevation(interMarkings, config.x, config.z, sampleY, centerTerrainY);
+      }
+
+      // 主要複数車線交差点には 2 次ベジェ曲線による右折誘導破線アーク（標識令準拠）を重畳する
+      const isMajorIntersection =
+        !junctionTopology.isScramble && hasGuideDots && hasCrosswalks && lanesX >= 2 && lanesZ >= 2;
+      if (isMajorIntersection) {
+        const turnArcsMesh = buildJunctionTurnGuideArcsMesh(
+          junctionTopology,
+          this.markings.getWhitePaintMaterial(),
+          {
+            elevationSampler: sampleY,
+            centerTerrainY,
+          },
+        );
+        if (turnArcsMesh) {
+          interMarkings.add(turnArcsMesh);
+        }
+      }
     }
     interMarkings.userData.isRoadInfrastructure = true;
     interGroup.add(interMarkings);
+
+    const junctionArcs = extractJunctionConnectionArcs(
+      junctionTopology,
+      sampleY,
+      baseY + MARKING_Y_LAYERS.intersectionMarks,
+    );
+    interGroup.userData.junctionArcs = junctionArcs;
 
     const colliders: RAPIER.Collider[] = [];
     const obstacleColliderHandles: number[] = [];
@@ -284,7 +374,14 @@ export class JapaneseRoadBuilder {
       }
     }
 
-    return { group: interGroup, puddleMaterials, colliders, obstacleColliderHandles };
+    return {
+      group: interGroup,
+      puddleMaterials,
+      colliders,
+      obstacleColliderHandles,
+      junctionTopology,
+      junctionArcs,
+    };
   }
 
   public buildSegment(
@@ -299,6 +396,8 @@ export class JapaneseRoadBuilder {
     puddleMaterials: PuddleMaterial[];
     colliders: RAPIER.Collider[];
     obstacleColliderHandles: number[];
+    laneProfile: RoadLaneProfile;
+    laneGraphEdges: LaneGraphEdge[];
   } {
     const group = new THREE.Group();
     group.userData.isRoadInfrastructure = true;
@@ -373,8 +472,18 @@ export class JapaneseRoadBuilder {
       segmentColliders,
     );
 
-    // 5. 道路標示（中央線、白破線、路肩線、横断歩道）
-    const laneLayout = this.buildMarkings(group, config, cross, crosswalkZPositions);
+    // 統一車線プロファイル（SSOT）を構築し、路面標示・進行方向別通行区分標識・車線グラフで共有する
+    const catalogEntry =
+      config.laneProfileOverride ?? lookupRoadLaneCatalogEntry(config.roadId ?? config.name);
+    const laneProfile = buildRoadLaneProfile(config, config.length, {
+      roadId: config.roadId ?? config.name ?? `straight_${position.x}_${position.z}`,
+      crosswalkArcs: crosswalkZPositions.map((cz) => cz + config.length * 0.5),
+      catalogEntry,
+    });
+    group.userData.laneProfile = laneProfile;
+
+    // 5. 道路標示（中央線、白破線、路肩線、横断歩道、細街路「止まれ」標示）
+    const laneLayout = this.buildMarkings(group, config, cross, crosswalkZPositions, laneProfile);
 
     // 6. 中央分離帯アイランド（medianWidth > 0 の場合）
     const hasRaisedMedian = cross.medianWidth > 0;
@@ -402,7 +511,17 @@ export class JapaneseRoadBuilder {
       roadBody,
       segmentColliders,
       obstacleColliderHandles,
+      laneProfile,
     );
+
+    const straightFrames = buildStraightRoadFrames(
+      buildStationsWithRamps(-config.length * 0.5, config.length * 0.5, 8.0),
+    );
+    const laneGraphEdges = extractRoadLaneGraphEdges(laneProfile, straightFrames, {
+      baseY: 0.015,
+      worldTransform: { position, rotationY },
+    });
+    group.userData.laneGraphEdges = laneGraphEdges;
 
     return {
       group,
@@ -410,6 +529,8 @@ export class JapaneseRoadBuilder {
       puddleMaterials: this.puddleMaterials,
       colliders: segmentColliders,
       obstacleColliderHandles,
+      laneProfile,
+      laneGraphEdges,
     };
   }
 
@@ -720,6 +841,7 @@ if (curbCamDist < 36.0) {
     config: JapaneseRoadSegmentConfig,
     cross: RoadCrossSectionSpec,
     crosswalkZPositions: ReadonlyArray<number>,
+    laneProfile?: RoadLaneProfile,
   ): RoadLaneLayout {
     const halfRoadWidth = cross.halfDriveable;
     const hasCrosswalks = crosswalkZPositions.length > 0;
@@ -837,7 +959,7 @@ if (curbCamDist < 36.0) {
       group.add(zebra);
     }
 
-    // 6. 全車線（1〜3+車線すべて）への進行方向矢印・横断歩道予告ダイヤ（◇）・最高速度標示の非重複配置
+    // 6. 全車線（1〜3+車線すべて）への進行方向矢印・細街路「止まれ」標示・横断歩道予告ダイヤ（◇）・最高速度標示の非重複配置
     // Why not rotationY = 0 for inbound (+Z) lanes:
     // RoadMarkings の Plane は rotateX(-Math.PI / 2) で地面に寝かせるため、rotationY = 0 だと上端が -Z（対向側）を向く。
     // +Z 方向へ走る自車車線（x > 0）から正立して見え、かつ「直進＋左折」が左（+X）へ分岐するよう rotationY = Math.PI とする。
@@ -845,10 +967,26 @@ if (curbCamDist < 36.0) {
     const oncomingArrowZ = crossZ + 9.5;
     const southArrowZ = southCrossZ - 9.5;
     const southOncomingArrowZ = southCrossZ + 9.5;
+    const hasStopTextApproaches = Boolean(
+      config.hasStopText ||
+      laneProfile?.sections.some(
+        (sec) =>
+          sec.inboundLanes.some((l) => l.hasStopText) ||
+          sec.oncomingLanes.some((l) => l.hasStopText),
+      ),
+    );
 
     for (const lane of laneLayout.lanes) {
       const isInbound = lane.direction === "inbound";
       const primaryArrowZ = isInbound ? arrowZ : oncomingArrowZ;
+      if (hasStopTextApproaches && hasCrosswalks) {
+        const stopTextZ = isInbound ? crossZ - 7.8 : crossZ + 7.8;
+        if (registerLaneSpan(lane.centerX, stopTextZ, 1.8)) {
+          group.add(
+            this.markings.createStopTextRoadMarking(lane.centerX, stopTextZ, lane.rotationY),
+          );
+        }
+      }
       if (registerLaneSpan(lane.centerX, primaryArrowZ, 3.6)) {
         group.add(
           this.markings.createLaneArrowMarking(
@@ -1128,6 +1266,7 @@ if (curbCamDist < 36.0) {
     roadBody: RAPIER.RigidBody,
     segmentColliders: RAPIER.Collider[],
     obstacleColliderHandles: number[],
+    laneProfile?: RoadLaneProfile,
   ): void {
     const signLabels = this.resolveRoadSignLocalizedLabels(config.name);
     const createPoleCylinderDesc = (halfH: number, radius: number) => {
@@ -1436,15 +1575,20 @@ if (curbCamDist < 36.0) {
 
     // 交差点手前の「進行方向別通行区分」標識（327の7）とデリネーター（視線誘導標）
     // 左側通行（+Z 進行 = x > 0）のドライバーへ正対するよう左歩道（+halfRoadWidth + 1.35）に rotation.y = Math.PI で設置し、
-    // 道路の実際の片側車線数（lanesPerDirection = 2 または 3）と一致する矢印区画板を描画する。
+    // RoadLaneProfile（SSOT）から導出した左→右車線の矢印配列をそのまま渡して路面矢印と 100% 同期する。
     const isMajorMultiLane = config.lanesPerDirection >= 2;
     if (isMajorMultiLane) {
       const laneDirSignX = halfRoadWidth + 1.35;
       const laneDirSignZ = config.length * 0.25 - 24.0;
+      const approachSec = laneProfile?.sections[laneProfile.sections.length - 1];
+      const signArrowsOrLanes =
+        approachSec && approachSec.inboundLanes.length >= 2
+          ? resolveDriverLeftToRightArrows(approachSec.inboundLanes)
+          : config.lanesPerDirection;
       const laneDirSign = this.props.signs.createLaneDirectionSign(
         laneDirSignX,
         laneDirSignZ,
-        config.lanesPerDirection,
+        signArrowsOrLanes,
       );
       laneDirSign.rotation.y = Math.PI;
       laneDirSign.userData.lodDetailTier = "medium";
@@ -1486,6 +1630,8 @@ if (curbCamDist < 36.0) {
     puddleMaterials: PuddleMaterial[];
     colliders: RAPIER.Collider[];
     obstacleColliderHandles: number[];
+    laneProfile: RoadLaneProfile;
+    laneGraphEdges: LaneGraphEdge[];
   } {
     const hasInsufficientPoints = points.length < 2;
     if (hasInsufficientPoints) {
@@ -1495,6 +1641,7 @@ if (curbCamDist < 36.0) {
     const group = new THREE.Group();
     group.name = `CurvedRoadSegment_${config.name || "OpenDataPolyline"}`;
     group.userData.isRoadInfrastructure = true;
+    group.userData.usesTerrainElevation = Boolean(config.elevationSampler);
     const segmentMaterials: JapaneseRoadMaterial[] = [];
     const segmentPuddleMaterials: PuddleMaterial[] = [];
     const segmentColliders: RAPIER.Collider[] = [];
@@ -1629,45 +1776,24 @@ if (curbCamDist < 36.0) {
     roadMesh.receiveShadow = true;
     group.add(roadMesh);
 
-    // 3. 曲線道路標示（中央線・車線境界線・外側線）
-    // Why 交差点手前トリム（14m〜20m）を設けるか:
-    // スプライン曲線道路の端点は交差点パッド（スクランブル交差点 44m×44m、宮益坂下 32m×24m 等）の内部にある。
-    // 白線（中央線・外側線・車線境界線）を端点まで伸ばすと、交差点の中心深くまで複数の道路の白線が突入し、
-    // 十字・X字に交差して「白線のジャングル」と激しい Z-fighting を引き起こす。
-    // 日本の道路構造基準・警察庁交通規制基準に基づき、交差点手前（停止線手前）で車線標示を終了させ、
-    // 交差点内部は平滑なアスファルト舗装面と横断歩道のみを整然と保つ。
+    // 3. 統一車線プロファイル（SSOT）＆自動クリッピングによる曲線道路標示（中央線・車線境界線・右折ポケット導流帯・外側線）
     const defaultTrim = Math.min(18.0, totalSplineLength * 0.25);
     const startMarkingTrim = config.startTrimMeters ?? defaultTrim;
     const endMarkingTrim = config.endTrimMeters ?? defaultTrim;
 
-    // フレーム配列から任意の弧長（arcLen）における位置・接線・法線を滑らかに補間するヘルパー
-    const getInterpolatedFrame = (targetArc: number): RoadFrame => {
-      const clampedArc = Math.max(0, Math.min(totalSplineLength, targetArc));
-      let low = 0;
-      let high = frames.length - 1;
-      while (low <= high) {
-        const mid = (low + high) >> 1;
-        if (frames[mid].arcLen < clampedArc) {
-          low = mid + 1;
-        } else {
-          high = mid - 1;
-        }
-      }
-      const idx0 = Math.max(0, low - 1);
-      const idx1 = Math.min(frames.length - 1, low);
-      if (idx0 === idx1) {
-        return frames[idx0];
-      }
-      const f0 = frames[idx0];
-      const f1 = frames[idx1];
-      const span = f1.arcLen - f0.arcLen;
-      const ratio = span > 0.0001 ? (clampedArc - f0.arcLen) / span : 0;
+    const catalogEntry =
+      config.laneProfileOverride ?? lookupRoadLaneCatalogEntry(config.roadId ?? config.name);
+    const laneProfile = buildRoadLaneProfile(config, totalSplineLength, {
+      roadId: config.roadId ?? config.name ?? "curved-road",
+      catalogEntry,
+      startClearanceM: startMarkingTrim + 8.0,
+      endClearanceM: endMarkingTrim + 8.0,
+    });
+    group.userData.laneProfile = laneProfile;
 
-      const pos = new THREE.Vector3().lerpVectors(f0.pos, f1.pos, ratio);
-      const tangent = new THREE.Vector3().lerpVectors(f0.tangent, f1.tangent, ratio).normalize();
-      const normal = new THREE.Vector3().lerpVectors(f0.normal, f1.normal, ratio).normalize();
-      return { pos, tangent, normal, arcLen: clampedArc };
-    };
+    // 共通フレーム補間（lanes/laneMarkingGeometry.ts と共有）
+    const getInterpolatedFrame = (targetArc: number): RoadFrame =>
+      interpolateRoadFrame(frames, targetArc);
 
     const buildDashedRibbonGeometry = (
       centerOffset: number,
@@ -1679,89 +1805,28 @@ if (curbCamDist < 36.0) {
       arcEnd = totalSplineLength,
       excludeArcRanges: ReadonlyArray<readonly [number, number]> = [],
     ): THREE.BufferGeometry => {
-      const halfW = lineWidth * 0.5;
-      const offsetLeft = centerOffset - halfW;
-      const offsetRight = centerOffset + halfW;
-      const cycle = dashLength + gapLength;
-      const minArc = Math.max(0, arcStart);
-      const maxArc = Math.min(totalSplineLength, arcEnd);
-      const totalDashable = maxArc - minArc;
-      if (totalDashable <= dashLength) {
-        return new THREE.BufferGeometry();
-      }
-
-      const positions: number[] = [];
-      const normals: number[] = [];
-      const uvs: number[] = [];
-      const indices: number[] = [];
-
-      let vertCount = 0;
-      for (let s = minArc; s + dashLength <= maxArc; s += cycle) {
-        const dashEnd = s + dashLength;
-        const overlapsExclusion = excludeArcRanges.some(
-          ([exStart, exEnd]) => dashEnd > exStart && s < exEnd,
-        );
-        if (overlapsExclusion) {
-          continue;
-        }
-
-        const segStart = s;
-        const segSubdivs = 4;
-        const segStartIndex = vertCount / 3;
-
-        for (let j = 0; j <= segSubdivs; j++) {
-          const tSeg = j / segSubdivs;
-          const arc = segStart + tSeg * dashLength;
-          const frame = getInterpolatedFrame(arc);
-
-          const lx = frame.pos.x + frame.normal.x * offsetLeft;
-          const lz = frame.pos.z + frame.normal.z * offsetLeft;
-          const rx = frame.pos.x + frame.normal.x * offsetRight;
-          const rz = frame.pos.z + frame.normal.z * offsetRight;
-
-          positions.push(lx, evalY(lx, lz, yHeight), lz, rx, evalY(rx, rz, yHeight), rz);
-          normals.push(0, 1, 0, 0, 1, 0);
-          uvs.push(0, tSeg, 1, tSeg);
-          vertCount += 6;
-
-          if (j < segSubdivs) {
-            const a = segStartIndex + j * 2;
-            const b = segStartIndex + j * 2 + 1;
-            const c = segStartIndex + (j + 1) * 2;
-            const d = segStartIndex + (j + 1) * 2 + 1;
-            indices.push(a, c, b, b, c, d);
-          }
-        }
-      }
-
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
-      geom.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
-      geom.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
-      geom.setIndex(indices);
-      if (sampleY) {
-        geom.computeVertexNormals();
-      }
-      geom.computeBoundingSphere();
-      return geom;
+      const batcher = new MarkingGeometryBatcher();
+      addDashedRibbon(
+        batcher,
+        frames,
+        Math.max(0, arcStart),
+        Math.min(totalSplineLength, arcEnd),
+        centerOffset,
+        lineWidth,
+        yHeight,
+        evalY,
+        {
+          dashLength,
+          gapLength,
+          excludeArcRanges,
+        },
+      );
+      return batcher.toBufferGeometry(Boolean(sampleY));
     };
 
-    // Why not applyCurb3DTexture を流用するか:
-    // 縁石用マテリアルには polygonOffset が設定されておらず、路面メッシュと深度競合（Z-fighting）して
-    // 走行中に白い点滅を引き起こすため、polygonOffset 付きかつガラスビーズ再帰反射対応の RoadMarkings シェーダーを適用する。
-    // また side: THREE.DoubleSide を設定し、急勾配や急カーブでもバックフェースカリングによる白線の消失を構造的に防ぐ。
-    const whiteLineMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: 0xf1f5f9,
-      emissiveIntensity: 0.45,
-      roughness: 0.35,
-      metalness: 0.05,
-      side: THREE.DoubleSide,
-      polygonOffset: true,
-      polygonOffsetFactor: -3,
-      polygonOffsetUnits: -3,
-    });
-    this.markings.applyRoadMarking3DTexture(whiteLineMat, "white-paint");
+    // 共有 3D ガラスビーズペイントマテリアル（RoadMarkings から単一インスタンスを共有しシェーダー複製を排除）
+    const whiteLineMat = this.markings.getWhitePaintMaterial();
+    const yellowPaintMat = this.markings.getYellowPaintMaterial();
 
     // 中央分離帯・縁石・歩道共通コンクリートマテリアル（ニュートラルコンクリートグレー）
     const curbMat = new THREE.MeshStandardMaterial({
@@ -1777,65 +1842,22 @@ if (curbCamDist < 36.0) {
       yHeight: number,
       arcStart: number,
       arcEnd: number,
-      uScale = 1,
-      vRepeatPerMeter = 0.2,
+      _uScale = 1,
+      _vRepeatPerMeter = 0.2,
     ): THREE.BufferGeometry => {
-      const spanArc = arcEnd - arcStart;
-      const steps = Math.max(2, Math.min(280, Math.ceil(spanArc / 4.0)));
-      const transverseSteps = sampleY && Math.abs(offsetRight - offsetLeft) > 2.5 ? 4 : 1;
-      const cols = transverseSteps + 1;
-      const positions = new Float32Array((steps + 1) * cols * 3);
-      const normals = new Float32Array((steps + 1) * cols * 3);
-      const uvs = new Float32Array((steps + 1) * cols * 2);
-      const indices: number[] = [];
-
-      for (let i = 0; i <= steps; i++) {
-        const arc = arcStart + (spanArc * i) / steps;
-        const f = getInterpolatedFrame(arc);
-        const vCoord = arc * vRepeatPerMeter;
-
-        for (let j = 0; j <= transverseSteps; j++) {
-          const uFrac = j / transverseSteps;
-          const latOff = offsetLeft + (offsetRight - offsetLeft) * uFrac;
-          const vx = f.pos.x + f.normal.x * latOff;
-          const vz = f.pos.z + f.normal.z * latOff;
-          const vy = evalY(vx, vz, yHeight);
-
-          const vIdx = (i * cols + j) * 3;
-          positions[vIdx] = vx;
-          positions[vIdx + 1] = vy;
-          positions[vIdx + 2] = vz;
-
-          normals[vIdx] = 0;
-          normals[vIdx + 1] = 1;
-          normals[vIdx + 2] = 0;
-
-          const uvIdx = (i * cols + j) * 2;
-          uvs[uvIdx] = uFrac * uScale;
-          uvs[uvIdx + 1] = vCoord;
-        }
-
-        if (i < steps) {
-          for (let j = 0; j < transverseSteps; j++) {
-            const a = i * cols + j;
-            const b = a + 1;
-            const c = (i + 1) * cols + j;
-            const d = c + 1;
-            indices.push(a, c, b, b, c, d);
-          }
-        }
-      }
-
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-      geom.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
-      geom.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-      geom.setIndex(indices);
-      if (sampleY) {
-        geom.computeVertexNormals();
-      }
-      geom.computeBoundingSphere();
-      return geom;
+      const batcher = new MarkingGeometryBatcher();
+      addSolidRibbon(
+        batcher,
+        frames,
+        arcStart,
+        arcEnd,
+        offsetLeft,
+        offsetRight,
+        yHeight,
+        evalY,
+        4.0,
+      );
+      return batcher.toBufferGeometry(Boolean(sampleY));
     };
 
     const buildCurvedSolidBoxRibbonGeometry = (
@@ -1933,40 +1955,35 @@ if (curbCamDist < 36.0) {
     const medianExclusions: ReadonlyArray<ExclusionZoneSpec> = config.medianExclusionZones ?? [];
     const markingExclusions: ReadonlyArray<ExclusionZoneSpec> =
       config.markingExclusionZones ?? config.medianExclusionZones ?? [];
+    const junctionPolygons = config.junctionPolygons ?? [];
+    const crossingCorridors = config.crossingCorridors ?? [];
     const isPointInExclusion = (
       px: number,
       pz: number,
       zones: ReadonlyArray<ExclusionZoneSpec>,
       padding = 0,
-    ): boolean => zones.some((ex) => Math.hypot(px - ex.x, pz - ex.z) < ex.radius + padding);
+    ): boolean =>
+      zones.some((ex) => Math.hypot(px - ex.x, pz - ex.z) < ex.radius + padding) ||
+      junctionPolygons.some((poly) => isPointInPolygon2D(px, pz, poly));
 
     const computeActiveArcIntervals = (
       trimStart: number,
       trimEnd: number,
       minSpanLength: number,
       zones: ReadonlyArray<ExclusionZoneSpec>,
-    ): Array<{ start: number; end: number }> => {
-      const maxArc = totalSplineLength - trimEnd;
-      const intervals: Array<{ start: number; end: number }> = [];
-      const sampleStep = 2.0;
-      let activeStart: number | null = null;
-      for (let arc = trimStart; arc <= maxArc; arc += sampleStep) {
-        const framePos = getInterpolatedFrame(arc).pos;
-        const blocked = isPointInExclusion(framePos.x, framePos.z, zones);
-        if (!blocked && activeStart === null) {
-          activeStart = arc;
-        } else if (blocked && activeStart !== null) {
-          if (arc - sampleStep - activeStart >= minSpanLength) {
-            intervals.push({ start: activeStart, end: arc - sampleStep });
-          }
-          activeStart = null;
-        }
-      }
-      if (activeStart !== null && maxArc - activeStart >= minSpanLength) {
-        intervals.push({ start: activeStart, end: maxArc });
-      }
-      return intervals;
-    };
+      includeCorridorClip = false,
+    ): Array<{ start: number; end: number }> =>
+      computeClippedMarkingIntervals({
+        frames,
+        startArc: trimStart,
+        endArc: totalSplineLength - trimEnd,
+        minSpanLength,
+        lateralProbeOffsets: [0],
+        junctionPolygons,
+        crossingCorridors: includeCorridorClip ? crossingCorridors : [],
+        exclusionZones: zones,
+        junctionPaddingM: 0.35,
+      });
 
     const subtractArcRanges = (
       baseIntervals: ReadonlyArray<{ start: number; end: number }>,
@@ -2130,15 +2147,138 @@ if (curbCamDist < 36.0) {
       }
     }
 
-    // 中央分離帯区間（medianWidth > 0 のときは交差点開口部・排他半径・横断歩道/停止線アプローチを除いた立体中央分離帯アイランドを構築）
+    // 右折ポケット（導流帯ゼブラ＋右折専用レーン拡幅）区間をプロファイル（SSOT）から抽出し、
+    // 中央分離帯・通常中央線・通常車線境界線と重ならないよう除外範囲を同期算出する
+    const chevronArcRanges: Array<[number, number]> = [];
+    const pocketArcRanges: Array<[number, number]> = [];
+    const chevronSections = laneProfile.sections.filter(
+      (sec) => sec.centerFeature === "zebra_chevron",
+    );
+    const pocketSections = laneProfile.sections.filter((sec) =>
+      Boolean(sec.hasRightTurnPocketInbound || sec.hasRightTurnPocketOncoming),
+    );
+    for (const cs of chevronSections) {
+      chevronArcRanges.push([cs.sStart - 0.5, cs.sEnd + 0.5]);
+    }
+    for (const ps of pocketSections) {
+      pocketArcRanges.push([ps.sStart - 0.5, ps.sEnd + 0.5]);
+    }
+
+    // 中央分離帯区間（medianWidth > 0 のときは交差点開口部・排他半径・横断歩道/停止線・右折ポケット/導流帯を除いた立体中央分離帯アイランドを構築）
     const hasRaisedMedian = medianW > 0;
     const medianHeight = Math.max(0.16, config.curbHeight + 0.02);
     const rawMedianIntervals = hasRaisedMedian
-      ? computeActiveArcIntervals(startMarkingTrim, endMarkingTrim, 8.0, medianExclusions)
+      ? computeActiveArcIntervals(startMarkingTrim, endMarkingTrim, 8.0, medianExclusions, false)
       : [];
     const medianIntervals = hasRaisedMedian
-      ? subtractArcRanges(rawMedianIntervals, approachCutRanges, 6.0)
+      ? subtractArcRanges(
+          rawMedianIntervals,
+          [...approachCutRanges, ...chevronArcRanges, ...pocketArcRanges],
+          6.0,
+        )
       : [];
+
+    // 右折ポケット手前の中央ゼブラ導流帯（指示標示 208の2）をスプライン曲線追従バッチメッシュで描画
+    if (chevronSections.length > 0) {
+      let chevronIdx = 0;
+      for (const cs of chevronSections) {
+        for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
+          const span = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
+          const s0 = Math.max(span.start, cs.sStart);
+          const s1 = Math.min(span.end, cs.sEnd);
+          if (s1 - s0 < 4.5) {
+            continue;
+          }
+          const targetHalfW = Math.max(0.75, Math.min(1.6, cs.medianWidth * 0.5 + 0.35));
+          const chevBatcher = new MarkingGeometryBatcher();
+          addChevronZebraZone(
+            chevBatcher,
+            frames,
+            s0,
+            s1,
+            (arc) => {
+              const t = Math.max(0, Math.min(1, (arc - s0) / Math.max(0.5, s1 - s0)));
+              return 0.45 + (targetHalfW - 0.45) * Math.sin(t * Math.PI * 0.5);
+            },
+            baseY + MARKING_Y_LAYERS.zebraChevron,
+            evalY,
+          );
+          if (chevBatcher.vertexCount > 0) {
+            const chevMesh = new THREE.Mesh(
+              chevBatcher.toBufferGeometry(Boolean(sampleY)),
+              whiteLineMat,
+            );
+            chevMesh.name = `CurvedChevron_GuideZone_${chevronIdx++}`;
+            chevMesh.userData.markingType = "ZebraZone";
+            chevMesh.userData.paintColor = "white";
+            chevMesh.receiveShadow = true;
+            group.add(chevMesh);
+          }
+        }
+      }
+    }
+
+    // 右折専用ポケット区間の進路変更禁止黄色実線＆右折専用矢印（既存 halfDriveableWidth 不変のまま内側に収める）
+    if (pocketSections.length > 0) {
+      let pocketIdx = 0;
+      for (const ps of pocketSections) {
+        for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
+          const span = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
+          const s0 = Math.max(span.start, ps.sStart);
+          const s1 = Math.min(span.end, ps.sEnd);
+          if (s1 - s0 < 6.0) {
+            continue;
+          }
+          const midS = (s0 + s1) * 0.5;
+          const evalCross = evaluateLaneCrossSectionAt(laneProfile, midS);
+          const pocketDirs: Array<"inbound" | "oncoming"> = [];
+          if (ps.hasRightTurnPocketInbound) {
+            pocketDirs.push("inbound");
+          }
+          if (ps.hasRightTurnPocketOncoming) {
+            pocketDirs.push("oncoming");
+          }
+
+          for (const dir of pocketDirs) {
+            const lanes = dir === "inbound" ? evalCross.inboundLanes : evalCross.oncomingLanes;
+            const rtSlot = lanes[0];
+            if (!rtSlot) {
+              continue;
+            }
+            // 右折ポケットと直進車線を仕切る黄色実線（進路変更禁止 102の2）
+            const yellowGeom = buildArcRibbonGeometry(
+              rtSlot.outerOffset - 0.08,
+              rtSlot.outerOffset + 0.08,
+              baseY + MARKING_Y_LAYERS.longitudinal + 0.002,
+              s0,
+              s1,
+            );
+            const yellowMesh = new THREE.Mesh(yellowGeom, yellowPaintMat);
+            yellowMesh.name = `CurvedMarking_RightTurnPocketYellow_${dir}_${pocketIdx++}`;
+            yellowMesh.userData.markingType = "LaneDivider";
+            yellowMesh.userData.isNoLaneChangeYellow = true;
+            yellowMesh.receiveShadow = true;
+            group.add(yellowMesh);
+
+            // 右折専用車線の路面「→」矢印
+            const fArrow = getInterpolatedFrame(midS);
+            const arrowYaw =
+              dir === "oncoming"
+                ? Math.atan2(fArrow.tangent.x, fArrow.tangent.z)
+                : Math.atan2(-fArrow.tangent.x, -fArrow.tangent.z);
+            const ax = fArrow.pos.x + fArrow.normal.x * rtSlot.centerOffset;
+            const az = fArrow.pos.z + fArrow.normal.z * rtSlot.centerOffset;
+            const rtArrow = this.markings.createLaneArrowMarking(ax, az, "right", arrowYaw);
+            const arrowGroundY = sampleY ? sampleY(ax, az) : 0;
+            rtArrow.position.y = arrowGroundY + baseY + MARKING_Y_LAYERS.transverseAndSymbols;
+            if (sampleY) {
+              this.drapeObjectOverElevation(rtArrow, 0, 0, sampleY, arrowGroundY);
+            }
+            group.add(rtArrow);
+          }
+        }
+      }
+    }
 
     if (hasRaisedMedian) {
       const halfMed = medianW * 0.5;
@@ -2203,7 +2343,7 @@ if (curbCamDist < 36.0) {
         }
 
         // 視線誘導ガイドポスト（全周反射＋両面円形ヘッドを中央分離帯天端へ確実に接地設置）
-        for (let postArc = iv.start + 2.0; postArc <= iv.end - 2.0; postArc += 28.0) {
+        for (let postArc = iv.start + 2.5; postArc <= iv.end - 2.5; postArc += 28.0) {
           const postFrame = getInterpolatedFrame(postArc);
           const delin = this.props.signs.createMedianGuidePost(postFrame.pos.x, postFrame.pos.z);
           delin.position.y = evalY(postFrame.pos.x, postFrame.pos.z, baseY + medianHeight);
@@ -2213,93 +2353,91 @@ if (curbCamDist < 36.0) {
         }
       }
     } else {
-      // 中央線（立体分離帯なしの道路: hasDoubleYellowCenterLine 指定時は片側2車線以上でも橙黄色二本線、それ以外は片側2車線以上=白実線・1車線追越禁止=黄実線・1車線一般道=白破線）
-      const hasCenterLine = config.hasCenterLine ?? true;
-      const isDoubleYellow = Boolean(config.hasDoubleYellowCenterLine);
-      const isMultiLaneCurved = config.lanesPerDirection >= 2;
-      const isSingleLaneYellow = !isMultiLaneCurved && Boolean(config.hasYellowCenterLine);
-      const isSingleLaneDashed = !isDoubleYellow && !isMultiLaneCurved && !isSingleLaneYellow;
+      // 中央線（立体分離帯なしの道路: RoadLaneProfile.centerFeature を単一真実源として描画）
+      const baseCenterFeature = laneProfile.sections[0]?.centerFeature ?? "none";
+      const hasCenterLine = (config.hasCenterLine ?? true) && baseCenterFeature !== "none";
+      const isDoubleYellow = baseCenterFeature === "double_yellow";
+      const isMultiLaneCurved = baseCenterFeature === "white_solid";
+      const isSingleLaneYellow = baseCenterFeature === "yellow_solid";
+      const isSingleLaneDashed = baseCenterFeature === "white_dashed";
+      const centerLineCutRanges = [...chevronArcRanges];
       if (hasCenterLine && isSingleLaneDashed) {
         for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
           const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
           const centerDashGeom = buildDashedRibbonGeometry(
             0,
             0.14,
-            baseY + 0.02,
+            baseY + MARKING_Y_LAYERS.longitudinal,
             4.0,
             4.0,
             iv.start,
             iv.end,
+            centerLineCutRanges,
           );
-          const centerDashMesh = new THREE.Mesh(centerDashGeom, whiteLineMat);
-          centerDashMesh.name = `CurvedMarking_WhiteDashedCenter_${ivIdx}`;
-          centerDashMesh.userData.paintColor = "white";
-          centerDashMesh.receiveShadow = true;
-          group.add(centerDashMesh);
+          if (centerDashGeom.attributes.position && centerDashGeom.attributes.position.count > 0) {
+            const centerDashMesh = new THREE.Mesh(centerDashGeom, whiteLineMat);
+            centerDashMesh.name = `CurvedMarking_WhiteDashedCenter_${ivIdx}`;
+            centerDashMesh.userData.markingType = "CenterLine";
+            centerDashMesh.userData.paintColor = "white";
+            centerDashMesh.receiveShadow = true;
+            group.add(centerDashMesh);
+          }
         }
       }
-      const createYellowCenterMat = (): THREE.MeshStandardMaterial => {
-        const yellowMat = new THREE.MeshStandardMaterial({
-          color: 0xf59e0b,
-          emissive: 0xf59e0b,
-          emissiveIntensity: 0.45,
-          roughness: 0.45,
-          metalness: 0.05,
-          side: THREE.DoubleSide,
-          polygonOffset: true,
-          polygonOffsetFactor: -3,
-          polygonOffsetUnits: -3,
-        });
-        this.markings.applyRoadMarking3DTexture(yellowMat, "yellow-paint");
-        return yellowMat;
-      };
       if (hasCenterLine && isDoubleYellow) {
-        const yellowMat = createYellowCenterMat();
         for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
-          const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
-          for (const [tag, offL, offR] of [
-            ["L", -0.22, -0.07],
-            ["R", 0.07, 0.22],
-          ] as const) {
-            const yellowGeom = buildArcRibbonGeometry(
-              offL,
-              offR,
-              baseY + 0.02,
-              iv.start,
-              iv.end,
-              1,
-              0.2,
-            );
-            const yellowMesh = new THREE.Mesh(yellowGeom, yellowMat);
-            yellowMesh.name = `CurvedMarking_DoubleYellowCenter_${tag}_${ivIdx}`;
-            yellowMesh.userData.paintColor = "yellow";
-            yellowMesh.receiveShadow = true;
-            group.add(yellowMesh);
+          const baseSpan = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
+          const subSpans = subtractArcRanges([baseSpan], centerLineCutRanges, 3.0);
+          for (const iv of subSpans) {
+            for (const [tag, offL, offR] of [
+              ["L", -0.22, -0.07],
+              ["R", 0.07, 0.22],
+            ] as const) {
+              const yellowGeom = buildArcRibbonGeometry(
+                offL,
+                offR,
+                baseY + MARKING_Y_LAYERS.longitudinal,
+                iv.start,
+                iv.end,
+                1,
+                0.2,
+              );
+              const yellowMesh = new THREE.Mesh(yellowGeom, yellowPaintMat);
+              yellowMesh.name = `CurvedMarking_DoubleYellowCenter_${tag}_${ivIdx}`;
+              yellowMesh.userData.markingType = "CenterLine";
+              yellowMesh.userData.paintColor = "yellow";
+              yellowMesh.receiveShadow = true;
+              group.add(yellowMesh);
+            }
           }
         }
       } else {
         const shouldDrawCenterLine = hasCenterLine && (isMultiLaneCurved || isSingleLaneYellow);
         if (shouldDrawCenterLine) {
-          const centerMat = isMultiLaneCurved ? whiteLineMat : createYellowCenterMat();
+          const centerMat = isMultiLaneCurved ? whiteLineMat : yellowPaintMat;
 
           for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
-            const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
-            const centerGeom = buildArcRibbonGeometry(
-              -0.09,
-              0.09,
-              baseY + 0.02,
-              iv.start,
-              iv.end,
-              1,
-              0.2,
-            );
-            const centerLineMesh = new THREE.Mesh(centerGeom, centerMat);
-            centerLineMesh.name = isMultiLaneCurved
-              ? `CurvedMarking_WhiteCenter_${ivIdx}`
-              : `CurvedMarking_YellowCenter_${ivIdx}`;
-            centerLineMesh.userData.paintColor = isMultiLaneCurved ? "white" : "yellow";
-            centerLineMesh.receiveShadow = true;
-            group.add(centerLineMesh);
+            const baseSpan = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
+            const subSpans = subtractArcRanges([baseSpan], centerLineCutRanges, 3.0);
+            for (const iv of subSpans) {
+              const centerGeom = buildArcRibbonGeometry(
+                -0.09,
+                0.09,
+                baseY + MARKING_Y_LAYERS.longitudinal,
+                iv.start,
+                iv.end,
+                1,
+                0.2,
+              );
+              const centerLineMesh = new THREE.Mesh(centerGeom, centerMat);
+              centerLineMesh.name = isMultiLaneCurved
+                ? `CurvedMarking_WhiteCenter_${ivIdx}`
+                : `CurvedMarking_YellowCenter_${ivIdx}`;
+              centerLineMesh.userData.markingType = "CenterLine";
+              centerLineMesh.userData.paintColor = isMultiLaneCurved ? "white" : "yellow";
+              centerLineMesh.receiveShadow = true;
+              group.add(centerLineMesh);
+            }
           }
         }
       }
@@ -2324,25 +2462,29 @@ if (curbCamDist < 36.0) {
           );
           const edgeMesh = new THREE.Mesh(edgeGeom, whiteLineMat);
           edgeMesh.name = `CurvedMarking_Shoulder_${sideSign > 0 ? "L" : "R"}_${ivIdx}`;
+          edgeMesh.userData.markingType = "ShoulderLine";
           edgeMesh.receiveShadow = true;
           group.add(edgeMesh);
         }
       }
     }
 
-    // 複数車線時の破線レーン境界線（スプライン追従リボンメッシュ：進路変更禁止黄色実線区間を除外）
+    // 複数車線時の破線レーン境界線（スプライン追従リボンメッシュ：進路変更禁止黄色実線＆右折ポケット区間を除外）
     const hasMultiLaneDashed = config.hasWhiteDashedLines && config.lanesPerDirection > 1;
     if (hasMultiLaneDashed) {
       for (const dirSign of [-1, 1]) {
         for (let lane = 1; lane < config.lanesPerDirection; lane++) {
           const laneOffset = dirSign * (medianW / 2 + lane * config.laneWidth);
-          const yellowExclusions = yellowNoLaneChangeByLane.get(`${dirSign}_${lane}`) ?? [];
+          const yellowExclusions: Array<readonly [number, number]> = [
+            ...(yellowNoLaneChangeByLane.get(`${dirSign}_${lane}`) ?? []),
+            ...pocketArcRanges,
+          ];
           for (let ivIdx = 0; ivIdx < activeRoadIntervals.length; ivIdx++) {
             const iv = getLongitudinalMarkingSpan(activeRoadIntervals[ivIdx], ivIdx);
             const dashedGeom = buildDashedRibbonGeometry(
               laneOffset,
               0.15,
-              baseY + 0.019,
+              baseY + MARKING_Y_LAYERS.longitudinal,
               5.0,
               5.0,
               iv.start,
@@ -2352,6 +2494,7 @@ if (curbCamDist < 36.0) {
             if (dashedGeom.attributes.position && dashedGeom.attributes.position.count > 0) {
               const dashMesh = new THREE.Mesh(dashedGeom, whiteLineMat);
               dashMesh.name = `CurvedMarking_LaneDivider_${dirSign > 0 ? "R" : "L"}_${lane}_${ivIdx}`;
+              dashMesh.userData.markingType = "LaneDivider";
               dashMesh.receiveShadow = true;
               group.add(dashMesh);
             }
@@ -2644,47 +2787,60 @@ if (curbCamDist < 36.0) {
       }
     }
 
-    // 6. 交差点アプローチ標示・横断歩道・停止線・進行方向矢印・制限速度ペイント・マンホール・信号機
-    const yellowPaintMat = (() => {
-      const yellowMat = new THREE.MeshStandardMaterial({
-        color: 0xf59e0b,
-        emissive: 0xf59e0b,
-        emissiveIntensity: 0.45,
-        roughness: 0.45,
-        metalness: 0.05,
-        side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: -3,
-        polygonOffsetUnits: -3,
-      });
-      this.markings.applyRoadMarking3DTexture(yellowMat, "yellow-paint");
-      return yellowMat;
-    })();
+    // 6. 交差点アプローチ標示・横断歩道（バッチ統合）・停止線・細街路「止まれ」・進行方向矢印（SSOT）・制限速度ペイント・マンホール・信号機
+    const hasStopTextApproaches = Boolean(
+      config.hasStopText ||
+      laneProfile.sections.some(
+        (sec) =>
+          sec.inboundLanes.some((l) => l.hasStopText) ||
+          sec.oncomingLanes.some((l) => l.hasStopText),
+      ),
+    );
 
     for (const app of validCurvedApproaches) {
       const fCross = getInterpolatedFrame(app.sCross);
       if (app.hasCrosswalk) {
-        const zebraGeo = new THREE.PlaneGeometry(0.45, 3.6, 1, sampleY ? 4 : 1);
-        zebraGeo.rotateX(-Math.PI / 2);
-        const crossYaw = Math.atan2(fCross.tangent.x, fCross.tangent.z);
-
         const zebraStartOff = -halfDriveable + 1.0;
         const zebraEndOff = halfDriveable - 1.0;
-        let stripeIdx = 0;
+        const stripeOffsets: number[] = [];
         for (let off = zebraStartOff; off <= zebraEndOff; off += 0.9) {
-          const zx = fCross.pos.x + fCross.normal.x * off;
-          const zz = fCross.pos.z + fCross.normal.z * off;
-          const zGroundY = sampleY ? sampleY(zx, zz) : 0;
-          const zebraMesh = new THREE.Mesh(zebraGeo, whiteLineMat);
-          zebraMesh.name = `CurvedCrosswalk_${app.name}_${app.ivIdx}_${stripeIdx++}`;
-          zebraMesh.userData.markingType = "CrosswalkStripe";
-          zebraMesh.position.set(zx, zGroundY + baseY + 0.024, zz);
-          zebraMesh.rotation.y = crossYaw;
-          if (sampleY) {
-            this.drapeObjectOverElevation(zebraMesh, 0, 0, sampleY, zGroundY);
+          stripeOffsets.push(off);
+        }
+        // 斜め幹線道路（明治通り 46° 等）で横断歩道全体の AABB が過剰に膨らむのを防ぐため、
+        // 3 本単位のコンパクトバッチで結合してフラスタムカリング＆Box3 精度とドローコール削減を両立する。
+        const clusterSize = 3;
+        for (
+          let cStart = 0, clusterIdx = 0;
+          cStart < stripeOffsets.length;
+          cStart += clusterSize, clusterIdx++
+        ) {
+          const cwBatcher = new MarkingGeometryBatcher();
+          const slice = stripeOffsets.slice(cStart, cStart + clusterSize);
+          for (const off of slice) {
+            const zx = fCross.pos.x + fCross.normal.x * off;
+            const zz = fCross.pos.z + fCross.normal.z * off;
+            cwBatcher.addOrientedRect(
+              zx,
+              zz,
+              fCross.tangent.x,
+              fCross.tangent.z,
+              0.45,
+              3.6,
+              baseY + MARKING_Y_LAYERS.transverseAndSymbols,
+              evalY,
+              sampleY ? 3 : 1,
+            );
           }
-          zebraMesh.receiveShadow = true;
-          group.add(zebraMesh);
+          if (cwBatcher.vertexCount > 0) {
+            const zebraMesh = new THREE.Mesh(
+              cwBatcher.toBufferGeometry(Boolean(sampleY)),
+              whiteLineMat,
+            );
+            zebraMesh.name = `CurvedCrosswalk_${app.name}_${app.ivIdx}_${clusterIdx}`;
+            zebraMesh.userData.markingType = "CrosswalkStripe";
+            zebraMesh.receiveShadow = true;
+            group.add(zebraMesh);
+          }
         }
       }
 
@@ -2696,7 +2852,7 @@ if (curbCamDist < 36.0) {
         const stopGeom = buildArcRibbonGeometry(
           stopOffLeft,
           stopOffRight,
-          baseY + 0.024,
+          baseY + MARKING_Y_LAYERS.transverseAndSymbols,
           app.sStop - 0.2,
           app.sStop + 0.2,
           1,
@@ -2708,6 +2864,30 @@ if (curbCamDist < 36.0) {
         stopMesh.receiveShadow = true;
         group.add(stopMesh);
 
+        // 細街路の一時停止線手前「止まれ」法定路面文字標示
+        if (hasStopTextApproaches) {
+          const sStopText = isStartApproach ? app.sStop + 3.2 : app.sStop - 3.2;
+          const isStopTextInSpan = sStopText >= app.ivStart + 1.5 && sStopText <= app.ivEnd - 1.5;
+          if (isStopTextInSpan) {
+            const fStopText = getInterpolatedFrame(sStopText);
+            const stopTextYaw = isStartApproach
+              ? Math.atan2(fStopText.tangent.x, fStopText.tangent.z)
+              : Math.atan2(-fStopText.tangent.x, -fStopText.tangent.z);
+            const laneOff = isStartApproach
+              ? -(medianW * 0.5 + 0.5 * config.laneWidth)
+              : +(medianW * 0.5 + 0.5 * config.laneWidth);
+            const stx = fStopText.pos.x + fStopText.normal.x * laneOff;
+            const stz = fStopText.pos.z + fStopText.normal.z * laneOff;
+            const stopTextMesh = this.markings.createStopTextRoadMarking(stx, stz, stopTextYaw);
+            const stGroundY = sampleY ? sampleY(stx, stz) : 0;
+            stopTextMesh.position.y = stGroundY + baseY + MARKING_Y_LAYERS.transverseAndSymbols;
+            if (sampleY) {
+              this.drapeObjectOverElevation(stopTextMesh, 0, 0, sampleY, stGroundY);
+            }
+            group.add(stopTextMesh);
+          }
+        }
+
         const canAddArrows = lanesPerDir >= 2 && app.ivLen >= 42.0;
         if (canAddArrows) {
           const arrowOffsets = [8.0, 20.0];
@@ -2715,6 +2895,11 @@ if (curbCamDist < 36.0) {
             const sArrow = isStartApproach ? app.sStop + arrDist : app.sStop - arrDist;
             const isArrowInSpan = sArrow >= app.ivStart && sArrow <= app.ivEnd;
             if (!isArrowInSpan) {
+              continue;
+            }
+            // 右折ポケット専用区間内は専用矢印ビルダーに任せて二重配置を防ぐ
+            const isInsidePocket = pocketArcRanges.some(([p0, p1]) => sArrow >= p0 && sArrow <= p1);
+            if (isInsidePocket) {
               continue;
             }
             const fArrow = getInterpolatedFrame(sArrow);
@@ -2731,25 +2916,17 @@ if (curbCamDist < 36.0) {
               ? Math.atan2(fArrow.tangent.x, fArrow.tangent.z)
               : Math.atan2(-fArrow.tangent.x, -fArrow.tangent.z);
 
-            for (let lane = 1; lane <= lanesPerDir; lane++) {
-              const laneCenterOffset = isStartApproach
-                ? -(medianW * 0.5 + (lane - 0.5) * config.laneWidth)
-                : +(medianW * 0.5 + (lane - 0.5) * config.laneWidth);
+            const arrowCross = evaluateLaneCrossSectionAt(laneProfile, sArrow);
+            const targetLanes = isStartApproach
+              ? arrowCross.oncomingLanes
+              : arrowCross.inboundLanes;
 
-              const arrowType: RoadLaneArrowType =
-                lane === 1
-                  ? lanesPerDir >= 3
-                    ? "right"
-                    : "straight-right"
-                  : lane === lanesPerDir
-                    ? "straight-left"
-                    : "straight";
-
-              const ax = fArrow.pos.x + fArrow.normal.x * laneCenterOffset;
-              const az = fArrow.pos.z + fArrow.normal.z * laneCenterOffset;
-              const arrowMesh = this.markings.createLaneArrowMarking(ax, az, arrowType, arrowYaw);
+            for (const slot of targetLanes) {
+              const ax = fArrow.pos.x + fArrow.normal.x * slot.centerOffset;
+              const az = fArrow.pos.z + fArrow.normal.z * slot.centerOffset;
+              const arrowMesh = this.markings.createLaneArrowMarking(ax, az, slot.arrow, arrowYaw);
               const arrowGroundY = sampleY ? sampleY(ax, az) : 0;
-              arrowMesh.position.y = arrowGroundY + baseY + 0.024;
+              arrowMesh.position.y = arrowGroundY + baseY + MARKING_Y_LAYERS.transverseAndSymbols;
               if (sampleY) {
                 this.drapeObjectOverElevation(arrowMesh, 0, 0, sampleY, arrowGroundY);
               }
@@ -2764,23 +2941,32 @@ if (curbCamDist < 36.0) {
             ? app.sStop
             : Math.max(app.ivStart, app.sStop - 18.0);
           const sYellowEnd = isStartApproach ? Math.min(app.ivEnd, app.sStop + 18.0) : app.sStop;
-          for (let lane = 1; lane < lanesPerDir; lane++) {
-            const laneDivOff = isStartApproach
-              ? -(medianW * 0.5 + lane * config.laneWidth)
-              : +(medianW * 0.5 + lane * config.laneWidth);
-            const yellowDivGeom = buildArcRibbonGeometry(
-              laneDivOff - 0.075,
-              laneDivOff + 0.075,
-              baseY + 0.024,
-              sYellowStart,
-              sYellowEnd,
-              1,
-              0.2,
-            );
-            const yellowDivMesh = new THREE.Mesh(yellowDivGeom, yellowPaintMat);
-            yellowDivMesh.name = `CurvedMarking_YellowNoLaneChange_${app.name}_${lane}_${app.ivIdx}`;
-            yellowDivMesh.receiveShadow = true;
-            group.add(yellowDivMesh);
+          const yellowSubSpans = subtractArcRanges(
+            [{ start: sYellowStart, end: sYellowEnd }],
+            pocketArcRanges,
+            3.0,
+          );
+          for (const ys of yellowSubSpans) {
+            for (let lane = 1; lane < lanesPerDir; lane++) {
+              const laneDivOff = isStartApproach
+                ? -(medianW * 0.5 + lane * config.laneWidth)
+                : +(medianW * 0.5 + lane * config.laneWidth);
+              const yellowDivGeom = buildArcRibbonGeometry(
+                laneDivOff - 0.075,
+                laneDivOff + 0.075,
+                baseY + MARKING_Y_LAYERS.transverseAndSymbols,
+                ys.start,
+                ys.end,
+                1,
+                0.2,
+              );
+              const yellowDivMesh = new THREE.Mesh(yellowDivGeom, yellowPaintMat);
+              yellowDivMesh.name = `CurvedMarking_YellowNoLaneChange_${app.name}_${lane}_${app.ivIdx}`;
+              yellowDivMesh.userData.markingType = "LaneDivider";
+              yellowDivMesh.userData.isNoLaneChangeYellow = true;
+              yellowDivMesh.receiveShadow = true;
+              group.add(yellowDivMesh);
+            }
           }
         }
       }
@@ -3014,12 +3200,20 @@ if (curbCamDist < 36.0) {
       });
     }
 
+    const laneGraphEdges = extractRoadLaneGraphEdges(laneProfile, frames, {
+      elevationSampler: sampleY,
+      baseY,
+    });
+    group.userData.laneGraphEdges = laneGraphEdges;
+
     return {
       group,
       materials: segmentMaterials,
       puddleMaterials: segmentPuddleMaterials,
       colliders: segmentColliders,
       obstacleColliderHandles,
+      laneProfile,
+      laneGraphEdges,
     };
   }
 
