@@ -2146,6 +2146,11 @@ async function bootstrap() {
   }
 
   window.addEventListener("keydown", (event) => {
+    const isLinkElementFocused =
+      event.target instanceof HTMLElement && event.target.closest("a[href]") !== null;
+    if (isLinkElementFocused) {
+      return;
+    }
     const isStartKey =
       !isTitleScreenDismissed &&
       (event.code === "Enter" ||

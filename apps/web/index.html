@@ -129,7 +129,7 @@
         gap: 8px;
         min-width: 0;
         flex-shrink: 0;
-        width: 390px;
+        width: 412px;
         max-width: 100%;
       }
       .title-box {
@@ -145,7 +145,8 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 8px;
+        flex-wrap: wrap;
+        gap: 4px 8px;
       }
       .title-row-actions {
         display: flex;
@@ -159,6 +160,9 @@
         letter-spacing: 0.05em;
         color: #60a5fa;
         margin-bottom: 2px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
         white-space: nowrap;
       }
       .title-box p {
@@ -192,6 +196,46 @@
       }
       .hud-ui-toggle-btn:active {
         transform: scale(0.96);
+      }
+      .hud-github-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-inline-size: 26px;
+        min-block-size: 24px;
+        padding: 3px 6px;
+        background: rgba(30, 41, 59, 0.88);
+        color: #e2e8f0;
+        border: 1px solid rgba(148, 163, 184, 0.42);
+        border-radius: 6px;
+        text-decoration: none;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition:
+          background 0.15s ease,
+          border-color 0.15s ease,
+          color 0.15s ease,
+          transform 0.1s ease;
+      }
+      .hud-github-link:hover {
+        background: rgba(51, 65, 85, 0.95);
+        border-color: #93c5fd;
+        color: #ffffff;
+      }
+      .hud-github-link:focus-visible {
+        outline: 2px solid #7dd3fc;
+        outline-offset: 2px;
+        border-color: #7dd3fc;
+        color: #ffffff;
+      }
+      .hud-github-link:active {
+        transform: scale(0.96);
+      }
+      .github-icon {
+        display: block;
+        flex: none;
+        pointer-events: none;
       }
       .gis-toggle-btn {
         display: none;
@@ -441,7 +485,7 @@
         flex-wrap: wrap;
         justify-content: flex-end;
         gap: 8px;
-        max-width: calc(100% - 410px);
+        max-width: calc(100% - 432px);
         min-width: 0;
         max-height: calc(100dvh - 265px);
         overflow-y: auto;
@@ -1264,6 +1308,10 @@
           display: inline-flex;
           align-items: center;
         }
+        .hud-github-link {
+          min-inline-size: 30px;
+          min-block-size: 28px;
+        }
         .gis-telemetry-box.is-collapsed-mobile {
           display: none;
         }
@@ -1330,7 +1378,12 @@
           padding: 7px 10px;
         }
         .title-box h1 {
-          font-size: 0.86rem;
+          font-size: 0.82rem;
+        }
+        .hud-ui-toggle-btn,
+        .gis-toggle-btn {
+          padding: 3px 7px;
+          font-size: 0.64rem;
         }
         .title-box p {
           font-size: 0.64rem;
@@ -1551,6 +1604,48 @@
         flex-direction: column;
         gap: 16px;
       }
+      .title-card-top-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .title-github-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-block-size: 28px;
+        padding: 4px 11px;
+        border-radius: 999px;
+        background: rgba(30, 41, 59, 0.88);
+        border: 1px solid rgba(148, 163, 184, 0.45);
+        color: #e2e8f0;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-decoration: none;
+        white-space: nowrap;
+        transition:
+          background 0.15s ease,
+          border-color 0.15s ease,
+          color 0.15s ease,
+          transform 0.1s ease;
+      }
+      .title-github-link:hover {
+        background: rgba(51, 65, 85, 0.96);
+        border-color: #7dd3fc;
+        color: #ffffff;
+      }
+      .title-github-link:focus-visible {
+        outline: 2px solid #7dd3fc;
+        outline-offset: 2px;
+        border-color: #7dd3fc;
+        color: #ffffff;
+      }
+      .title-github-link:active {
+        transform: scale(0.97);
+      }
       .title-badge {
         display: inline-flex;
         align-self: flex-start;
@@ -1762,6 +1857,14 @@
   </head>
   <body data-touch-ui="hidden">
     <canvas id="webgl-canvas"></canvas>
+    <svg aria-hidden="true" style="position: absolute; width: 0; height: 0; overflow: hidden">
+      <symbol id="icon-github-mark" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
+        />
+      </symbol>
+    </svg>
 
     <!-- タイトル画面 & ローディングプログレスオーバーレイ -->
     <div
@@ -1772,9 +1875,25 @@
       aria-labelledby="title-screen-heading"
     >
       <div class="title-screen-card">
-        <span class="title-badge" id="title-screen-badge"
-          >PROJECT PLATEAU × GSI 3D DRIVING SIMULATOR</span
-        >
+        <div class="title-card-top-row">
+          <span class="title-badge" id="title-screen-badge"
+            >PROJECT PLATEAU × GSI 3D DRIVING SIMULATOR</span
+          >
+          <a
+            class="title-github-link"
+            id="title-github-link"
+            href="https://github.com/kexi/antigravity-deep-drive"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="GitHub リポジトリを開く（新しいタブ）"
+            aria-label="GitHub リポジトリを開く（新しいタブ）"
+          >
+            <svg class="github-icon" width="14" height="14" aria-hidden="true">
+              <use href="#icon-github-mark"></use>
+            </svg>
+            <span>GitHub</span>
+          </a>
+        </div>
         <h2 class="title-hero-heading" id="title-screen-heading">ANTIGRAVITY DEEP DRIVE</h2>
         <p class="title-hero-subtitle" id="title-screen-subtitle">
           渋谷ストリーム・明治通り・国道246号 ＆ 東京駅丸の内 オープンデータ3Dドライブ
@@ -1892,6 +2011,19 @@
             <div class="title-row">
               <h1>ANTIGRAVITY DEEP DRIVE</h1>
               <div class="title-row-actions">
+                <a
+                  class="hud-github-link"
+                  id="hud-github-link"
+                  href="https://github.com/kexi/antigravity-deep-drive"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="GitHub リポジトリを開く（新しいタブ）"
+                  aria-label="GitHub リポジトリを開く（新しいタブ）"
+                >
+                  <svg class="github-icon" width="14" height="14" aria-hidden="true">
+                    <use href="#icon-github-mark"></use>
+                  </svg>
+                </a>
                 <button
                   type="button"
                   class="hud-ui-toggle-btn"

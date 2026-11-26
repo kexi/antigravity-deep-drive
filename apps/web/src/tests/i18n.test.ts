@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
+import indexHtml from "../../index.html?raw";
 import {
   applyDocumentTranslations,
   formatGsiRoadTelemetry,
@@ -423,6 +424,13 @@ describe("Multi-language i18n & Browser Default Locale", () => {
     applyDocumentTranslations("en", fakeDoc);
     expect(getOrCreateEl("#lang-panel-label").textContent).toBe("Language [N]");
     expect(getOrCreateEl("#hud-ui-toggle-btn").textContent).toBe("👁 UI OFF [Tab]");
+    expect(getOrCreateEl("#hud-github-link").attributes["aria-label"]).toBe(
+      "GitHub repository (opens in new tab)",
+    );
+    expect(getOrCreateEl("#title-github-link").attributes["aria-label"]).toBe(
+      getOrCreateEl("#hud-github-link").attributes["aria-label"],
+    );
+    expect(getOrCreateEl("#hud-github-link").attributes["title"]).toContain("GitHub");
     expect(getOrCreateEl("#ui-restore-fab").textContent).toBe("👁 Show UI [Tab]");
     expect(getOrCreateEl("#ui-visibility-panel-label").textContent).toBe(
       "HUD Visibility (UI Mode) [Tab]",
@@ -435,6 +443,13 @@ describe("Multi-language i18n & Browser Default Locale", () => {
     applyDocumentTranslations("zh", fakeDoc);
     expect(getOrCreateEl("#lang-panel-label").textContent).toBe("显示语言 (Language) [N]");
     expect(getOrCreateEl("#hud-ui-toggle-btn").textContent).toBe("👁 隐藏UI [Tab]");
+    expect(getOrCreateEl("#hud-github-link").attributes["aria-label"]).toBe(
+      "GitHub 代码仓库（在新标签页中打开）",
+    );
+    expect(getOrCreateEl("#title-github-link").attributes["aria-label"]).toBe(
+      getOrCreateEl("#hud-github-link").attributes["aria-label"],
+    );
+    expect(getOrCreateEl("#hud-github-link").attributes["title"]).toContain("GitHub");
     expect(getOrCreateEl("#ui-restore-fab").textContent).toBe("👁 显示UI [Tab]");
     expect(getOrCreateEl("#controls-guide-line-3").innerHTML).toContain("<kbd>Tab</kbd>");
     expect(getOrCreateEl("#controls-guide-line-3").innerHTML).toContain("<kbd>N</kbd>");
@@ -489,5 +504,18 @@ describe("Multi-language i18n & Browser Default Locale", () => {
     expect(fakeDoc.title).toContain("东京站・涩谷 3D驾驶模拟器");
     expect(fakeSubtitleEl.textContent).toContain("东京都 PLATEAU");
     expect(fakeThrottleEl.attributes["aria-label"]).toContain("油门");
+  });
+
+  it("index.html のタイトル画面とゲーム中 HUD に安全な GitHub リポジトリリンクが配置されていることを保証する", () => {
+    const targetUrl = "https://github.com/kexi/antigravity-deep-drive";
+
+    for (const id of ["title-github-link", "hud-github-link"]) {
+      const tagMatch = indexHtml.match(new RegExp(`<a\\b[^>]*id="${id}"[^>]*>`, "s"));
+      expect(tagMatch).not.toBeNull();
+      const anchorTag = tagMatch?.[0] ?? "";
+      expect(anchorTag).toContain(`href="${targetUrl}"`);
+      expect(anchorTag).toContain('target="_blank"');
+      expect(anchorTag).toContain('rel="noopener noreferrer"');
+    }
   });
 });

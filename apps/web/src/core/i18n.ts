@@ -249,6 +249,7 @@ export interface UiTranslationDictionary {
   panelUiVisibilityLabel: string;
   uiVisibilityOnBtn: string;
   uiVisibilityOffBtn: string;
+  githubLinkAria: string;
 }
 
 /**
@@ -1309,6 +1310,7 @@ export const UI_TRANSLATIONS: Readonly<Record<SupportedLocale, UiTranslationDict
     panelUiVisibilityLabel: "HUD UI表示 (UI Mode) [Tab]",
     uiVisibilityOnBtn: "UI表示 (ON)",
     uiVisibilityOffBtn: "UI OFF (没入モード) [Tab]",
+    githubLinkAria: "GitHub リポジトリを開く（新しいタブ）",
   },
   en: {
     documentTitle: "Antigravity Deep Drive - Tokyo 3D Driving Simulator",
@@ -1515,6 +1517,7 @@ export const UI_TRANSLATIONS: Readonly<Record<SupportedLocale, UiTranslationDict
     panelUiVisibilityLabel: "HUD Visibility (UI Mode) [Tab]",
     uiVisibilityOnBtn: "UI ON",
     uiVisibilityOffBtn: "UI OFF (Immersive) [Tab]",
+    githubLinkAria: "GitHub repository (opens in new tab)",
   },
   zh: {
     documentTitle: "Antigravity Deep Drive - 东京站・涩谷 3D驾驶模拟器",
@@ -1720,6 +1723,7 @@ export const UI_TRANSLATIONS: Readonly<Record<SupportedLocale, UiTranslationDict
     panelUiVisibilityLabel: "HUD界面显示 (UI Mode) [Tab]",
     uiVisibilityOnBtn: "显示UI (ON)",
     uiVisibilityOffBtn: "隐藏UI (沉浸模式) [Tab]",
+    githubLinkAria: "GitHub 代码仓库（在新标签页中打开）",
   },
 };
 
@@ -2221,6 +2225,10 @@ export function applyDocumentTranslations(
   setAttr("#gis-toggle-btn", "aria-label", dict.gisToggleAria);
   setText("#hud-ui-toggle-btn", dict.hudUiOffBtn);
   setAttr("#hud-ui-toggle-btn", "title", dict.hudUiOffBtnTitle);
+  setAttr("#hud-github-link", "title", dict.githubLinkAria);
+  setAttr("#hud-github-link", "aria-label", dict.githubLinkAria);
+  setAttr("#title-github-link", "title", dict.githubLinkAria);
+  setAttr("#title-github-link", "aria-label", dict.githubLinkAria);
   setText("#ui-restore-fab", dict.uiRestoreFabBtn);
   setAttr("#ui-restore-fab", "title", dict.uiRestoreFabTitle);
   setAttr("#ui-restore-fab", "aria-label", dict.uiRestoreFabTitle);
