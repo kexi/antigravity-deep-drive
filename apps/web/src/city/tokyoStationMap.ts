@@ -26,6 +26,12 @@ import {
   type LaneGraphEdge,
   type Point2D,
 } from "../roads/lanes";
+import {
+  alignSignalYawToRoadOverhang,
+  computeIntersectionSignalPlacements,
+  resolveSignalIntersectionBinding,
+  type TrafficSignalController,
+} from "../roads/signals";
 import { logger } from "../core/logger";
 import { PuddleMaterial, type PuddleEnvironmentSyncParams } from "../shaders/puddleShader";
 import {
@@ -576,7 +582,10 @@ export class TokyoStationMap {
         hasCrosswalk: true,
         hasGuardrails: true,
         hasManholes: true,
-        hasTrafficLights: true,
+        // Why len >= 100 のみ途中横断歩道信号を残すか:
+        // 短区間（len=58）は両端の交差点（丸の内仲通り・和田倉門）に正規の交差点信号が自動配置されるため、
+        // 道路途中に不要な信号が乱立するのを防ぐ。
+        hasTrafficLights: gyokoSeg.len >= 100,
         speedLimitSign: 40,
       };
       addRoadSegment(gyokoConfig, new THREE.Vector3(0, 0.01, gyokoSeg.cz), 0);
@@ -596,7 +605,8 @@ export class TokyoStationMap {
       hasCrosswalk: true,
       hasGuardrails: false,
       hasManholes: true,
-      hasTrafficLights: true,
+      // 和田倉門(z=250)・皇居外苑(z=365)の両端交差点に正規交差点信号が配置されるため橋中央の不要信号を抑止
+      hasTrafficLights: false,
       speedLimitSign: 40,
     };
     addRoadSegment(kokyoApproachConfig, new THREE.Vector3(0, 0.01, 309), 0);
@@ -2049,6 +2059,139 @@ export class TokyoStationMap {
       junctionCount: collectedJunctionTopologies.length,
       junctionArcCount: collectedJunctionArcs.length,
     });
+
+    // --- R. 統一交差点トポロジー連動 交通信号機の自動配置（丸の内・銀座・皇居外苑の全主要交差点） ---
+    // How: 各交差点の遠方左歩道（far-side left sidewalk）に支柱を自動計算し、
+    // 交差点パッド外・車道外・接続道路歩道上の3条件をすべて満たす位置のみへ信号機＋物理コライダーを配置し、
+    // 同一交差点内の南北軸(axis_a)・東西軸(axis_b)を TrafficSignalController の排他フェーズ制御へ登録する。
+    const placedIntersectionSignalPts: Array<{ x: number; z: number }> = [];
+    const signalController = this.roadBuilder.getSignalController();
+    const groundBodyYForSignals =
+      typeof groundBody?.translation === "function" ? groundBody.translation().y : -0.5;
+    let intersectionSignalsPlaced = 0;
+
+    const isValidIntersectionSignalSidewalkPos = (px: number, pz: number): boolean => {
+      // 1. 交差点パッド内部は不可
+      for (const p of pendingIntersections) {
+        if (
+          px >= p.ix - p.widthX * 0.5 - 0.15 &&
+          px <= p.ix + p.widthX * 0.5 + 0.15 &&
+          pz >= p.iz - p.depthZ * 0.5 - 0.15 &&
+          pz <= p.iz + p.depthZ * 0.5 + 0.15
+        ) {
+          return false;
+        }
+      }
+      // 2. いずれかの直線車道内部は不可
+      for (const r of registeredStraightRoads) {
+        if (
+          px >= r.minX - 0.15 &&
+          px <= r.maxX + 0.15 &&
+          pz >= r.minZ - 0.15 &&
+          pz <= r.maxZ + 0.15
+        ) {
+          return false;
+        }
+      }
+      // 3. いずれかの曲線車道内部は不可
+      for (const desc of corridorDescriptors) {
+        const threshSq = (desc.spec.halfWidth + 0.35) ** 2;
+        for (const s of desc.samples) {
+          if ((px - s.x) ** 2 + (pz - s.z) ** 2 < threshSq) {
+            return false;
+          }
+        }
+      }
+      // 4. 既配置の交差点信号柱と近接しすぎないこと
+      for (const prev of placedIntersectionSignalPts) {
+        if (Math.hypot(px - prev.x, pz - prev.z) < 4.5) {
+          return false;
+        }
+      }
+      // 5. 接続直線道路の実在歩道スラブ上に確実に支持されていること
+      for (const r of registeredStraightRoads) {
+        if (r.sidewalkWidth < 1.2) {
+          continue;
+        }
+        const halfCarry = r.carriagewayWidth * 0.5;
+        if (!r.isEastWest) {
+          const inZ = pz >= r.minZ + 0.4 && pz <= r.maxZ - 0.4;
+          const distX = Math.abs(px - r.cx);
+          if (inZ && distX >= halfCarry + 0.25 && distX <= halfCarry + r.sidewalkWidth - 0.35) {
+            return true;
+          }
+        } else {
+          const inX = px >= r.minX + 0.4 && px <= r.maxX - 0.4;
+          const distZ = Math.abs(pz - r.cz);
+          if (inX && distZ >= halfCarry + 0.25 && distZ <= halfCarry + r.sidewalkWidth - 0.35) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    for (const jTopo of collectedJunctionTopologies) {
+      const hasAnyCrosswalk = jTopo.arms.some((a) => a.hasCrosswalk);
+      if (!hasAnyCrosswalk || jTopo.x < -395) {
+        continue;
+      }
+      const placements = computeIntersectionSignalPlacements(jTopo, {
+        padClearanceM: 1.45,
+        sidewalkInsetM: 0.65,
+        validatePosition: isValidIntersectionSignalSidewalkPos,
+      });
+      const phaseOffsetSec = Math.abs(Math.round(jTopo.x * 0.07 + jTopo.z * 0.05)) % 24;
+      for (const spec of placements) {
+        const managed = this.roadBuilder.props.createManagedTrafficLight(
+          spec.x,
+          spec.z,
+          spec.rotationY,
+          {
+            activeSignal: spec.axisGroup === "axis_a" ? "green" : "red",
+            intersectionNameJa: spec.intersectionNameJa,
+            intersectionNameEn: spec.intersectionNameEn,
+            showArrowSignal: spec.showArrowSignal,
+            armLengthMeters: spec.armLengthMeters,
+            hasDualPedestrianHeads: spec.hasDualPedestrianHeads,
+            includePointLight: false,
+          },
+          {
+            id: spec.id,
+            intersectionId: spec.intersectionId,
+            axisGroup: spec.axisGroup,
+          },
+        );
+        signalController.registerSignal(managed.handle, {
+          isScramble: spec.isScramble,
+          timing: { phaseOffsetSec },
+        });
+        this.group.add(managed.group);
+        placedIntersectionSignalPts.push({ x: spec.x, z: spec.z });
+        intersectionSignalsPlaced += 1;
+
+        const hasCyl = typeof rapier.ColliderDesc.cylinder === "function";
+        const poleDesc = (
+          hasCyl
+            ? rapier.ColliderDesc.cylinder(2.5, 0.16)
+            : rapier.ColliderDesc.cuboid(0.16, 2.5, 0.16)
+        )
+          .setTranslation(spec.x, 2.5 - groundBodyYForSignals, spec.z)
+          .setFriction(0.4)
+          .setRestitution(0.12);
+        const col = world.createCollider(poleDesc, groundBody);
+        this.colliders.push(col);
+        if (typeof col?.handle === "number") {
+          this.obstacleColliderHandles.push(col.handle);
+        }
+      }
+    }
+
+    logger.info("roads", "traffic_signals.intersection_placed", "交差点連動交通信号機を配置", {
+      intersectionSignalsPlaced,
+      totalManagedSignals: signalController.getAllSignalHandles().length,
+      managedIntersections: signalController.getIntersectionSummaries().length,
+    });
   }
 
   /**
@@ -2063,6 +2206,20 @@ export class TokyoStationMap {
    */
   public getJunctionTopologies(): ReadonlyArray<JunctionTopology> {
     return this.laneGraph.junctions;
+  }
+
+  /**
+   * 都市全体のリアルタイム交通信号制御コントローラを取得する
+   */
+  public getTrafficSignalController(): TrafficSignalController {
+    return this.roadBuilder.getSignalController();
+  }
+
+  /**
+   * 毎フレーム呼び出し：全交差点の信号フェーズ（青→黄→赤→右折矢印・歩行者青点滅・スクランブル）を更新する
+   */
+  public updateTrafficSignals(deltaSeconds: number): void {
+    this.roadBuilder.getSignalController().update(deltaSeconds);
   }
 
   /**
@@ -8916,14 +9073,14 @@ export class TokyoStationMap {
       {
         x: -993.0,
         z: 249.0,
-        rotY: Math.PI,
+        rotY: 0,
         nameJa: "渋谷駅前・QFRONT前",
         nameEn: "Shibuya Station Front",
       },
       {
         x: -968.0,
         z: 282.0,
-        rotY: 0,
+        rotY: Math.PI,
         nameJa: "渋谷駅ハチ公広場北",
         nameEn: "Hachiko Sq. North",
       },
@@ -9069,7 +9226,16 @@ export class TokyoStationMap {
       },
     ];
 
-    for (const inter of shibuyaIntersections) {
+    const shibuyaSignalController = this.roadBuilder.getSignalController();
+    const shibuyaRoadPolylines: Point2D[][] = allCorridorDatas.map((cd) =>
+      cd.sampledPts.map((pt) => ({ x: pt.x, z: pt.z })),
+    );
+    const shibuyaJunctionPolys: Point2D[][] = this.laneGraph.junctions
+      .filter((j) => j.x < -395 && j.boundaryPolygon.length >= 3)
+      .map((j) => j.boundaryPolygon);
+
+    for (let sigIdx = 0; sigIdx < shibuyaIntersections.length; sigIdx++) {
+      const inter = shibuyaIntersections[sigIdx];
       const isSafe = isSafeShibuyaStreetPropPosition(inter.x, inter.z, {
         minRoadGap: 0.25,
         minPropGap: 6.0,
@@ -9077,15 +9243,45 @@ export class TokyoStationMap {
         skipIntersectionExclusion: true,
       });
       if (isSafe) {
-        const tl = this.roadBuilder.props.createTrafficLight(inter.x, inter.z, inter.rotY, {
-          intersectionNameJa: inter.nameJa,
-          intersectionNameEn: inter.nameEn,
-          activeSignal: "green",
-          showArrowSignal: true,
+        const alignedRotY = alignSignalYawToRoadOverhang(
+          inter.x,
+          inter.z,
+          inter.rotY,
+          shibuyaRoadPolylines,
+          shibuyaJunctionPolys,
+        );
+        const binding = resolveSignalIntersectionBinding(
+          inter.x,
+          inter.z,
+          alignedRotY,
+          this.laneGraph.junctions,
+        );
+        const managed = this.roadBuilder.props.createManagedTrafficLight(
+          inter.x,
+          inter.z,
+          alignedRotY,
+          {
+            intersectionNameJa: inter.nameJa,
+            intersectionNameEn: inter.nameEn,
+            activeSignal: binding.axisGroup === "axis_a" ? "green" : "red",
+            showArrowSignal: !binding.isScramble,
+            armLengthMeters: 4.1,
+            hasDualPedestrianHeads: true,
+            includePointLight: false,
+          },
+          {
+            id: `shibuya_sig_${sigIdx}`,
+            intersectionId: binding.intersectionId,
+            axisGroup: binding.axisGroup,
+          },
+        );
+        shibuyaSignalController.registerSignal(managed.handle, {
+          isScramble: binding.isScramble,
+          timing: { phaseOffsetSec: binding.phaseOffsetSec },
         });
-        tl.position.y = sampleShibuyaTerrainY(inter.x, inter.z);
-        this.removeAttachedLights(tl);
-        this.group.add(tl);
+        managed.group.position.y = sampleShibuyaTerrainY(inter.x, inter.z);
+        managed.group.userData.usesTerrainElevation = true;
+        this.group.add(managed.group);
         placedShibuyaProps.push({ x: inter.x, z: inter.z });
       }
     }
@@ -10885,6 +11081,8 @@ export class TokyoStationMap {
             obj.visible = road.props.hasGuardrails;
           } else if (name.includes("Manhole")) {
             obj.visible = road.props.hasManholes;
+          } else if (name === "JapaneseTrafficSignalGroup") {
+            obj.visible = road.props.hasTrafficLights;
           } else if (name.includes("Median")) {
             obj.visible = road.hasMedian;
           }

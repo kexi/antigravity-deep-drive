@@ -5,6 +5,7 @@ import { PuddleMaterial } from "../shaders/puddleShader";
 import { Procedural3DTextureGenerator } from "../textures/procedural3DTexture";
 import { RoadMarkings, computeRoadLaneLayout, type RoadLaneLayout } from "./roadMarkings";
 import { applyRoadProp3DTexture, RoadProps } from "./roadProps";
+import { resolveAdaptiveArmLength, type TrafficSignalController } from "./signals";
 import {
   buildIntersectionCornerSidewalks,
   buildLGutterRibbonGeometry,
@@ -151,6 +152,10 @@ export class JapaneseRoadBuilder {
 
   public getMarkings(): RoadMarkings {
     return this.markings;
+  }
+
+  public getSignalController(): TrafficSignalController {
+    return this.props.signalController;
   }
 
   private createLGutterMaterial(): THREE.MeshStandardMaterial {
@@ -1381,51 +1386,89 @@ if (curbCamDist < 36.0) {
     }
 
     const hasTrafficLights = config.hasTrafficLights;
-    if (hasTrafficLights) {
-      // 北側交差点・横断歩道前に日本の信号機を配置（左歩道側＋対向車線側）
+    const hasCrosswalkForSignals = Boolean(config.hasCrosswalk || config.hasCrosswalks);
+    if (hasTrafficLights && hasCrosswalkForSignals) {
+      const segArmLen = resolveAdaptiveArmLength(halfRoadWidth * 2);
+      const segSignalGroupId = `midblock_${config.roadId ?? config.name ?? "road"}_${Math.round(group.position.x)}_${Math.round(group.position.z)}`;
+      const segPhaseOffset =
+        Math.abs(Math.round(group.position.x * 0.11 + group.position.z * 0.09)) % 24;
+
+      // 北側横断歩道前に日本の信号機を配置（左歩道側＋対向車線側）
       const northSignalX = halfRoadWidth + 0.45;
       const northSignalZ = config.length * 0.25 + 4.5;
-      const trafficLightNorth = this.props.createTrafficLight(northSignalX, northSignalZ, Math.PI, {
-        activeSignal: "green",
-        intersectionNameJa: signLabels.northIntersectionJa,
-        intersectionNameEn: signLabels.northIntersectionEn,
-        showArrowSignal: true,
-      });
-      group.add(trafficLightNorth);
-      registerObstacleCollider(
-        createPoleCylinderDesc(2.5, 0.16)
-          .setTranslation(northSignalX, 2.5, northSignalZ)
-          .setFriction(0.4)
-          .setRestitution(0.12),
-      );
+      const northLimit = config.length * 0.5 - 0.8;
+      if (Math.abs(northSignalZ) <= northLimit) {
+        const northManaged = this.props.createManagedTrafficLight(
+          northSignalX,
+          northSignalZ,
+          Math.PI,
+          {
+            activeSignal: "green",
+            intersectionNameJa: signLabels.northIntersectionJa,
+            intersectionNameEn: signLabels.northIntersectionEn,
+            showArrowSignal: config.lanesPerDirection >= 2,
+            armLengthMeters: segArmLen,
+            includePointLight: false,
+          },
+          {
+            id: `${segSignalGroupId}_north_in`,
+            intersectionId: `${segSignalGroupId}_north`,
+            axisGroup: "axis_a",
+          },
+        );
+        this.props.signalController.registerSignal(northManaged.handle, {
+          timing: { phaseOffsetSec: segPhaseOffset },
+        });
+        group.add(northManaged.group);
+        registerObstacleCollider(
+          createPoleCylinderDesc(2.5, 0.16)
+            .setTranslation(northSignalX, 2.5, northSignalZ)
+            .setFriction(0.4)
+            .setRestitution(0.12),
+        );
+      }
 
       const northOppSignalX = -halfRoadWidth - 0.45;
       const northOppSignalZ = config.length * 0.25 - 4.5;
-      const trafficLightNorthOpposite = this.props.createTrafficLight(
-        northOppSignalX,
-        northOppSignalZ,
-        0,
-        {
-          activeSignal: "green",
-          intersectionNameJa: signLabels.northIntersectionJa,
-          intersectionNameEn: signLabels.northIntersectionEn,
-          showArrowSignal: false,
-        },
-      );
-      group.add(trafficLightNorthOpposite);
-      registerObstacleCollider(
-        createPoleCylinderDesc(2.5, 0.16)
-          .setTranslation(northOppSignalX, 2.5, northOppSignalZ)
-          .setFriction(0.4)
-          .setRestitution(0.12),
-      );
+      if (Math.abs(northOppSignalZ) <= northLimit) {
+        const northOppManaged = this.props.createManagedTrafficLight(
+          northOppSignalX,
+          northOppSignalZ,
+          0,
+          {
+            activeSignal: "green",
+            intersectionNameJa: signLabels.northIntersectionJa,
+            intersectionNameEn: signLabels.northIntersectionEn,
+            showArrowSignal: false,
+            armLengthMeters: segArmLen,
+            includePointLight: false,
+          },
+          {
+            id: `${segSignalGroupId}_north_opp`,
+            intersectionId: `${segSignalGroupId}_north`,
+            axisGroup: "axis_a",
+          },
+        );
+        this.props.signalController.registerSignal(northOppManaged.handle, {
+          timing: { phaseOffsetSec: segPhaseOffset },
+        });
+        group.add(northOppManaged.group);
+        registerObstacleCollider(
+          createPoleCylinderDesc(2.5, 0.16)
+            .setTranslation(northOppSignalX, 2.5, northOppSignalZ)
+            .setFriction(0.4)
+            .setRestitution(0.12),
+        );
+      }
 
-      // 多車線幹線道路（行幸通り・日比谷通り・明治通り等）ではスタート地点から直近前方の南側交差点（-0.14 * length + 4.5）にも日本の信号機を配置
-      const isMajorMultiLaneSignal = config.lanesPerDirection >= 2;
+      // 長尺多車線区間（length >= 95m）のみ南側信号機を配置する
+      // Why guard by config.length >= 95: 短区間（45m/58m/86m等）には南側横断歩道が存在しないにもかかわらず
+      // 旧実装では横断歩道のない道路中央に架空の信号機を2基立ててしまっていたため。
+      const isMajorMultiLaneSignal = config.lanesPerDirection >= 2 && config.length >= 95;
       if (isMajorMultiLaneSignal) {
         const southSignalX = halfRoadWidth + 0.45;
         const southSignalZ = -config.length * 0.14 + 4.5;
-        const trafficLightSouth = this.props.createTrafficLight(
+        const southManaged = this.props.createManagedTrafficLight(
           southSignalX,
           southSignalZ,
           Math.PI,
@@ -1434,9 +1477,19 @@ if (curbCamDist < 36.0) {
             intersectionNameJa: signLabels.southIntersectionJa,
             intersectionNameEn: signLabels.southIntersectionEn,
             showArrowSignal: true,
+            armLengthMeters: segArmLen,
+            includePointLight: false,
+          },
+          {
+            id: `${segSignalGroupId}_south_in`,
+            intersectionId: `${segSignalGroupId}_south`,
+            axisGroup: "axis_a",
           },
         );
-        group.add(trafficLightSouth);
+        this.props.signalController.registerSignal(southManaged.handle, {
+          timing: { phaseOffsetSec: (segPhaseOffset + 8) % 24 },
+        });
+        group.add(southManaged.group);
         registerObstacleCollider(
           createPoleCylinderDesc(2.5, 0.16)
             .setTranslation(southSignalX, 2.5, southSignalZ)
@@ -1446,7 +1499,7 @@ if (curbCamDist < 36.0) {
 
         const southOppSignalX = -halfRoadWidth - 0.45;
         const southOppSignalZ = -config.length * 0.14 - 4.5;
-        const trafficLightSouthOpposite = this.props.createTrafficLight(
+        const southOppManaged = this.props.createManagedTrafficLight(
           southOppSignalX,
           southOppSignalZ,
           0,
@@ -1455,9 +1508,19 @@ if (curbCamDist < 36.0) {
             intersectionNameJa: signLabels.southIntersectionJa,
             intersectionNameEn: signLabels.southIntersectionEn,
             showArrowSignal: false,
+            armLengthMeters: segArmLen,
+            includePointLight: false,
+          },
+          {
+            id: `${segSignalGroupId}_south_opp`,
+            intersectionId: `${segSignalGroupId}_south`,
+            axisGroup: "axis_a",
           },
         );
-        group.add(trafficLightSouthOpposite);
+        this.props.signalController.registerSignal(southOppManaged.handle, {
+          timing: { phaseOffsetSec: (segPhaseOffset + 8) % 24 },
+        });
+        group.add(southOppManaged.group);
         registerObstacleCollider(
           createPoleCylinderDesc(2.5, 0.16)
             .setTranslation(southOppSignalX, 2.5, southOppSignalZ)
@@ -3053,18 +3116,35 @@ if (curbCamDist < 36.0) {
             continue;
           }
 
+          // Why +tangent for sideSign < 0 / -tangent for sideSign > 0:
+          // fLight.normal = (tz, -tx) = leftNormal2D(tangent) のため、+normal 歩道柱では
+          // world(local +X) = -normal（車道側張り出し）かつ正面 -tangent となる atan2(-tx, -tz)、
+          // -normal 歩道柱では world(local +X) = +normal かつ正面 +tangent となる atan2(+tx, +tz) が正対角になる。
           const lightYaw =
             la.sideSign < 0
-              ? Math.atan2(-fLight.tangent.x, -fLight.tangent.z)
-              : Math.atan2(fLight.tangent.x, fLight.tangent.z);
+              ? Math.atan2(fLight.tangent.x, fLight.tangent.z)
+              : Math.atan2(-fLight.tangent.x, -fLight.tangent.z);
 
-          const tl = this.props.createTrafficLight(lightPosX, lightPosZ, lightYaw, {
-            activeSignal: "green",
-            showArrowSignal: lanesPerDir >= 2,
-            intersectionNameJa: config.name,
-          });
-          tl.position.y = evalY(lightPosX, lightPosZ, baseY);
-          group.add(tl);
+          const managedTl = this.props.createManagedTrafficLight(
+            lightPosX,
+            lightPosZ,
+            lightYaw,
+            {
+              activeSignal: "green",
+              showArrowSignal: lanesPerDir >= 2,
+              intersectionNameJa: config.name,
+              armLengthMeters: resolveAdaptiveArmLength(driveableWidth),
+              includePointLight: false,
+            },
+            {
+              id: `curved_${config.roadId ?? config.name ?? "road"}_${ivIdx}_${la.sideSign}`,
+              intersectionId: `curved_${config.roadId ?? config.name ?? "road"}_${ivIdx}`,
+              axisGroup: "axis_a",
+            },
+          );
+          this.props.signalController.registerSignal(managedTl.handle);
+          managedTl.group.position.y = evalY(lightPosX, lightPosZ, baseY);
+          group.add(managedTl.group);
         }
       }
     }

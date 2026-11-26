@@ -2297,6 +2297,14 @@ async function bootstrap() {
     },
   };
 
+  const trafficSignalController = cityMap.getTrafficSignalController();
+  (window as unknown as { __DEEP_DRIVE_SIGNALS__?: unknown }).__DEEP_DRIVE_SIGNALS__ = {
+    getIntersections: () => trafficSignalController.getIntersectionSummaries(),
+    getElapsedSeconds: () => trafficSignalController.getElapsedSeconds(),
+    setPaused: (paused: boolean) => trafficSignalController.setPaused(paused),
+    setElapsedSeconds: (sec: number) => trafficSignalController.setElapsedSeconds(sec),
+  };
+
   // デバッグ・自動検証用に主要コンポーネントを window へ公開
   (window as unknown as { __DEEP_DRIVE_DEV__?: unknown }).__DEEP_DRIVE_DEV__ = {
     carModel,
@@ -2307,6 +2315,7 @@ async function bootstrap() {
     renderer,
     cityMap,
     laneGraph,
+    trafficSignalController,
     setDebugLanesVisible,
   };
 
@@ -2489,10 +2498,11 @@ async function bootstrap() {
       cityMap.updateDistanceCulling(carPos, cullingDistanceM);
     }
 
-    // 3. 時間帯 & 天候 & 雨シミュレーション更新（水たまりシェーダー＆フロントガラス雨滴光学シェーダーへ太陽・空色・波紋強度を同期）
+    // 3. 時間帯 & 天候 & 雨シミュレーション & リアルタイム交通信号フェーズ更新
     weatherSystem.update(dt, carPos, carVelocity);
     const puddleEnvParams = weatherSystem.getPuddleEnvironmentParams();
     cityMap.updateRainWetness(weatherSystem.wetness, currentTime * 0.001, puddleEnvParams);
+    cityMap.updateTrafficSignals(dt);
 
     // 4. 車体メッシュ & ワイパー & フロントガラス更新（環境ラベル更新は時間帯・天候・言語切替時のみイベント駆動で実行）
     carModel.setWindshieldEnvironment(puddleEnvParams);

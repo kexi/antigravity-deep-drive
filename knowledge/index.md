@@ -70,3 +70,4 @@ trust_signals:
 - [055-road-and-sidewalk-architecture-overhaul.md](./055-road-and-sidewalk-architecture-overhaul.md): 道路作成システム・歩道断面幾何学・交差点隅切りの統合刷新
 - [056-shibuya-true-1to1-gis-non-mirrored-sloped-overhaul.md](./056-shibuya-true-1to1-gis-non-mirrored-sloped-overhaul.md): 渋谷エリア非鏡像 1:1 GIS 座標系・DEM5A 谷地形・構造物リアル化オーバーホール
 - [057-unified-lane-profile-junction-topology-and-batched-markings.md](./057-unified-lane-profile-junction-topology-and-batched-markings.md): 統一車線プロファイル・交差点トポロジー自動クリッピング・バッチ路面標示アーキテクチャ
+- [058-unified-traffic-signal-system-and-phase-interlock.md](./058-unified-traffic-signal-system-and-phase-interlock.md): 統一交通信号作成システム・交差点トポロジー連動配置・排他フェーズ制御
