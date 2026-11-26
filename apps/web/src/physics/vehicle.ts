@@ -22,6 +22,10 @@ export class VehiclePhysics {
   private smoothedVisualY = 0.0;
   private hasInitializedVisualFilter = false;
   private smoothedQuat = new THREE.Quaternion();
+  private isAutoHoldActive = false;
+  private autoHoldAnchorX: number | null = null;
+  private autoHoldAnchorZ: number | null = null;
+  private lastStepDt = 1 / 60;
   private obstacleColliderHandleSet = new Set<number>();
   private drivableColliderHandleSet = new Set<number>();
 
@@ -48,7 +52,7 @@ export class VehiclePhysics {
     const bodyDesc = rapier.RigidBodyDesc.dynamic()
       .setTranslation(startPos.x, startPos.y, startPos.z)
       .setLinearDamping(0.22)
-      .setAngularDamping(3.8)
+      .setAngularDamping(4.8)
       .setCcdEnabled(true)
       .setCanSleep(false);
 
@@ -90,9 +94,9 @@ export class VehiclePhysics {
       );
 
       // サスペンションバネ定数・減衰力・トラベル量・タイヤグリップの設定（高減衰 AVS でピッチ・ロールの微細振動を抑制）
-      this.vehicleController.setWheelSuspensionStiffness(i, 42.0);
-      this.vehicleController.setWheelSuspensionCompression(i, 6.4);
-      this.vehicleController.setWheelSuspensionRelaxation(i, 7.2);
+      this.vehicleController.setWheelSuspensionStiffness(i, 38.0);
+      this.vehicleController.setWheelSuspensionCompression(i, 7.6);
+      this.vehicleController.setWheelSuspensionRelaxation(i, 8.4);
       this.vehicleController.setWheelMaxSuspensionTravel(i, 0.22);
       this.vehicleController.setWheelMaxSuspensionForce(i, 15000.0);
       this.vehicleController.setWheelFrictionSlip(i, 3.6);
@@ -141,6 +145,7 @@ export class VehiclePhysics {
     if (!isDtValid) {
       return;
     }
+    this.lastStepDt = dt;
 
     const transform = this.rigidBody.translation();
     const rotation = this.rigidBody.rotation();
@@ -173,6 +178,13 @@ export class VehiclePhysics {
     const isReverseInputActive = isPressingBrake && !isPressingThrottle && !isHandbrakeEngaged;
     this.lastReverseInputActive = isReverseInputActive;
 
+    const hasDriveRequest = isPressingThrottle || isReverseInputActive;
+    if (hasDriveRequest) {
+      this.isAutoHoldActive = false;
+      this.autoHoldAnchorX = null;
+      this.autoHoldAnchorZ = null;
+    }
+
     if (isPressingThrottle) {
       const powerCurve = Math.max(0.2, 1.0 - this.currentSpeedKmh / 185.0);
       engineForce = input.throttle * this.maxEngineForce * powerCurve;
@@ -189,11 +201,11 @@ export class VehiclePhysics {
       }
     }
 
-    // アクセルもブレーキも踏んでいない場合はエンジンブレーキを効かせ、停車付近ではオートホールド制動で微振動・坂道ずり下がりを抑止
+    // アクセルもブレーキも踏んでいない場合はエンジンブレーキを効かせ、停車付近では過発振しない適度なブレーキ＋オートホールドへ引き継ぐ
     const isCoasting = !isPressingThrottle && !isPressingBrake;
     if (isCoasting) {
       const isNearlyStationary = Math.abs(forwardSpeed) < 0.4;
-      wheelBrake = isNearlyStationary ? 48.0 : 6.5;
+      wheelBrake = isNearlyStationary ? 14.0 : 6.5;
     }
 
     // 3. DynamicRayCastVehicleController の全4輪へ操舵・駆動・制動・ドリフト摩擦を適用
@@ -247,6 +259,64 @@ export class VehiclePhysics {
       return true;
     });
 
+    // 4.5 停車オートホールド（3輪以上接地かつ微速時に水平スリップ・坂道クリープ・ピッチ/ロール微振動を積極減衰）
+    let groundedWheelCount = 0;
+    for (let i = 0; i < numWheels; i++) {
+      if (this.vehicleController.wheelIsInContact(i)) {
+        groundedWheelCount += 1;
+      }
+    }
+    const postStepVel = this.rigidBody.linvel();
+    const postStepAngVel = this.rigidBody.angvel();
+    const horizontalSpeedMs = Math.hypot(postStepVel.x, postStepVel.z);
+    const angularSpeedRad = Math.hypot(postStepAngVel.x, postStepAngVel.y, postStepAngVel.z);
+    const isGroundedOnSurface = groundedWheelCount >= 3;
+    const shouldEnterAutoHold =
+      !hasDriveRequest &&
+      isGroundedOnSurface &&
+      horizontalSpeedMs < 0.35 &&
+      Math.abs(postStepVel.y) < 0.45 &&
+      angularSpeedRad < 0.6;
+    const shouldKeepAutoHold =
+      this.isAutoHoldActive && !hasDriveRequest && isGroundedOnSurface && horizontalSpeedMs < 0.8;
+
+    if (shouldEnterAutoHold || shouldKeepAutoHold) {
+      this.isAutoHoldActive = true;
+      const currentPos = this.rigidBody.translation();
+      const hasAnchor = this.autoHoldAnchorX !== null && this.autoHoldAnchorZ !== null;
+      if (!hasAnchor && horizontalSpeedMs < 0.15) {
+        this.autoHoldAnchorX = currentPos.x;
+        this.autoHoldAnchorZ = currentPos.z;
+      }
+
+      const verticalDecay = Math.exp(-12.0 * dt);
+      const angularDecay = Math.exp(-22.0 * dt);
+      const dampedVy = Math.abs(postStepVel.y) < 0.02 ? 0 : postStepVel.y * verticalDecay;
+      const dampAng = (v: number): number => (Math.abs(v) < 0.003 ? 0 : v * angularDecay);
+
+      this.rigidBody.setLinvel(new this.rapier.Vector3(0, dampedVy, 0), true);
+      this.rigidBody.setAngvel(
+        new this.rapier.Vector3(
+          dampAng(postStepAngVel.x),
+          dampAng(postStepAngVel.y),
+          dampAng(postStepAngVel.z),
+        ),
+        true,
+      );
+
+      const hasAnchoredXZ = this.autoHoldAnchorX !== null && this.autoHoldAnchorZ !== null;
+      if (hasAnchoredXZ) {
+        this.rigidBody.setTranslation(
+          new this.rapier.Vector3(this.autoHoldAnchorX!, currentPos.y, this.autoHoldAnchorZ!),
+          true,
+        );
+      }
+    } else {
+      this.isAutoHoldActive = false;
+      this.autoHoldAnchorX = null;
+      this.autoHoldAnchorZ = null;
+    }
+
     // 5. 高速走行時のエアロダウンフォースと転倒防止アンチロールスタビライザー
     const controllerForwardSpeed = this.vehicleController.currentVehicleSpeed();
     const rawMeasuredForwardSpeed = Number.isFinite(controllerForwardSpeed)
@@ -258,7 +328,8 @@ export class VehiclePhysics {
         : rawMeasuredForwardSpeed;
     const rawSpeedKmh = Math.abs(measuredForwardSpeed) * 3.6;
     const isParkedMicroJitter =
-      !isPressingThrottle && !isReverseInputActive && Math.abs(measuredForwardSpeed) < 0.15;
+      this.isAutoHoldActive ||
+      (!isPressingThrottle && !isReverseInputActive && Math.abs(measuredForwardSpeed) < 0.15);
     this.currentSpeedKmh = isParkedMicroJitter ? 0 : rawSpeedKmh;
 
     const downforce = this.currentSpeedKmh * 1.4 * dt;
@@ -351,6 +422,9 @@ export class VehiclePhysics {
     this.engineRpm = 800;
     this.lastReverseInputActive = false;
     this.hasInitializedVisualFilter = false;
+    this.isAutoHoldActive = false;
+    this.autoHoldAnchorX = null;
+    this.autoHoldAnchorZ = null;
 
     const numWheels = this.vehicleController.numWheels();
     for (let i = 0; i < numWheels; i++) {
@@ -370,11 +444,15 @@ export class VehiclePhysics {
     // Why not update() 時点の currentVehicleSpeed() をそのまま返すか:
     // update() は world.step() の前に呼ばれるため、壁や障害物に衝突して剛体が停止した直後でも
     // 物理ステップ後の実際の速度減衰が即座に currentSpeedKmh に反映されるようにする。
-    const postStepHorizontalSpeedMs = Math.hypot(vel.x, vel.z);
-    const postStepSpeedKmh = postStepHorizontalSpeedMs * 3.6;
-    const isStoppedOrSlowedByCollision = postStepSpeedKmh < this.currentSpeedKmh;
-    if (isStoppedOrSlowedByCollision) {
-      this.currentSpeedKmh = postStepSpeedKmh;
+    if (this.isAutoHoldActive) {
+      this.currentSpeedKmh = 0;
+    } else {
+      const postStepHorizontalSpeedMs = Math.hypot(vel.x, vel.z);
+      const postStepSpeedKmh = postStepHorizontalSpeedMs * 3.6;
+      const isStoppedOrSlowedByCollision = postStepSpeedKmh < this.currentSpeedKmh;
+      if (isStoppedOrSlowedByCollision) {
+        this.currentSpeedKmh = postStepSpeedKmh;
+      }
     }
 
     // 物理ステップ後の衝突・停止減衰で停車域 (< 1.5 km/h) に達しリバース未入力の場合は "R" 残留を防止して "D 1" へ整合する
@@ -388,14 +466,24 @@ export class VehiclePhysics {
     // タイヤ接地面（地形標高Y）と車体底面（wheelRadius=0.38）が視覚的に一致するよう垂直オフセットを算出
     const rawVisualY = pos.y - (this.wheelRadius + this.suspensionRestLength - 0.08);
 
-    // 可変フレームレート時のレイキャストサスペンション微小振動を平滑化（クラウンのフラットライド姿勢制御）
+    // フレームレート非依存のサスペンション平滑化（クラウンのフラットライド姿勢制御）および停車中の微小振動デッドゾーン
     if (!this.hasInitializedVisualFilter) {
       this.smoothedVisualY = rawVisualY;
       this.smoothedQuat.copy(rawQuat);
       this.hasInitializedVisualFilter = true;
     } else {
-      this.smoothedVisualY = THREE.MathUtils.lerp(this.smoothedVisualY, rawVisualY, 0.25);
-      this.smoothedQuat.slerp(rawQuat, 0.32);
+      const yAlpha = 1 - Math.exp(-12 * this.lastStepDt);
+      const qAlpha = 1 - Math.exp(-14 * this.lastStepDt);
+      const isTinyVerticalNoise =
+        this.isAutoHoldActive && Math.abs(rawVisualY - this.smoothedVisualY) < 0.0015;
+      if (!isTinyVerticalNoise) {
+        this.smoothedVisualY = THREE.MathUtils.lerp(this.smoothedVisualY, rawVisualY, yAlpha);
+      }
+      const isTinyAngularNoise =
+        this.isAutoHoldActive && this.smoothedQuat.angleTo(rawQuat) < 0.0015;
+      if (!isTinyAngularNoise) {
+        this.smoothedQuat.slerp(rawQuat, qAlpha);
+      }
     }
 
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.smoothedQuat);

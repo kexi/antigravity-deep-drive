@@ -58,3 +58,14 @@ trust_signals:
    - 横断歩道の対岸から横断歩行者へ正対する向き（左側歩道 `+π/2`、右側歩道 `-π/2`）へ修正。
    - 512×1024 Canvas による日本仕様の縦型2灯（上段：赤の立ち姿ピクトグラム、下段：青緑の歩行姿ピクトグラム＋LEDドットマトリクス＆サンバイザー）を実装。
 4. **横断歩道開口部のガードレール自動分割**: [`buildGuardrailSection`](../apps/web/src/roads/roadBuilder.ts) にて横断歩道位置（`crosswalkZPositions`）の前後 `±3.8m` を開口部として自動分割し、各端部に巻き込み袖ビームと端末支柱を配置して歩行者動線を確保。
+
+---
+
+## 4. 2026-11-25 追記: モーションブラー視認性調整と停車時車体揺れ（60Hzサブステップ＋オートホールド）
+
+- **モーションブラー強度・クリアゾーン調整（[`motionBlur.ts`](../apps/web/src/shaders/motionBlur.ts)）**:
+  - 従来 `minSpeed = 20 km/h` から最大強度 `0.04` まで線形立ち上がりし画面中心にもブラーがかかっていたため、市街地走行時でも標識・ビルが強く滲んで見えていた。
+  - フラグメントシェーダーへ前方注視クリアゾーン `peripheralWeight = smoothstep(0.16, 0.58, dist)` を導入し、`minSpeed = 40.0 km/h` 超から `pow(normalizedSpeed, 1.4) * 0.014` の緩やかなカーブで外縁部のみブラーを掛ける設計に改めた。
+- **停車時の車体揺れ・クリープ根絶（[`main.ts`](../apps/web/src/main.ts), [`vehicle.ts`](../apps/web/src/physics/vehicle.ts)）**:
+  - 30fps 以下（`dt >= 0.025s`）の環境や `vehiclePhysics.update(dt)` と `physics.step(Math.min(dt, 0.033))` の積分幅不一致により、渋谷 DEM5A 傾斜 Trimesh 上で Rapier `DynamicRayCastVehicleController` の高ブレーキ値（`48.0`）・横摩擦ソルバーが発振し、停車中にも `±0.27 rad/s` のロール振動や `1〜2 km/h` 表示が発生していた。
+  - `main.ts` 側で最大 4 分割の `<= 1/60s` サブステップ更新に統一したうえ、`VehiclePhysics` に AVS 減衰強化（`AngularDamping = 4.8`, `Stiffness = 38.0`, `Compression = 7.6`, `Relaxation = 8.4`）、惰性停車ブレーキ `14.0` 抑制、水平位置アンカー付き **停車オートホールド（Auto Hold）**、および `lastStepDt` 連動の指数平滑化＋静止デッドゾーンを実装して `dt = 1/60`・`1/30` ともに振動・ずり動きをゼロ近傍へ収束させた。

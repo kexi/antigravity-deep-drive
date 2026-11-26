@@ -21,7 +21,7 @@ describe("MotionBlurPass - Depth-Masked Exterior Motion Blur", () => {
   it("車内視点（cockpit）およびチェイス視点（chase）に応じてカメラ距離マスク閾値とブラー強度が更新されることを保証する", () => {
     const pass = new MotionBlurPass(800, 600);
 
-    // 1. コックピット視点・高速走行時 (100 km/h): 車内（カーナビ ~0.62m、メーター ~0.65m、ボンネット先端 ~2.2m）を保護する閾値 2.2m〜3.0m
+    // 1. コックピット視点・高速走行時 (100 km/h): 車内（カーナビ ~0.62m、メーター ~0.65m、ボンネット先端 ~2.2m）を保護する閾値 2.2m〜3.0m かつ視認性を保つ控えめな強度
     pass.update(100, true, {
       cameraNear: 0.1,
       cameraFar: 600.0,
@@ -29,7 +29,8 @@ describe("MotionBlurPass - Depth-Masked Exterior Motion Blur", () => {
     });
 
     expect(pass.material.uniforms.uEnabled.value).toBe(1.0);
-    expect(pass.material.uniforms.uStrength.value).toBeGreaterThan(0.02);
+    expect(pass.material.uniforms.uStrength.value).toBeGreaterThan(0.002);
+    expect(pass.material.uniforms.uStrength.value).toBeLessThanOrEqual(0.008);
     expect(pass.material.uniforms.uMaskNearDistance.value).toBeCloseTo(2.2, 4);
     expect(pass.material.uniforms.uMaskFarDistance.value).toBeCloseTo(3.0, 4);
 
@@ -45,9 +46,13 @@ describe("MotionBlurPass - Depth-Masked Exterior Motion Blur", () => {
     expect(pass.material.uniforms.uMaskNearDistance.value).toBeCloseTo(0.5, 4);
     expect(pass.material.uniforms.uMaskFarDistance.value).toBeCloseTo(1.2, 4);
 
-    // 3. 低速時 (20 km/h 以下) または無効化時はブラー強度が 0 になること
-    pass.update(15, true, { cameraMode: "cockpit" });
+    // 3. 低速〜市街地低速時 (35 km/h 以下) または無効化時はブラー強度が 0、最高速時 (180 km/h) でも上限 0.015 以下に抑えられること
+    pass.update(35, true, { cameraMode: "cockpit" });
     expect(pass.material.uniforms.uStrength.value).toBe(0.0);
+
+    pass.update(180, true, { cameraMode: "cockpit" });
+    expect(pass.material.uniforms.uStrength.value).toBeGreaterThan(0.01);
+    expect(pass.material.uniforms.uStrength.value).toBeLessThanOrEqual(0.015);
 
     pass.update(120, false, { cameraMode: "cockpit" });
     expect(pass.material.uniforms.uEnabled.value).toBe(0.0);
@@ -100,5 +105,9 @@ describe("MotionBlurPass - Depth-Masked Exterior Motion Blur", () => {
       "float sampleExteriorMask = computeExteriorMask(sampleUv);",
     );
     expect(hasSampleMaskWeight).toBe(true);
+
+    // 5. 前方注視領域（画面中心）をクリアに保つ周辺ブラー重みが含まれること
+    const hasPeripheralClearZone = fragmentGlsl.includes("smoothstep(0.16, 0.58, dist)");
+    expect(hasPeripheralClearZone).toBe(true);
   });
 });

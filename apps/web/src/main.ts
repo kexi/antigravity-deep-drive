@@ -2394,8 +2394,13 @@ async function bootstrap() {
       ? rawInput
       : { throttle: 0, brake: 1, steer: 0, handbrake: true };
     if (isTitleScreenDismissed) {
-      vehiclePhysics.update(dt, activeInput);
-      physics.step(dt);
+      const maxPhysicsSubStep = 1 / 60;
+      const subStepCount = Math.min(4, Math.max(1, Math.ceil(dt / maxPhysicsSubStep)));
+      const subDt = dt / subStepCount;
+      for (let stepIdx = 0; stepIdx < subStepCount; stepIdx += 1) {
+        vehiclePhysics.update(subDt, activeInput);
+        physics.step(subDt);
+      }
     }
 
     // 2. 車両ステート同期 & オープンワールドチャンクストリーミング & エリア・距離カリング更新

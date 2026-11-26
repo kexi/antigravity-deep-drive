@@ -942,4 +942,116 @@ describe("車両およびゲームシステムの仕様検証", () => {
     expect(ctxJa.nearbyPois.length).toBeGreaterThanOrEqual(1);
     expect(ctxJa.sceneSummary).toContain("POI:");
   });
+
+  it("平坦面および渋谷3D傾斜路面で停車放置した際に低FPS相当(dt=1/30)でも車体が揺れ・ずり動きせず、発進操作で即座にオートホールド解除されることを保証する", async () => {
+    await RAPIER.init();
+    const { sampleShibuyaTerrainY } = await import("../openData/gsiPlateauLoader");
+
+    // 1. 渋谷スポーン地点周辺の傾斜 Trimesh を構築
+    const world = new RAPIER.World(new RAPIER.Vector3(0.0, -9.81, 0.0));
+    const xMin = -780;
+    const xMax = -640;
+    const zMin = 420;
+    const zMax = 560;
+    const step = 8;
+    const cols = Math.floor((xMax - xMin) / step) + 1;
+    const rows = Math.floor((zMax - zMin) / step) + 1;
+    const verts = new Float32Array(cols * rows * 3);
+    const indices = new Uint32Array((rows - 1) * (cols - 1) * 6);
+    for (let r = 0; r < rows; r += 1) {
+      const z = zMin + r * step;
+      for (let c = 0; c < cols; c += 1) {
+        const x = xMin + c * step;
+        const idx3 = (r * cols + c) * 3;
+        verts[idx3] = x;
+        verts[idx3 + 1] = sampleShibuyaTerrainY(x, z);
+        verts[idx3 + 2] = z;
+      }
+    }
+    let cursor = 0;
+    for (let r = 0; r < rows - 1; r += 1) {
+      for (let c = 0; c < cols - 1; c += 1) {
+        const i00 = r * cols + c;
+        const i10 = i00 + 1;
+        const i01 = (r + 1) * cols + c;
+        const i11 = i01 + 1;
+        indices[cursor++] = i00;
+        indices[cursor++] = i01;
+        indices[cursor++] = i10;
+        indices[cursor++] = i10;
+        indices[cursor++] = i01;
+        indices[cursor++] = i11;
+      }
+    }
+    const terrainBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0));
+    const terrainCollider = world.createCollider(
+      RAPIER.ColliderDesc.trimesh(verts, indices).setFriction(0.9).setRestitution(0.01),
+      terrainBody,
+    );
+
+    const sx = -709.4;
+    const sz = 492.3;
+    const gy = sampleShibuyaTerrainY(sx, sz);
+    const vehicle = new VehiclePhysics(world, RAPIER, new THREE.Vector3(sx, gy + 0.62, sz));
+    vehicle.setDrivableColliderHandles([terrainCollider.handle]);
+
+    for (const dt of [1 / 60, 1 / 30]) {
+      vehicle.resetPosition(new THREE.Vector3(sx, gy + 0.62, sz), -2.35);
+      let minY = Number.POSITIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+      let minPitch = Number.POSITIVE_INFINITY;
+      let maxPitch = Number.NEGATIVE_INFINITY;
+      let minRoll = Number.POSITIVE_INFINITY;
+      let maxRoll = Number.NEGATIVE_INFINITY;
+      let maxSpeed = 0;
+      let anchorX = 0;
+      let anchorZ = 0;
+      let maxDriftM = 0;
+
+      for (let i = 0; i < 240; i += 1) {
+        vehicle.update(dt, { throttle: 0, brake: 0, steer: 0, handbrake: false });
+        world.timestep = dt;
+        world.step();
+        const s = vehicle.getState();
+        if (i === 90) {
+          anchorX = s.position.x;
+          anchorZ = s.position.z;
+        }
+        if (i >= 90) {
+          minY = Math.min(minY, s.position.y);
+          maxY = Math.max(maxY, s.position.y);
+          minPitch = Math.min(minPitch, s.pitchAngle);
+          maxPitch = Math.max(maxPitch, s.pitchAngle);
+          minRoll = Math.min(minRoll, s.rollAngle);
+          maxRoll = Math.max(maxRoll, s.rollAngle);
+          maxSpeed = Math.max(maxSpeed, s.speedKmh);
+          maxDriftM = Math.max(
+            maxDriftM,
+            Math.hypot(s.position.x - anchorX, s.position.z - anchorZ),
+          );
+        }
+      }
+
+      expect(maxSpeed).toBe(0);
+      expect(maxY - minY).toBeLessThan(0.001);
+      expect(THREE.MathUtils.radToDeg(maxPitch - minPitch)).toBeLessThan(0.05);
+      expect(THREE.MathUtils.radToDeg(maxRoll - minRoll)).toBeLessThan(0.05);
+      expect(maxDriftM).toBeLessThan(0.002);
+    }
+
+    // オートホールド状態からアクセル入力で即座に解除・発進できることを保証する
+    const beforeStart = vehicle.getState().position;
+    for (let i = 0; i < 60; i += 1) {
+      vehicle.update(1 / 60, { throttle: 1.0, brake: 0, steer: 0, handbrake: false });
+      world.timestep = 1 / 60;
+      world.step();
+    }
+    const afterAccelerate = vehicle.getState();
+    const movedDist = Math.hypot(
+      afterAccelerate.position.x - beforeStart.x,
+      afterAccelerate.position.z - beforeStart.z,
+    );
+    expect(afterAccelerate.speedKmh).toBeGreaterThan(10.0);
+    expect(movedDist).toBeGreaterThan(1.0);
+  });
 });

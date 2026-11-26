@@ -113,13 +113,14 @@ export const MotionBlurShader = {
         return;
       }
 
-      // 中心からの距離（画面周辺ほどブラーが強まる）
+      // 中心からの距離（前方注視領域 dist <= 0.16 は鮮明に保ち、画面外縁に向かって滑らかにブラーを付与）
       vec2 dirToCenter = vUv - uCenter;
       float dist = length(dirToCenter);
+      float peripheralWeight = smoothstep(0.16, 0.58, dist);
 
       // 放射方向ベクトルと進行方向ベクトルのブレンド（境界付近はマスク係数で滑らかに減衰）
       float effectiveStrength = uStrength * centerExteriorMask;
-      vec2 blurDir = normalize(dirToCenter + vec2(0.0001)) * dist * 0.7 + uVelocity * 0.3;
+      vec2 blurDir = normalize(dirToCenter + vec2(0.0001)) * dist * peripheralWeight * 0.7 + uVelocity * 0.3;
       vec2 stepVec = blurDir * effectiveStrength / float(SAMPLES);
 
       vec4 accumColor = baseColor;
@@ -222,17 +223,18 @@ export class MotionBlurPass {
     }
 
     this.material.uniforms.uEnabled.value = 1.0;
-    // 時速20km/h以上でブラーが徐々に発現
-    const minSpeed = 20.0;
+    // 時速40km/h以下（市街地低速域）は完全クリアとし、40km/h超から非線形に控えめなブラーを発現
+    const minSpeed = 40.0;
     const isMovingFast = speedKmh > minSpeed;
     if (!isMovingFast) {
       this.material.uniforms.uStrength.value = 0.0;
       return;
     }
 
-    const normalizedSpeed = Math.min((speedKmh - minSpeed) / 120.0, 1.0);
-    // ブラー強度: 最大 0.04
-    this.material.uniforms.uStrength.value = normalizedSpeed * 0.04;
+    const normalizedSpeed = Math.min((speedKmh - minSpeed) / 140.0, 1.0);
+    const easedSpeed = Math.pow(normalizedSpeed, 1.4);
+    // 視認性を損なわない控えめなブラー強度: 最大 0.014（従来 0.04 から約65%削減）
+    this.material.uniforms.uStrength.value = easedSpeed * 0.014;
   }
 
   public render(
