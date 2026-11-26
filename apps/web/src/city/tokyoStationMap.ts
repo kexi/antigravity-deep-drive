@@ -19,6 +19,7 @@ import type {
 import { computeRoadCrossSection } from "../roads/roadCrossSection";
 import {
   buildRectanglePolygon,
+  isPointInPolygon2D,
   resolveJunctionTopology,
   type JunctionConnectionArc,
   type JunctionTopology,
@@ -32,6 +33,12 @@ import {
   resolveSignalIntersectionBinding,
   type TrafficSignalController,
 } from "../roads/signals";
+import type { SidewalkNetwork, SidewalkSystem } from "../roads/sidewalks";
+import { RoadLightingSystem } from "../roads/lighting";
+import { BarrierSystem } from "../roads/barriers";
+import { RoadUtilitySystem } from "../roads/utilities";
+import { StreetFurnitureSystem } from "../roads/furniture";
+import { JapaneseRoadInfrastructure } from "../roads/infrastructure";
 import { logger } from "../core/logger";
 import { PuddleMaterial, type PuddleEnvironmentSyncParams } from "../shaders/puddleShader";
 import {
@@ -124,8 +131,14 @@ export class TokyoStationMap {
   public plateauTileMeshes: THREE.Mesh[] = [];
   public glbTreeTemplate: THREE.Group | null = null;
   public readonly signSystem: RoadSignSystem;
+  public readonly lightingSystem: RoadLightingSystem;
+  public readonly barrierSystem: BarrierSystem;
+  public readonly utilitySystem: RoadUtilitySystem;
+  public readonly furnitureSystem: StreetFurnitureSystem;
+  public readonly roadInfrastructure: JapaneseRoadInfrastructure;
 
   private roadBuilder: JapaneseRoadBuilder;
+  private builtSignInstances: CreatedRoadSignInstance[] = [];
   private laneGraph: LaneGraph = {
     version: "1.0.0",
     edges: [],
@@ -231,6 +244,23 @@ export class TokyoStationMap {
     scene.add(this.group);
     this.roadBuilder = new JapaneseRoadBuilder();
     this.signSystem = new RoadSignSystem();
+    this.lightingSystem = new RoadLightingSystem();
+    this.barrierSystem = new BarrierSystem();
+    this.utilitySystem = new RoadUtilitySystem();
+    this.furnitureSystem = new StreetFurnitureSystem();
+    this.roadInfrastructure = new JapaneseRoadInfrastructure({
+      getLaneGraph: () => this.laneGraph,
+      sidewalks: this.roadBuilder.getSidewalkSystem(),
+      signals: this.roadBuilder.getSignalController(),
+      getSignInstances: () => [
+        ...this.builtSignInstances,
+        ...Array.from(this.customSignInstances.values()),
+      ],
+      lighting: this.lightingSystem,
+      barriers: this.barrierSystem,
+      utilities: this.utilitySystem,
+      furniture: this.furnitureSystem,
+    });
 
     for (const def of WORLD_CHUNK_DEFINITIONS) {
       this.chunkObjectsMap.set(def.id, []);
@@ -539,7 +569,11 @@ export class TokyoStationMap {
         }
       }
       this.roadMaterials.push(...res.materials);
-      this.puddleMaterials.push(...res.puddleMaterials);
+      for (const pm of res.puddleMaterials) {
+        if (!this.puddleMaterials.includes(pm)) {
+          this.puddleMaterials.push(pm);
+        }
+      }
       this.colliders.push(...res.colliders);
       this.obstacleColliderHandles.push(...res.obstacleColliderHandles);
       collectedLaneEdges.push(...res.laneGraphEdges);
@@ -1875,7 +1909,11 @@ export class TokyoStationMap {
       }
       this.group.add(polyRes.group);
       this.roadMaterials.push(...polyRes.materials);
-      this.puddleMaterials.push(...polyRes.puddleMaterials);
+      for (const pm of polyRes.puddleMaterials) {
+        if (!this.puddleMaterials.includes(pm)) {
+          this.puddleMaterials.push(pm);
+        }
+      }
       this.colliders.push(...polyRes.colliders);
       this.obstacleColliderHandles.push(...polyRes.obstacleColliderHandles);
       collectedLaneEdges.push(...polyRes.laneGraphEdges);
@@ -2031,7 +2069,7 @@ export class TokyoStationMap {
           crosswalkW: spec.crosswalkW,
           arms: armCount > 0 ? arms : undefined,
           hasCornerSidewalks: shouldBuildCorners,
-          sidewalkPavingStyle: "granite_slab",
+          sidewalkPavingStyle: isShibuyaIntersection ? "interlocking_brick" : "granite_slab",
           elevationSampler: isShibuyaIntersection ? sampleShibuyaTerrainY : undefined,
           skipRoadCollider: isShibuyaIntersection,
         },
@@ -2041,7 +2079,11 @@ export class TokyoStationMap {
         intersectionPadMat,
       );
       this.group.add(interRes.group);
-      this.puddleMaterials.push(...interRes.puddleMaterials);
+      for (const pm of interRes.puddleMaterials) {
+        if (!this.puddleMaterials.includes(pm)) {
+          this.puddleMaterials.push(pm);
+        }
+      }
       this.colliders.push(...interRes.colliders);
       this.obstacleColliderHandles.push(...interRes.obstacleColliderHandles);
       collectedJunctionTopologies.push(interRes.junctionTopology);
@@ -2192,6 +2234,42 @@ export class TokyoStationMap {
       totalManagedSignals: signalController.getAllSignalHandles().length,
       managedIntersections: signalController.getIntersectionSummaries().length,
     });
+
+    const swSummary = this.roadBuilder.getSidewalkSystem().getNetworkSummary();
+    logger.info("roads", "sidewalk_network.built", "統一歩道ネットワークを構築", {
+      totalSegments: swSummary.totalSegments,
+      straightSegments: swSummary.straightSegments,
+      curvedSegments: swSummary.curvedSegments,
+      intersectionCorners: swSummary.intersectionCorners,
+      intersectionEdges: swSummary.intersectionEdges,
+      totalAreaSqMeters: swSummary.totalAreaSqMeters,
+      totalRampCount: swSummary.totalRampCount,
+      totalTactilePadCount: swSummary.totalTactilePadCount,
+      totalCatchBasinCount: swSummary.totalCatchBasinCount,
+      materialStats: this.roadBuilder.getSidewalkSystem().materials.getCachedMaterialStats(),
+    });
+  }
+
+  /**
+   * 都市全体の統一歩道作成システム（SidewalkSystem）を取得する
+   */
+  public getSidewalkSystem(): SidewalkSystem {
+    return this.roadBuilder.getSidewalkSystem();
+  }
+
+  /**
+   * 統一歩道システムが構築した構造化歩道ネットワーク（SidewalkNetwork / SSOT）を取得する
+   */
+  public getSidewalkNetwork(): SidewalkNetwork {
+    return this.roadBuilder.getSidewalkSystem().getSidewalkNetwork();
+  }
+
+  /**
+   * 日本の道路全8系統（車線・歩道・信号・標識・照明・防護安全・路面インフラ・沿道ファニチャー）を
+   * 統括するマスターインフラファサードを取得する
+   */
+  public getRoadInfrastructure(): JapaneseRoadInfrastructure {
+    return this.roadInfrastructure;
   }
 
   /**
@@ -9351,7 +9429,13 @@ export class TokyoStationMap {
             requireSidewalk: isSidewalkRequiredCorridor,
           });
           if (isSafe) {
-            this.createStreetLamp(px, pz, world, rapier, streetPropsBody);
+            const toRoadX = pt.x - px;
+            const toRoadZ = pt.z - pz;
+            const lampYaw = Math.atan2(-toRoadZ, toRoadX);
+            this.createStreetLamp(px, pz, world, rapier, streetPropsBody, {
+              rotationY: lampYaw,
+              roadName: corridor.id,
+            });
             placedShibuyaProps.push({ x: px, z: pz });
           }
         }
@@ -9363,14 +9447,20 @@ export class TokyoStationMap {
       this.glbLoadPromises.push(this.loadBlenderStreetTreeGlb());
     }
 
-    // 街灯（夜間に点灯：丸の内・行幸通り・仲通り・日比谷通り・永代通り・馬場先門通りの黒鋳鉄製2灯式クラシカル街灯）
+    // 街灯（丸の内・行幸通り・仲通りは黒鋳鉄2灯ランタン、日比谷通り・内堀通り幹線はLEDコブラ照明灯）
     for (let z = 18; z < 245; z += 35) {
       const isNearNakadori = Math.abs(z - 165) < 15;
       if (isNearNakadori) {
         continue;
       }
-      this.createStreetLamp(-12.8, z, world, rapier, streetPropsBody);
-      this.createStreetLamp(12.8, z, world, rapier, streetPropsBody);
+      this.createStreetLamp(-12.8, z, world, rapier, streetPropsBody, {
+        rotationY: 0,
+        roadName: "行幸通り",
+      });
+      this.createStreetLamp(12.8, z, world, rapier, streetPropsBody, {
+        rotationY: Math.PI,
+        roadName: "行幸通り",
+      });
     }
     // 街灯（丸の内都心ブロック x=-240 〜 x=+240: 仲通り・日比谷通り・皇居外苑広場）
     for (let x = -240; x <= 240; x += 65) {
@@ -9383,15 +9473,27 @@ export class TokyoStationMap {
       if (isNearIntersection) {
         continue;
       }
-      this.createStreetLamp(x, 165 - 8.8, world, rapier, streetPropsBody);
-      this.createStreetLamp(x, 250 - 14.2, world, rapier, streetPropsBody);
+      this.createStreetLamp(x, 165 - 8.8, world, rapier, streetPropsBody, {
+        rotationY: -Math.PI / 2,
+        roadName: "丸の内仲通り",
+      });
+      this.createStreetLamp(x, 250 - 14.2, world, rapier, streetPropsBody, {
+        rotationY: -Math.PI / 2,
+        roadName: "日比谷通り",
+      });
       if (Math.abs(x) < 160 && !isNearCurvedRoadway(x, 365 + 11.2)) {
-        this.createStreetLamp(x, 365 + 11.2, world, rapier, streetPropsBody);
+        this.createStreetLamp(x, 365 + 11.2, world, rapier, streetPropsBody, {
+          rotationY: Math.PI / 2,
+          roadName: "内堀通り",
+        });
       }
     }
 
-    // 行幸通り石造ボラード（車止め御影石柱：歩道車道境界縁石 |x|=8.75m のすぐ内側 x = ±9.15m に実寸配置）
+    // 行幸通り石造ボラード（BarrierSystem へ統合）
     this.buildGraniteBollards(world, rapier, streetPropsBody);
+
+    // 統一道路附属物システム群（カーブミラー・反射ボラード・地上変圧器・消火栓・ハンドホール・バス停・郵便ポスト・案内板・パーキングメーター・ベンチ）
+    this.buildUnifiedJapaneseRoadAccessories(world, rapier, streetPropsBody);
   }
 
   private buildGraniteBollards(
@@ -9399,61 +9501,393 @@ export class TokyoStationMap {
     rapier: typeof RAPIER,
     streetPropsBody: RAPIER.RigidBody,
   ): void {
-    const graniteMat = new THREE.MeshStandardMaterial({
-      color: 0xcbd5e1, // 白御影石（稲田石）
-      roughness: 0.72,
-      metalness: 0.08,
-    });
-    this.applyArchitecture3DTexture(graniteMat, "white_granite");
-
-    const bronzeRingMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b, // ブロンズ黒装飾リング
-      roughness: 0.4,
-      metalness: 0.85,
-    });
-    this.applyArchitecture3DTexture(bronzeRingMat, "anodized_metal");
-
-    // 実寸ボラード（直径 28〜30cm = 半径 0.14〜0.15m、地上高約 0.85m）
-    const postGeo = new THREE.CylinderGeometry(0.14, 0.15, 0.74, 12);
-    const capGeo = new THREE.SphereGeometry(0.14, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2);
-    const bandGeo = new THREE.CylinderGeometry(0.146, 0.146, 0.045, 12);
-
     for (let z = 18; z <= 232; z += 12) {
       const isNearNakadori = Math.abs(z - 165) < 15;
       if (isNearNakadori) {
         continue;
       }
       for (const x of [-9.15, 9.15]) {
-        const bollard = new THREE.Group();
-        bollard.position.set(x, 0, z);
-        bollard.userData.maxLodDrawDistance = 115;
+        const res = this.barrierSystem.placeBarrier({
+          type: "granite_bollard",
+          x,
+          y: 0,
+          z,
+          rotationY: 0,
+          label: "行幸通り御影石ボラード",
+        });
+        this.group.add(res.group);
 
-        const post = new THREE.Mesh(postGeo, graniteMat);
-        post.position.y = 0.37;
-        post.castShadow = false;
-        post.receiveShadow = true;
-        bollard.add(post);
-
-        const cap = new THREE.Mesh(capGeo, graniteMat);
-        cap.position.y = 0.74;
-        cap.userData.lodDetailTier = "high";
-        bollard.add(cap);
-
-        const band = new THREE.Mesh(bandGeo, bronzeRingMat);
-        band.position.y = 0.62;
-        band.userData.lodDetailTier = "high";
-        bollard.add(band);
-
-        this.group.add(bollard);
-
-        // 御影石ボラード物理コライダー（半径 0.16m, 高さ 0.90m）
-        const bollardColDesc = this.createCylinderDesc(rapier, 0.45, 0.16)
-          .setTranslation(x, 0.45, z)
+        const bollardColDesc = this.createCylinderDesc(
+          rapier,
+          res.colliderHeight * 0.5,
+          res.colliderRadius,
+        )
+          .setTranslation(x, res.colliderHeight * 0.5, z)
           .setFriction(0.45)
           .setRestitution(0.15);
         this.registerCollider(world.createCollider(bollardColDesc, streetPropsBody), true);
       }
     }
+  }
+
+  /**
+   * SidewalkNetwork（SSOT）と LaneGraph・JunctionTopology に連動し、
+   * 日本の都市道路に実在する安全施設・路面/地下インフラ・沿道公共交通/ストリートファニチャーを
+   * 歩道施設帯上（車道非侵入・既存支柱離隔・地形密着）へ体系配置する。
+   */
+  private buildUnifiedJapaneseRoadAccessories(
+    world: RAPIER.World,
+    rapier: typeof RAPIER,
+    streetPropsBody: RAPIER.RigidBody,
+  ): void {
+    const swSys = this.roadBuilder.getSidewalkSystem();
+    const swNetwork = swSys.getSidewalkNetwork();
+    const occupiedPts: Array<{ x: number; z: number }> = [];
+
+    for (const sig of this.roadBuilder.getSignalController().getAllSignalHandles()) {
+      occupiedPts.push({ x: sig.group.position.x, z: sig.group.position.z });
+    }
+    for (const lamp of this.lightingSystem.getAllPlacements()) {
+      occupiedPts.push({ x: lamp.x, z: lamp.z });
+    }
+    for (const bar of this.barrierSystem.getAllPlacements()) {
+      occupiedPts.push({ x: bar.x, z: bar.z });
+    }
+    for (const tree of this.treeSlots) {
+      occupiedPts.push({ x: tree.slotGroup.position.x, z: tree.slotGroup.position.z });
+    }
+
+    const isSafeAccessorySidewalkSpot = (
+      px: number,
+      pz: number,
+      minClearance = 3.2,
+      allowIntersectionCorner = false,
+    ): boolean => {
+      if (!swSys.isPointOnSidewalk(px, pz)) {
+        return false;
+      }
+      // JR 山手線ガード下 2 箇所を除外
+      const isInsideJrUnderpass =
+        (px >= -912 && px <= -878 && pz >= 242 && pz <= 278) ||
+        (px >= -872 && px <= -838 && pz >= 445 && pz <= 490);
+      if (isInsideJrUnderpass) {
+        return false;
+      }
+      // 交差点ポリゴン内部を除外（隅切り歩道専用の安全配置時は除外せず車線離隔＋歩道ポリゴンで検証）
+      if (!allowIntersectionCorner) {
+        for (const j of this.laneGraph.junctions) {
+          if (
+            Math.abs(px - j.x) <= j.widthX * 0.6 &&
+            Math.abs(pz - j.z) <= j.depthZ * 0.6 &&
+            isPointInPolygon2D(px, pz, j.boundaryPolygon)
+          ) {
+            return false;
+          }
+        }
+      }
+      // 全車線中心線からの最小離隔チェック（車道侵入ゼロ保証）
+      for (const edge of this.laneGraph.edges) {
+        const samples = edge.samples;
+        for (let i = 0; i < samples.length; i += 2) {
+          const s = samples[i];
+          const dx = px - s.x;
+          const dz = pz - s.z;
+          const minDist = s.width * 0.5 + 0.55;
+          if (dx * dx + dz * dz < minDist * minDist) {
+            return false;
+          }
+        }
+      }
+      // 渋谷 PLATEAU 建築物との離隔チェック
+      if (px < -395) {
+        for (const b of SHIBUYA_PLATEAU_BUILDINGS) {
+          const dx = Math.max(0, Math.abs(px - b.localX) - b.width * 0.5);
+          const dz = Math.max(0, Math.abs(pz - b.localZ) - b.depth * 0.5);
+          if (Math.hypot(dx, dz) < 1.35) {
+            return false;
+          }
+        }
+      }
+      // 既存プロップ（信号・街灯・街路樹・ボラード・配置済み附属物）との離隔
+      const minSq = minClearance * minClearance;
+      for (const prev of occupiedPts) {
+        const dx = px - prev.x;
+        const dz = pz - prev.z;
+        if (dx * dx + dz * dz < minSq) {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    const attachObstacleCollider = (
+      x: number,
+      surfaceY: number,
+      z: number,
+      colSpec: {
+        kind: "cuboid" | "cylinder";
+        halfX: number;
+        halfY: number;
+        halfZ: number;
+        radius: number;
+      },
+    ): void => {
+      const desc =
+        colSpec.kind === "cuboid"
+          ? rapier.ColliderDesc.cuboid(colSpec.halfX, colSpec.halfY, colSpec.halfZ)
+          : this.createCylinderDesc(rapier, colSpec.halfY, colSpec.radius);
+      desc
+        .setTranslation(x, surfaceY + colSpec.halfY, z)
+        .setFriction(0.45)
+        .setRestitution(0.15);
+      this.registerCollider(world.createCollider(desc, streetPropsBody), true);
+    };
+
+    // 1. 歩道ネットワーク（straight / curved）の施設帯に沿ってバス停・郵便ポスト・案内板・地上変圧器・消火栓・パーキングメーター・ベンチ・ハンドホールを配置
+    let slotIndex = 0;
+    for (const seg of swNetwork.segments) {
+      const isLinearWalk = seg.kind === "straight" || seg.kind === "curved";
+      if (
+        !isLinearWalk ||
+        seg.widthMeters < 2.3 ||
+        seg.lengthMeters < 22 ||
+        seg.walkableSpine.length < 3
+      ) {
+        continue;
+      }
+      const isShibuya = seg.presetId === "shibuya_brick";
+      const isMarunouchiOrGinza =
+        seg.presetId === "marunouchi_granite" || seg.presetId === "ginza_promenade";
+
+      // 中間スパイン点（始端・終端の交差点付近を避け中央寄り）から候補点を最大 2 点抽出
+      const midIndices =
+        seg.lengthMeters >= 65
+          ? [
+              Math.floor(seg.walkableSpine.length * 0.35),
+              Math.floor(seg.walkableSpine.length * 0.68),
+            ]
+          : [Math.floor(seg.walkableSpine.length * 0.5)];
+
+      for (const idx of midIndices) {
+        const sp = seg.walkableSpine[idx];
+        if (!sp) {
+          continue;
+        }
+        const px = sp.x;
+        const pz = sp.z;
+        if (!isSafeAccessorySidewalkSpot(px, pz, 4.2)) {
+          continue;
+        }
+        const groundY = px < -395 ? sampleShibuyaTerrainY(px, pz) : 0;
+        const surfaceY = groundY + seg.curbHeightMeters;
+        // 歩道方向（sp.tx, sp.tz）から車道側へ正対するヨー角
+        const sideSign = seg.side === "left" ? 1 : -1;
+        const toRoadX = -sideSign * sp.tz;
+        const toRoadZ = sideSign * sp.tx;
+        const faceRoadYaw = Math.atan2(toRoadX, toRoadZ);
+        const alongWalkYaw = Math.atan2(sp.tx, sp.tz);
+
+        const mod = slotIndex % 9;
+        slotIndex += 1;
+
+        if (mod === 0) {
+          // 都営バス停（丸の内・銀座・皇居）または東急バス停（渋谷）
+          const res = this.furnitureSystem.placeFurniture({
+            type: isShibuya ? "bus_stop_tokyu" : "bus_stop_toei",
+            x: px,
+            y: surfaceY,
+            z: pz,
+            rotationY: alongWalkYaw,
+            titleJa: seg.roadName,
+          });
+          this.group.add(res.group);
+          attachObstacleCollider(px, surfaceY, pz, res.collider);
+          occupiedPts.push({ x: px, z: pz });
+        } else if (mod === 1) {
+          // 無電柱化地上変圧器（TEPCO パッドマウント地上機器）
+          const res = this.utilitySystem.placeUtility({
+            type: "pad_transformer",
+            x: px,
+            y: surfaceY,
+            z: pz,
+            rotationY: faceRoadYaw,
+            operator: "TEPCO",
+          });
+          this.group.add(res.group);
+          if (res.collider) {
+            attachObstacleCollider(px, surfaceY, pz, res.collider);
+          }
+          occupiedPts.push({ x: px, z: pz });
+        } else if (mod === 2) {
+          // 日本の赤い郵便ポスト（〒）
+          const res = this.furnitureSystem.placeFurniture({
+            type: "japan_postbox",
+            x: px,
+            y: surfaceY,
+            z: pz,
+            rotationY: faceRoadYaw,
+          });
+          this.group.add(res.group);
+          attachObstacleCollider(px, surfaceY, pz, res.collider);
+          occupiedPts.push({ x: px, z: pz });
+        } else if (mod === 3) {
+          // 赤ポール消火栓標識
+          const res = this.utilitySystem.placeUtility({
+            type: "fire_hydrant_sign",
+            x: px,
+            y: surfaceY,
+            z: pz,
+            rotationY: alongWalkYaw,
+            operator: "東京消防庁",
+          });
+          this.group.add(res.group);
+          if (res.collider) {
+            attachObstacleCollider(px, surfaceY, pz, res.collider);
+          }
+          occupiedPts.push({ x: px, z: pz });
+        } else if (mod === 4) {
+          // 街区・地下鉄出口案内サイン
+          const res = this.furnitureSystem.placeFurniture({
+            type: "district_info_kiosk",
+            x: px,
+            y: surfaceY,
+            z: pz,
+            rotationY: faceRoadYaw,
+            titleJa: seg.roadName,
+          });
+          this.group.add(res.group);
+          attachObstacleCollider(px, surfaceY, pz, res.collider);
+          occupiedPts.push({ x: px, z: pz });
+        } else if (mod === 5 && isMarunouchiOrGinza) {
+          // 丸の内・銀座の時間制限駐車区間パーキングメーター
+          const res = this.furnitureSystem.placeFurniture({
+            type: "parking_meter",
+            x: px,
+            y: surfaceY,
+            z: pz,
+            rotationY: faceRoadYaw,
+          });
+          this.group.add(res.group);
+          attachObstacleCollider(px, surfaceY, pz, res.collider);
+          occupiedPts.push({ x: px, z: pz });
+        } else if (mod === 6 && seg.widthMeters >= 3.4) {
+          // 幅広歩道の都市ベンチ
+          const res = this.furnitureSystem.placeFurniture({
+            type: "sidewalk_bench",
+            x: px,
+            y: surfaceY,
+            z: pz,
+            rotationY: faceRoadYaw,
+          });
+          this.group.add(res.group);
+          attachObstacleCollider(px, surfaceY, pz, res.collider);
+          occupiedPts.push({ x: px, z: pz });
+        } else if (mod === 7) {
+          // 通信・電力ハンドホール（歩道面とフラット）
+          const res = this.utilitySystem.placeUtility({
+            type: "telecom_handhole",
+            x: px,
+            y: surfaceY,
+            z: pz,
+            rotationY: alongWalkYaw,
+            operator: "NTT/TEPCO",
+          });
+          this.group.add(res.group);
+          occupiedPts.push({ x: px, z: pz });
+        } else {
+          // 反射帯付き車止めボラード（渋谷・都心歩道縁）
+          const res = this.barrierSystem.placeBarrier({
+            type: "reflective_bollard",
+            x: px,
+            y: surfaceY,
+            z: pz,
+            rotationY: faceRoadYaw,
+          });
+          this.group.add(res.group);
+          attachObstacleCollider(px, surfaceY, pz, {
+            kind: "cylinder",
+            halfX: res.colliderRadius,
+            halfY: res.colliderHeight * 0.5,
+            halfZ: res.colliderRadius,
+            radius: res.colliderRadius,
+          });
+          occupiedPts.push({ x: px, z: pz });
+        }
+      }
+    }
+
+    // 2. 交差点隅切りコーナー歩道（外角側オフセット位置）へ道路反射鏡（カーブミラー）および東京都桜マンホールを体系配置
+    let mirrorCount = 0;
+    let sakuraManholeCount = 0;
+    for (const corner of swNetwork.segments) {
+      if (corner.kind !== "intersection_corner" || corner.polygonXZ.length < 4) {
+        continue;
+      }
+      // 外角頂点 polygonXZ[0] から円弧中央頂点方向へ 0.95m 控えた位置（隅切り歩道スラブ中央部）を算出
+      const apex = corner.polygonXZ[0];
+      const arcMid = corner.polygonXZ[Math.floor(corner.polygonXZ.length * 0.5)];
+      const dx = arcMid.x - apex.x;
+      const dz = arcMid.z - apex.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 1.1) {
+        continue;
+      }
+      const inset = Math.min(1.05, dist * 0.45);
+      const cx = apex.x + (dx / dist) * inset;
+      const cz = apex.z + (dz / dist) * inset;
+      if (!isPointInPolygon2D(cx, cz, corner.polygonXZ)) {
+        continue;
+      }
+      if (!isSafeAccessorySidewalkSpot(cx, cz, 2.6, true)) {
+        continue;
+      }
+      const groundY = cx < -395 ? sampleShibuyaTerrainY(cx, cz) : 0;
+      const surfaceY = groundY + corner.curbHeightMeters;
+
+      if (mirrorCount < 20 && corner.side === "corner_NE") {
+        const res = this.barrierSystem.placeBarrier({
+          type: "convex_curve_mirror",
+          x: cx,
+          y: surfaceY,
+          z: cz,
+          rotationY: Math.atan2(dx, dz),
+          mirrorDual: mirrorCount % 3 === 0,
+          label: `${corner.roadName} カーブミラー`,
+        });
+        this.group.add(res.group);
+        attachObstacleCollider(cx, surfaceY, cz, {
+          kind: "cylinder",
+          halfX: res.colliderRadius,
+          halfY: res.colliderHeight * 0.5,
+          halfZ: res.colliderRadius,
+          radius: res.colliderRadius,
+        });
+        occupiedPts.push({ x: cx, z: cz });
+        mirrorCount += 1;
+      } else if (sakuraManholeCount < 24 && corner.side === "corner_SW") {
+        const res = this.utilitySystem.placeUtility({
+          type: "tokyo_sewer_manhole",
+          x: cx,
+          y: surfaceY,
+          z: cz,
+          rotationY: 0,
+          operator: "東京都下水道局",
+        });
+        this.group.add(res.group);
+        occupiedPts.push({ x: cx, z: cz });
+        sakuraManholeCount += 1;
+      }
+    }
+
+    const infraSummary = this.roadInfrastructure.getFullSummary();
+    logger.info("roads", "road_infrastructure.built", "日本の道路全8系統インフラを構築", {
+      lighting: infraSummary.subsystems.lighting.totalLamps,
+      barriers: infraSummary.subsystems.barriers.totalBarriers,
+      utilities: infraSummary.subsystems.utilities.totalUtilities,
+      furniture: infraSummary.subsystems.furniture.totalItems,
+      sidewalks: infraSummary.subsystems.sidewalks.totalSegments,
+      signals: infraSummary.subsystems.signals.totalSignals,
+    });
   }
 
   private createGinkgoTree(
@@ -9520,6 +9954,18 @@ export class TokyoStationMap {
 
     slotGroup.add(fallbackGroup);
     this.group.add(slotGroup);
+
+    // 街路樹根元の御影石植樹桝＋鋳鉄ツリーサークルグレーチング（RoadUtilitySystem 経由で共有キャッシュ配置）
+    const treePit = this.utilitySystem.placeUtility({
+      type: "tree_pit_curb",
+      x,
+      y: groundY,
+      z,
+      rotationY: 0,
+      operator: "街路樹植樹桝",
+    });
+    this.group.add(treePit.group);
+
     const chunkId = resolveChunkIdAtPosition(x, z);
     this.treeSlots.push({
       slotGroup,
@@ -9623,65 +10069,29 @@ export class TokyoStationMap {
     world: RAPIER.World,
     rapier: typeof RAPIER,
     streetPropsBody: RAPIER.RigidBody,
+    options?: { rotationY?: number; roadName?: string },
   ): void {
     const groundY = x < -395 ? sampleShibuyaTerrainY(x, z) : 0;
-    const lampGroup = new THREE.Group();
-    lampGroup.position.set(x, groundY, z);
-    lampGroup.userData.maxLodDrawDistance = 220;
+    const lampRes = this.lightingSystem.placeLamp({
+      x,
+      y: groundY,
+      z,
+      rotationY: options?.rotationY ?? 0,
+      roadName: options?.roadName,
+    });
 
     // 街灯ポールの物理コライダー（台座半径 0.22m, 高さ 5.0m）
-    const lampColDesc = this.createCylinderDesc(rapier, 2.5, 0.22)
-      .setTranslation(x, groundY + 2.5, z)
+    const lampColDesc = this.createCylinderDesc(
+      rapier,
+      lampRes.colliderHeight * 0.5,
+      lampRes.colliderRadius,
+    )
+      .setTranslation(x, groundY + lampRes.colliderHeight * 0.5, z)
       .setFriction(0.4)
       .setRestitution(0.15);
     this.registerCollider(world.createCollider(lampColDesc, streetPropsBody), true);
 
-    // 丸の内・行幸通り伝統の黒鋳鉄製フルート装飾ポール＋台座（3D鋳鉄砂型ディンプル質感）
-    const poleMat = new THREE.MeshStandardMaterial({
-      color: 0x18181b,
-      metalness: 0.85,
-      roughness: 0.28,
-    });
-    this.applyArchitecture3DTexture(poleMat, "cast_iron");
-    const baseGeo = new THREE.CylinderGeometry(0.18, 0.26, 0.9, 10);
-    const base = new THREE.Mesh(baseGeo, poleMat);
-    base.position.y = 0.45;
-    base.userData.lodDetailTier = "high";
-    lampGroup.add(base);
-
-    const poleGeo = new THREE.CylinderGeometry(0.075, 0.12, 5.8, 10);
-    const pole = new THREE.Mesh(poleGeo, poleMat);
-    pole.position.y = 3.1;
-    pole.castShadow = false;
-    lampGroup.add(pole);
-
-    // 上部2灯式クラシカルブラケットアーム
-    const armGeo = new THREE.BoxGeometry(1.3, 0.07, 0.07);
-    const arm = new THREE.Mesh(armGeo, poleMat);
-    arm.position.set(0, 5.75, 0);
-    arm.userData.lodDetailTier = "medium";
-    lampGroup.add(arm);
-
-    // 2灯ランタングローブ（温白色ガス灯風）
-    const headGeo = new THREE.SphereGeometry(0.28, 12, 12);
-    const headMat = new THREE.MeshBasicMaterial({ color: 0xffedd5 });
-    const capGeo = new THREE.ConeGeometry(0.32, 0.18, 10);
-    for (const offsetX of [-0.58, 0.58]) {
-      const head = new THREE.Mesh(headGeo, headMat);
-      head.position.set(offsetX, 6.0, 0);
-      lampGroup.add(head);
-
-      const cap = new THREE.Mesh(capGeo, poleMat);
-      cap.position.set(offsetX, 6.28, 0);
-      cap.userData.lodDetailTier = "high";
-      lampGroup.add(cap);
-    }
-
-    // 点光源（Why 街灯の PointLight をシーンツリーに追加せず、代表ダミー1基のみを配列に保持するか:
-    // visible = false にするだけでは Three.js のシーングラフ走査・ライト収集オーバーヘッドが残るため、
-    // ランタングローブの発光表現は MeshBasicMaterial + 路面側のシェーダー反射で担い、
-    // シーンツリーには PointLight を一切追加しない。streetLights 配列を参照するテストやインターフェースとの
-    // 互換性のため、親を持たない代表 PointLight を最大1個のみ配列に保持する）
+    // シーンツリーへ PointLight は一切追加せず、互換用の代表ダミー 1 基のみ配列に保持
     const shouldCreateRepresentativeLight = this.streetLampCounter === 0;
     this.streetLampCounter += 1;
     if (shouldCreateRepresentativeLight) {
@@ -9691,7 +10101,7 @@ export class TokyoStationMap {
       this.streetLights.push(light);
     }
 
-    this.group.add(lampGroup);
+    this.group.add(lampRes.group);
   }
 
   private buildTokyoStreetSigns(world: RAPIER.World, rapier: typeof RAPIER): void {
@@ -9747,6 +10157,7 @@ export class TokyoStationMap {
         enrichedSpec,
         this.signPhysicsContext ?? undefined,
       );
+      this.builtSignInstances.push(instance);
       for (const col of instance.colliders) {
         this.registerCollider(col, true);
       }
@@ -9984,11 +10395,16 @@ export class TokyoStationMap {
       this.waterMaterials[i].uRainWetness.value = wetness;
       this.waterMaterials[i].uTime.value = time;
     }
+
+    if (typeof envParams?.nightFactor === "number") {
+      this.lightingSystem.setNightFactor(envParams.nightFactor);
+    }
   }
 
   public setNightMode(isNight: boolean): void {
     this.isNightActive = isNight;
     this.sharedArchUniforms.uNightModeFactor.value = isNight ? 1.0 : 0.0;
+    this.lightingSystem.setNightFactor(isNight ? 1.0 : 0.0);
     for (let i = 0; i < this.streetLights.length; i++) {
       this.streetLights[i].intensity = isNight ? 22.0 : 0.0;
       this.streetLights[i].visible = false;
@@ -11062,9 +11478,12 @@ export class TokyoStationMap {
             name.startsWith("StraightSidewalk_") ||
             name.startsWith("StraightCurb_") ||
             name.startsWith("StraightLGutter_") ||
+            name.startsWith("StraightCatchBasins_") ||
             name.startsWith("CurvedSidewalk_") ||
             name.startsWith("CurvedCurb_") ||
-            name.startsWith("CurvedLGutter_")
+            name.startsWith("CurvedLGutter_") ||
+            name.startsWith("CurvedCatchBasins_") ||
+            name.startsWith("IntersectionCatchBasin")
           ) {
             obj.visible = road.hasSidewalk;
           } else if (obj.userData?.markingType === "Crosswalk" || name.includes("Crosswalk")) {

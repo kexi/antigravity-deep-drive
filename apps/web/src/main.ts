@@ -2305,6 +2305,26 @@ async function bootstrap() {
     setElapsedSeconds: (sec: number) => trafficSignalController.setElapsedSeconds(sec),
   };
 
+  const sidewalkSystem = cityMap.getSidewalkSystem();
+  (window as unknown as { __DEEP_DRIVE_SIDEWALKS__?: unknown }).__DEEP_DRIVE_SIDEWALKS__ = {
+    getSummary: () => sidewalkSystem.getNetworkSummary(),
+    getNetwork: () => sidewalkSystem.getSidewalkNetwork(),
+    getMaterialStats: () => sidewalkSystem.materials.getCachedMaterialStats(),
+    isPointOnSidewalk: (x: number, z: number) => sidewalkSystem.isPointOnSidewalk(x, z),
+    findNearestSidewalk: (x: number, z: number, maxDist?: number) =>
+      sidewalkSystem.findNearestSidewalk(x, z, maxDist),
+  };
+
+  const roadInfrastructure = cityMap.getRoadInfrastructure();
+  (window as unknown as { __DEEP_DRIVE_ROAD_SYSTEMS__?: unknown }).__DEEP_DRIVE_ROAD_SYSTEMS__ = {
+    getFullSummary: () => roadInfrastructure.getFullSummary(),
+    auditAll: () =>
+      roadInfrastructure.auditAll(scene, {
+        elevationSampler: sampleShibuyaTerrainY,
+        elevationRegionFilter: (x) => x < -395,
+      }),
+  };
+
   // デバッグ・自動検証用に主要コンポーネントを window へ公開
   (window as unknown as { __DEEP_DRIVE_DEV__?: unknown }).__DEEP_DRIVE_DEV__ = {
     carModel,
@@ -2316,6 +2336,8 @@ async function bootstrap() {
     cityMap,
     laneGraph,
     trafficSignalController,
+    sidewalkSystem,
+    roadInfrastructure,
     setDebugLanesVisible,
   };
 

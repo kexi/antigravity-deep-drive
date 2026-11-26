@@ -2,18 +2,13 @@ import * as THREE from "three";
 import type RAPIER from "@dimforge/rapier3d-compat";
 import { JapaneseRoadMaterial } from "./japaneseRoadMaterial";
 import { PuddleMaterial } from "../shaders/puddleShader";
-import { Procedural3DTextureGenerator } from "../textures/procedural3DTexture";
 import { RoadMarkings, computeRoadLaneLayout, type RoadLaneLayout } from "./roadMarkings";
-import { applyRoadProp3DTexture, RoadProps } from "./roadProps";
+import { RoadProps } from "./roadProps";
 import { resolveAdaptiveArmLength, type TrafficSignalController } from "./signals";
+import { SidewalkSystem, applyCurb3DTexture } from "./sidewalks";
 import {
-  buildIntersectionCornerSidewalks,
-  buildLGutterRibbonGeometry,
-  buildProfiledCurbRibbonGeometry,
-  buildProfiledSidewalkRibbonGeometry,
   buildStationsWithRamps,
   buildStraightRoadFrames,
-  computePerSideCorridorIntervals,
   computeRoadCrossSection,
   getSideCrossSection,
   type CrosswalkRampZone,
@@ -60,16 +55,30 @@ export class JapaneseRoadBuilder {
   private puddleMaterials: PuddleMaterial[] = [];
   private markings: RoadMarkings;
   public readonly props: RoadProps;
+  public readonly sidewalks: SidewalkSystem;
   private intersectionAsphaltMaterial: JapaneseRoadMaterial;
 
   constructor() {
     this.markings = new RoadMarkings();
     this.props = new RoadProps();
+    this.sidewalks = new SidewalkSystem();
     this.intersectionAsphaltMaterial = new JapaneseRoadMaterial({
       isIntersection: true,
       isIntersectionPad: true,
     });
     this.roadMaterials.push(this.intersectionAsphaltMaterial);
+  }
+
+  private registerPuddleMaterials(materials: ReadonlyArray<PuddleMaterial>): void {
+    for (const mat of materials) {
+      if (!this.puddleMaterials.includes(mat)) {
+        this.puddleMaterials.push(mat);
+      }
+    }
+  }
+
+  public getSidewalkSystem(): SidewalkSystem {
+    return this.sidewalks;
   }
 
   public getIntersectionAsphaltMaterial(): JapaneseRoadMaterial {
@@ -156,19 +165,6 @@ export class JapaneseRoadBuilder {
 
   public getSignalController(): TrafficSignalController {
     return this.props.signalController;
-  }
-
-  private createLGutterMaterial(): THREE.MeshStandardMaterial {
-    const gutterMat = new THREE.MeshStandardMaterial({
-      color: 0xb2b0a8,
-      roughness: 0.78,
-      metalness: 0.06,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
-    });
-    this.applyCurb3DTexture(gutterMat);
-    return gutterMat;
   }
 
   /**
@@ -328,56 +324,21 @@ export class JapaneseRoadBuilder {
       colliders.push(physicsWorld.createCollider(padColDesc, groundBody));
     }
 
-    const shouldBuildCorners = (config.hasCornerSidewalks ?? true) && Boolean(config.arms);
-    if (shouldBuildCorners) {
-      const curbHeight = config.curbHeight ?? 0.15;
-      const sidewalkMat = new PuddleMaterial({
-        baseColor: 0xa8a6a0,
-        baseRoughness: 0.76,
-        baseMetalness: 0.08,
-        puddleThreshold: 0.46,
-        sidewalkPavingStyle: config.sidewalkPavingStyle ?? "granite_slab",
-      });
-      this.puddleMaterials.push(sidewalkMat);
-      puddleMaterials.push(sidewalkMat);
-
-      const curbMat = new THREE.MeshStandardMaterial({
-        color: 0x989690,
-        roughness: 0.8,
-        metalness: 0.1,
-      });
-      this.applyCurb3DTexture(curbMat);
-      const gutterMat = this.createLGutterMaterial();
-
-      const localDeltaSampler = sampleY
-        ? (lx: number, lz: number) => sampleY(config.x + lx, config.z + lz) - centerTerrainY
-        : undefined;
-      const corners = buildIntersectionCornerSidewalks(
-        config,
-        {
-          sidewalkMaterial: sidewalkMat,
-          curbMaterial: curbMat,
-          gutterMaterial: gutterMat,
-          brailleMaterial: this.markings.getBrailleTileMaterial(),
-        },
-        0,
-        localDeltaSampler,
-      );
-      interGroup.add(corners.group);
-
-      for (const cc of corners.cornerColliders) {
-        const colGroundY = sampleY ? sampleY(config.x + cc.cx, config.z + cc.cz) : 0;
-        const swColDesc = rapier.ColliderDesc.cuboid(cc.halfX, curbHeight * 0.5, cc.halfZ)
-          .setTranslation(
-            config.x + cc.cx,
-            colGroundY + baseY + curbHeight * 0.5 - groundBodyY,
-            config.z + cc.cz,
-          )
-          .setFriction(0.8);
-        const col = physicsWorld.createCollider(swColDesc, groundBody);
-        colliders.push(col);
-      }
-    }
+    const interSidewalkRes = this.sidewalks.buildIntersectionSidewalks({
+      interGroup,
+      config,
+      baseY,
+      centerTerrainY,
+      groundBodyY,
+      sampleY,
+      physicsWorld,
+      rapier,
+      groundBody,
+      colliders,
+      brailleMaterial: this.markings.getBrailleTileMaterial(),
+    });
+    this.registerPuddleMaterials(interSidewalkRes.puddleMaterials);
+    puddleMaterials.push(...interSidewalkRes.puddleMaterials);
 
     return {
       group: interGroup,
@@ -461,21 +422,22 @@ export class JapaneseRoadBuilder {
     const createdRoadCol = world.createCollider(roadCollider, roadBody);
     segmentColliders.push(createdRoadCol);
 
-    // 3. L型側溝・面取り縁石（横断歩道切下げスロープ付き）
-    this.buildCurbs(group, config, cross, rampZones);
-
-    // 4. 歩道（1.5%排水勾配・舗装目地シェーダー・切下げすりつけスロープ・点字警告ブロック）
-    this.buildSidewalks(
+    // 3〜4. 統一歩道システム（L型側溝・面取り切下げ縁石・1.5%排水勾配歩道・バッチ雨水集水桝・斜面密着点字警告ブロック・物理コライダー）
+    const straightSidewalkRes = this.sidewalks.buildStraightRoadSidewalks({
       group,
       config,
       cross,
       rampZones,
       crosswalkZPositions,
+      worldPosition: position,
+      rotationY,
       world,
       rapier,
       roadBody,
       segmentColliders,
-    );
+      brailleMaterial: this.markings.getBrailleTileMaterial(),
+    });
+    this.registerPuddleMaterials(straightSidewalkRes.puddleMaterials);
 
     // 統一車線プロファイル（SSOT）を構築し、路面標示・進行方向別通行区分標識・車線グラフで共有する
     const catalogEntry =
@@ -539,223 +501,6 @@ export class JapaneseRoadBuilder {
     };
   }
 
-  private buildCurbs(
-    group: THREE.Group,
-    config: JapaneseRoadSegmentConfig,
-    cross: RoadCrossSectionSpec,
-    rampZones: ReadonlyArray<CrosswalkRampZone>,
-  ): void {
-    const curbMat = new THREE.MeshStandardMaterial({
-      color: 0x989690,
-      roughness: 0.8,
-      metalness: 0.1,
-    });
-    this.applyCurb3DTexture(curbMat);
-    const gutterMat = this.createLGutterMaterial();
-
-    const stations = buildStationsWithRamps(
-      -config.length * 0.5,
-      config.length * 0.5,
-      8.0,
-      rampZones,
-    );
-    const frames = buildStraightRoadFrames(stations);
-
-    for (const sideSign of [-1, 1] as const) {
-      const sideSpec = getSideCrossSection(cross, sideSign);
-      const hasSidewalk = sideSpec.totalWidth > 0.05;
-      if (!hasSidewalk) {
-        continue;
-      }
-
-      const gutterGeom = buildLGutterRibbonGeometry(frames, sideSign, cross, 0);
-      const gutterMesh = new THREE.Mesh(gutterGeom, gutterMat);
-      gutterMesh.name = `StraightLGutter_${sideSign > 0 ? "L" : "R"}`;
-      gutterMesh.receiveShadow = true;
-      group.add(gutterMesh);
-
-      const curbGeom = buildProfiledCurbRibbonGeometry(frames, sideSign, cross, 0, rampZones);
-      const curbMesh = new THREE.Mesh(curbGeom, curbMat);
-      curbMesh.name = `StraightCurb_${sideSign > 0 ? "L" : "R"}`;
-      curbMesh.userData.isSidewalkSurface = true;
-      curbMesh.castShadow = true;
-      curbMesh.receiveShadow = true;
-      group.add(curbMesh);
-    }
-  }
-
-  /**
-   * 縁石（マウントアップコンクリートブロック）へ 3D ボリュームテクスチャ（sampler3D）を注入する
-   * How: 共有 3D テクスチャ（getSharedRoadMarkingProp3DTexture）を 3D ワールド座標でサンプリングし、
-   * コンクリート骨材粒子、60cm ピッチの目地溝、縦方向の雨だれウェザリング、ラフネス変調、法線マイクロバンプを表現する。
-   * Why not 2D UV テクスチャを使うか:
-   * 長尺の BoxGeometry 縁石に 2D テクスチャを貼ると上面と側面で伸縮率の違いによる UV 引き伸ばしや継ぎ目が発生するため、
-   * 3D ワールド空間座標で連続サンプリングするソリッドテクスチャ方式を採用した。
-   */
-  private applyCurb3DTexture(material: THREE.MeshStandardMaterial): void {
-    const volumeTex = Procedural3DTextureGenerator.getSharedRoadMarkingProp3DTexture(32);
-    material.userData.uRoadPropVolumeTex = volumeTex;
-    material.customProgramCacheKey = () => "japanese-road-curb-3d-v3";
-
-    material.onBeforeCompile = (shader) => {
-      shader.uniforms.uRoadPropVolumeTex = { value: volumeTex };
-
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <common>",
-        `#include <common>
-varying vec3 vCurbWorldPos;
-varying vec3 vCurbLocalPos;
-varying vec2 vCurbUv;`,
-      );
-
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <begin_vertex>",
-        `#include <begin_vertex>
-vCurbLocalPos = position;
-vCurbWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
-vCurbUv = uv;`,
-      );
-
-      shader.fragmentShader = shader.fragmentShader.replace(
-        "#include <common>",
-        `#include <common>
-precision highp sampler3D;
-uniform sampler3D uRoadPropVolumeTex;
-varying vec3 vCurbWorldPos;
-varying vec3 vCurbLocalPos;
-varying vec2 vCurbUv;`,
-      );
-
-      shader.fragmentShader = shader.fragmentShader.replace(
-        "#include <color_fragment>",
-        `#include <color_fragment>
-float curbCamDist = length(cameraPosition - vCurbWorldPos);
-float curbAggregate = 0.5;
-float jointGroove = 0.0;
-float bottomGrime = 0.0;
-vec4 curbVoxFine = vec4(0.5);
-if (curbCamDist < 60.0) {
-  vec4 curbVoxCoarse = texture(uRoadPropVolumeTex, vCurbWorldPos * vec3(1.8, 2.4, 0.9));
-  curbVoxFine = texture(uRoadPropVolumeTex, vCurbWorldPos * 8.5 + vec3(0.19, 0.47, 0.83));
-  curbAggregate = mix(curbVoxCoarse.a, curbVoxFine.r, 0.45);
-  // 60cm 間隔のコンクリート縁石ブロック目地溝（道路方向 UV vCurbUv.y に直交）
-  float curbLongCoord = vCurbUv.y;
-  float jointPhase = abs(fract(curbLongCoord / 0.6 + 0.5) - 0.5);
-  float jointDistFade = 1.0 - smoothstep(32.0, 48.0, curbCamDist);
-  jointGroove = (1.0 - smoothstep(0.0, 0.022, jointPhase)) * jointDistFade;
-  // 縁石下部・側面の縦方向雨だれ＆泥跳ねウェザリング
-  float verticalStreak = texture(uRoadPropVolumeTex, vec3(vCurbWorldPos.x * 3.2, vCurbWorldPos.y * 0.65, vCurbWorldPos.z * 2.6)).a;
-  bottomGrime = smoothstep(0.14, -0.06, vCurbLocalPos.y) * (0.55 + 0.45 * verticalStreak);
-  float curbShade = 0.86 + (curbAggregate - 0.5) * 0.26 - jointGroove * 0.34 - bottomGrime * 0.18;
-  diffuseColor.rgb *= clamp(curbShade, 0.48, 1.15);
-}`,
-      );
-
-      shader.fragmentShader = shader.fragmentShader.replace(
-        "#include <metalnessmap_fragment>",
-        `#include <metalnessmap_fragment>
-if (curbCamDist < 60.0) {
-  roughnessFactor = clamp(roughnessFactor + (0.5 - curbAggregate) * 0.16 + jointGroove * 0.14 + bottomGrime * 0.12, 0.45, 0.98);
-  metalnessFactor = clamp(metalnessFactor * (1.0 - jointGroove * 0.5), 0.02, 0.25);
-}`,
-      );
-
-      shader.fragmentShader = shader.fragmentShader.replace(
-        "#include <normal_fragment_maps>",
-        `#include <normal_fragment_maps>
-if (curbCamDist < 36.0) {
-  // Why not dFdx(vCurbWorldPos) * dFdx(curbHeightSignal) を使うか:
-  // 浅い視線角度（グレージング角）やポリゴンエッジで dFdx(worldPos) が数十mになり、
-  // ビュースペースの normal と逆向きに相殺して normalize(0) -> NaN の白フラッシュを発生させるため、
-  // 3D ボリュームの有界な差分を viewMatrix でビュースペースへ変換して安全に摂動を加える。
-  vec3 curbMicroShift = vec3(
-    (curbVoxFine.r - 0.5) * 0.09,
-    0.0,
-    (curbVoxFine.g - 0.5) * 0.09 - jointGroove * 0.08
-  );
-  vec3 curbViewPerturb = mat3(viewMatrix) * curbMicroShift;
-  vec3 curbCombinedN = normal + clamp(curbViewPerturb, vec3(-0.14), vec3(0.14));
-  normal = curbCombinedN / max(length(curbCombinedN), 0.001);
-}`,
-      );
-    };
-    material.needsUpdate = true;
-  }
-
-  private buildSidewalks(
-    group: THREE.Group,
-    config: JapaneseRoadSegmentConfig,
-    cross: RoadCrossSectionSpec,
-    rampZones: ReadonlyArray<CrosswalkRampZone>,
-    crosswalkZPositions: ReadonlyArray<number>,
-    world: RAPIER.World,
-    rapier: typeof RAPIER,
-    roadBody: RAPIER.RigidBody,
-    segmentColliders: RAPIER.Collider[],
-  ): void {
-    const sidewalkMat = new PuddleMaterial({
-      baseColor: 0xa8a6a0,
-      baseRoughness: 0.76,
-      baseMetalness: 0.08,
-      puddleThreshold: 0.46,
-      sidewalkPavingStyle: config.sidewalkPavingStyle ?? "granite_slab",
-    });
-    this.puddleMaterials.push(sidewalkMat);
-
-    const stations = buildStationsWithRamps(
-      -config.length * 0.5,
-      config.length * 0.5,
-      8.0,
-      rampZones,
-    );
-    const frames = buildStraightRoadFrames(stations);
-
-    for (const sideSign of [-1, 1] as const) {
-      const sideSpec = getSideCrossSection(cross, sideSign);
-      const hasSidewalk = sideSpec.totalWidth > 0.05;
-      if (!hasSidewalk) {
-        continue;
-      }
-
-      const swGeom = buildProfiledSidewalkRibbonGeometry(frames, sideSign, cross, 0, rampZones);
-      const swMesh = new THREE.Mesh(swGeom, sidewalkMat);
-      swMesh.name = `StraightSidewalk_${sideSign > 0 ? "L" : "R"}`;
-      swMesh.userData.isSidewalkSurface = true;
-      swMesh.receiveShadow = true;
-      group.add(swMesh);
-
-      // 視覚歩道幅と 1:1 一致する歩道物理コライダー
-      const colCenterX = sideSign * (cross.halfDriveable + sideSpec.totalWidth * 0.5);
-      const swColDesc = rapier.ColliderDesc.cuboid(
-        sideSpec.totalWidth * 0.5,
-        cross.curbHeight * 0.5,
-        config.length * 0.5,
-      )
-        .setTranslation(colCenterX, cross.curbHeight * 0.5, 0)
-        .setFriction(0.8);
-      segmentColliders.push(world.createCollider(swColDesc, roadBody));
-
-      const hasCrosswalks = crosswalkZPositions.length > 0;
-      if (hasCrosswalks) {
-        const tactileMargin = Math.min(0.42, sideSpec.walkSurfaceWidth * 0.42);
-        const tactileX = sideSign * (sideSpec.curbOuter + tactileMargin);
-        const outerRampRatio =
-          sideSpec.walkSurfaceWidth > 0.01
-            ? Math.min(1, (tactileMargin + 0.3) / sideSpec.walkSurfaceWidth)
-            : 0;
-        const tactileBaseY = 0.02 + (sideSpec.backEdgeHeight - 0.02) * outerRampRatio + 0.002;
-        const braille = this.markings.createBrailleTiles(
-          config.length,
-          tactileX,
-          tactileBaseY,
-          crosswalkZPositions,
-        );
-        braille.userData.lodDetailTier = "high";
-        group.add(braille);
-      }
-    }
-  }
-
   private buildRaisedMedian(
     group: THREE.Group,
     config: JapaneseRoadSegmentConfig,
@@ -771,19 +516,14 @@ if (curbCamDist < 36.0) {
     const halfMed = cross.halfMedian;
     const curbBorder = Math.min(0.18, halfMed * 0.35);
 
-    const curbMat = new THREE.MeshStandardMaterial({
-      color: 0x989690,
-      roughness: 0.8,
-      metalness: 0.1,
-    });
-    this.applyCurb3DTexture(curbMat);
+    const curbMat = this.sidewalks.materials.getCurbMaterial();
 
     const medianTopMat = new THREE.MeshStandardMaterial({
       color: 0xa4a29c,
       roughness: 0.72,
       metalness: 0.06,
     });
-    this.applyCurb3DTexture(medianTopMat);
+    applyCurb3DTexture(medianTopMat);
 
     const whiteEdgeMat = this.markings.getWhitePaintMaterial();
     const spans = this.markings.computeIncludedZSpans(config.length, excludeZRanges);
@@ -1891,13 +1631,8 @@ if (curbCamDist < 36.0) {
     const whiteLineMat = this.markings.getWhitePaintMaterial();
     const yellowPaintMat = this.markings.getYellowPaintMaterial();
 
-    // 中央分離帯・縁石・歩道共通コンクリートマテリアル（ニュートラルコンクリートグレー）
-    const curbMat = new THREE.MeshStandardMaterial({
-      color: 0x989690,
-      roughness: 0.72,
-      metalness: 0.08,
-    });
-    this.applyCurb3DTexture(curbMat);
+    // 中央分離帯・縁石共通コンクリートマテリアル（SidewalkMaterialLibrary から共有）
+    const curbMat = this.sidewalks.materials.getCurbMaterial();
 
     const buildArcRibbonGeometry = (
       offsetLeft: number,
@@ -2352,7 +2087,7 @@ if (curbCamDist < 36.0) {
         roughness: 0.72,
         metalness: 0.06,
       });
-      this.applyCurb3DTexture(medianTopMat);
+      applyCurb3DTexture(medianTopMat);
 
       for (let ivIdx = 0; ivIdx < medianIntervals.length; ivIdx++) {
         const iv = medianIntervals[ivIdx];
@@ -2566,289 +2301,32 @@ if (curbCamDist < 36.0) {
       }
     }
 
-    // 4. 片側別の高精度歩道・面取り縁石・L型側溝・切下げスロープ・点字警告ブロック
-    const hasLeftSidewalk = cross.left.totalWidth > 0.05;
-    const hasRightSidewalk = cross.right.totalWidth > 0.05;
-    const hasSidewalks = hasLeftSidewalk || hasRightSidewalk;
-
-    const leftSidewalkIntervals = hasLeftSidewalk
-      ? computePerSideCorridorIntervals({
-          frames,
-          totalSplineLength,
-          sideSign: 1,
-          innerOffset: halfDriveable,
-          outerOffset: cross.left.walkOuter,
-          exclusionCorridors: config.sidewalkExclusionCorridors,
-          exclusionBoxes: config.sidewalkExclusionBoxes,
-          exclusionZones: config.sidewalkExclusionZones,
-          fallbackStartTrim: startMarkingTrim,
-          fallbackEndTrim: endMarkingTrim,
-          minSpanLength: 3.5,
-        })
-      : [];
-
-    const rightSidewalkIntervals = hasRightSidewalk
-      ? computePerSideCorridorIntervals({
-          frames,
-          totalSplineLength,
-          sideSign: -1,
-          innerOffset: halfDriveable,
-          outerOffset: cross.right.walkOuter,
-          exclusionCorridors: config.sidewalkExclusionCorridors,
-          exclusionBoxes: config.sidewalkExclusionBoxes,
-          exclusionZones: config.sidewalkExclusionZones,
-          fallbackStartTrim: startMarkingTrim,
-          fallbackEndTrim: endMarkingTrim,
-          minSpanLength: 3.5,
-        })
-      : [];
-
-    const rampZones: CrosswalkRampZone[] = curvedCrosswalkArcs.map((c) => ({
-      center: c,
-      halfWidth: 2.2,
-      transitionLength: 1.2,
-    }));
-
-    if (hasSidewalks) {
-      const sidewalkMat = new PuddleMaterial({
-        baseColor: 0xa8a6a0,
-        baseRoughness: 0.76,
-        baseMetalness: 0.08,
-        puddleThreshold: 0.46,
-        sidewalkPavingStyle: config.sidewalkPavingStyle ?? "interlocking_brick",
-      });
-      this.puddleMaterials.push(sidewalkMat);
-      segmentPuddleMaterials.push(sidewalkMat);
-
-      const gutterMat = this.createLGutterMaterial();
-      const brailleMat = this.markings.getBrailleTileMaterial();
-
-      const sideConfigs: ReadonlyArray<{
-        sideSign: -1 | 1;
-        intervals: ReadonlyArray<{ start: number; end: number }>;
-      }> = [
-        { sideSign: -1, intervals: rightSidewalkIntervals },
-        { sideSign: 1, intervals: leftSidewalkIntervals },
-      ];
-
-      for (const sc of sideConfigs) {
-        const sideSpec = getSideCrossSection(cross, sc.sideSign);
-        const sideTag = sc.sideSign > 0 ? "L" : "R";
-
-        for (let ivIdx = 0; ivIdx < sc.intervals.length; ivIdx++) {
-          const iv = sc.intervals[ivIdx];
-          const stations = buildStationsWithRamps(iv.start, iv.end, 4.5, rampZones);
-          const ivFrames = stations.map((arc) => getInterpolatedFrame(arc));
-          if (ivFrames.length < 2) {
-            continue;
-          }
-
-          // L型側溝コンクリート帯
-          const gutterGeom = buildLGutterRibbonGeometry(
-            ivFrames,
-            sc.sideSign,
-            cross,
-            baseY,
-            sampleY,
-          );
-          const gutterMesh = new THREE.Mesh(gutterGeom, gutterMat);
-          gutterMesh.name = `CurvedLGutter_${sideTag}_${ivIdx}`;
-          gutterMesh.receiveShadow = true;
-          group.add(gutterMesh);
-
-          // 面取り＆切下げスロープ付き 3D 縁石（路面 baseY に密着）
-          const curbGeom = buildProfiledCurbRibbonGeometry(
-            ivFrames,
-            sc.sideSign,
-            cross,
-            baseY,
-            rampZones,
-            sampleY,
-          );
-          const curbMesh = new THREE.Mesh(curbGeom, curbMat);
-          curbMesh.name = `CurvedCurb_${sideTag}_${ivIdx}`;
-          curbMesh.userData.isSidewalkSurface = true;
-          curbMesh.castShadow = true;
-          curbMesh.receiveShadow = true;
-          group.add(curbMesh);
-
-          // 1.5%排水勾配＆切下げスロープ付き舗装歩道（路面 baseY に密着）
-          const walkGeom = buildProfiledSidewalkRibbonGeometry(
-            ivFrames,
-            sc.sideSign,
-            cross,
-            baseY,
-            rampZones,
-            sampleY,
-          );
-          const walkMesh = new THREE.Mesh(walkGeom, sidewalkMat);
-          walkMesh.name = `CurvedSidewalk_${sideTag}_${ivIdx}`;
-          walkMesh.userData.isSidewalkSurface = true;
-          walkMesh.receiveShadow = true;
-          group.add(walkMesh);
-
-          // 横断歩道接続部の点字警告ブロック（JIS T 9251）
-          const tactileMargin = Math.min(0.42, sideSpec.walkSurfaceWidth * 0.42);
-          const tactileOff = sc.sideSign * (sideSpec.curbOuter + tactileMargin);
-          const outerRampRatio =
-            sideSpec.walkSurfaceWidth > 0.01
-              ? Math.min(1, (tactileMargin + 0.3) / sideSpec.walkSurfaceWidth)
-              : 0;
-          const tactileYOffset =
-            baseY + 0.02 + (sideSpec.backEdgeHeight - 0.02) * outerRampRatio + 0.006;
-
-          for (let cwIdx = 0; cwIdx < curvedCrosswalkArcs.length; cwIdx++) {
-            const cwArc = curvedCrosswalkArcs[cwIdx];
-            const isInsideSidewalk = cwArc >= iv.start + 1.4 && cwArc <= iv.end - 1.4;
-            if (!isInsideSidewalk) {
-              continue;
-            }
-            const fCw = getInterpolatedFrame(cwArc);
-            const tileX = fCw.pos.x + fCw.normal.x * tactileOff;
-            const tileZ = fCw.pos.z + fCw.normal.z * tactileOff;
-            const tileGeo = new THREE.PlaneGeometry(0.6, 2.4, 1, 2);
-            tileGeo.rotateX(-Math.PI / 2);
-            const tileMesh = new THREE.Mesh(tileGeo, brailleMat);
-            tileMesh.name = `CurvedTactileWarning_${sideTag}_${ivIdx}_${cwIdx}`;
-            tileMesh.userData.markingType = "TactilePaving";
-            tileMesh.userData.lodDetailTier = "high";
-            const tileGroundY = sampleY ? sampleY(tileX, tileZ) : 0;
-            tileMesh.position.set(tileX, tileGroundY + tactileYOffset, tileZ);
-            tileMesh.rotation.y = Math.atan2(fCw.tangent.x, fCw.tangent.z);
-            if (sampleY) {
-              this.drapeObjectOverElevation(tileMesh, 0, 0, sampleY, tileGroundY);
-            }
-            group.add(tileMesh);
-          }
-        }
-      }
-    }
-
-    // 5. 曲線3D都市型防護柵（ガードレール・東京都型防護パイプ）立体ビーム＆支柱・横断歩道開口・再帰反射材
-    const subtractGuardrailOpenings = (
-      baseIntervals: ReadonlyArray<{ start: number; end: number }>,
-    ): Array<{ start: number; end: number }> => {
-      const result: Array<{ start: number; end: number }> = [];
-      const sortedCuts = [...curvedCrosswalkArcs]
-        .map((c) => [c - 3.6, c + 3.6] as [number, number])
-        .sort((a, b) => a[0] - b[0]);
-
-      for (const iv of baseIntervals) {
-        let cursor = iv.start + 1.5;
-        const limitEnd = iv.end - 1.5;
-        for (const [cutStart, cutEnd] of sortedCuts) {
-          if (cutEnd <= cursor || cutStart >= limitEnd) {
-            continue;
-          }
-          const clippedEnd = Math.min(limitEnd, cutStart);
-          if (clippedEnd - cursor >= 3.5) {
-            result.push({ start: cursor, end: clippedEnd });
-          }
-          cursor = Math.max(cursor, cutEnd);
-        }
-        if (limitEnd - cursor >= 3.5) {
-          result.push({ start: cursor, end: limitEnd });
-        }
-      }
-      return result;
-    };
-
-    const leftGuardrailIntervals = subtractGuardrailOpenings(
-      hasLeftSidewalk ? leftSidewalkIntervals : activeRoadIntervals,
-    );
-    const rightGuardrailIntervals = subtractGuardrailOpenings(
-      hasRightSidewalk ? rightSidewalkIntervals : activeRoadIntervals,
-    );
-
+    // 4〜5. 統一歩道システム（片側独立クリッピング・地形追従歩道・切下げ縁石・L型側溝・バッチ雨水集水桝・斜面密着点字ブロック・横断歩道開口バッチ防護柵）
     const hasGuardrails = Boolean(config.hasGuardrails);
-    if (hasGuardrails) {
-      const railBeamMat = new THREE.MeshStandardMaterial({
-        color: 0xf4f7fb,
-        roughness: 0.28,
-        metalness: 0.25,
-      });
-      applyRoadProp3DTexture(railBeamMat, "guardrail");
-
-      const railRetroMat = new THREE.MeshStandardMaterial({
-        color: 0xfacc15,
-        emissive: 0xf59e0b,
-        emissiveIntensity: 0.75,
-        roughness: 0.14,
-        metalness: 0.35,
-      });
-      applyRoadProp3DTexture(railRetroMat, "retroreflector");
-
-      const postGeo = new THREE.BoxGeometry(0.06, 0.78, 0.06);
-      const retroBadgeGeo = new THREE.BoxGeometry(0.075, 0.06, 0.06);
-
-      const railSideSpecs: ReadonlyArray<{
-        sideSign: -1 | 1;
-        intervals: ReadonlyArray<{ start: number; end: number }>;
-      }> = [
-        { sideSign: -1, intervals: rightGuardrailIntervals },
-        { sideSign: 1, intervals: leftGuardrailIntervals },
-      ];
-
-      for (const rs of railSideSpecs) {
-        const railCenterOff = rs.sideSign * (halfDriveable + 0.36);
-        const railGroup = new THREE.Group();
-        railGroup.name = `CurvedGuardrail_${rs.sideSign > 0 ? "L" : "R"}`;
-
-        for (const iv of rs.intervals) {
-          const topGeom = buildCurvedSolidBoxRibbonGeometry(
-            railCenterOff - 0.03,
-            railCenterOff + 0.03,
-            baseY + 0.72,
-            baseY + 0.79,
-            iv.start,
-            iv.end,
-            0.2,
-          );
-          const topMesh = new THREE.Mesh(topGeom, railBeamMat);
-          topMesh.castShadow = true;
-          topMesh.receiveShadow = true;
-          railGroup.add(topMesh);
-
-          const midGeom = buildCurvedSolidBoxRibbonGeometry(
-            railCenterOff - 0.025,
-            railCenterOff + 0.025,
-            baseY + 0.44,
-            baseY + 0.49,
-            iv.start,
-            iv.end,
-            0.2,
-          );
-          const midMesh = new THREE.Mesh(midGeom, railBeamMat);
-          midMesh.castShadow = true;
-          midMesh.receiveShadow = true;
-          railGroup.add(midMesh);
-
-          let postCounter = 0;
-          for (let s = iv.start + 1.25; s <= iv.end - 1.25; s += 2.5) {
-            const f = getInterpolatedFrame(s);
-            const postX = f.pos.x + f.normal.x * railCenterOff;
-            const postZ = f.pos.z + f.normal.z * railCenterOff;
-            const postYaw = Math.atan2(f.tangent.x, f.tangent.z);
-
-            const postMesh = new THREE.Mesh(postGeo, railBeamMat);
-            postMesh.position.set(postX, evalY(postX, postZ, baseY + 0.39), postZ);
-            postMesh.rotation.y = postYaw;
-            postMesh.castShadow = true;
-            postMesh.receiveShadow = true;
-            railGroup.add(postMesh);
-
-            if (postCounter % 2 === 0) {
-              const badgeMesh = new THREE.Mesh(retroBadgeGeo, railRetroMat);
-              badgeMesh.position.set(postX, evalY(postX, postZ, baseY + 0.62), postZ);
-              badgeMesh.rotation.y = postYaw;
-              railGroup.add(badgeMesh);
-            }
-            postCounter += 1;
-          }
-        }
-        group.add(railGroup);
-      }
-    }
+    const curvedSidewalkRes = this.sidewalks.buildCurvedRoadSidewalks({
+      group,
+      config,
+      cross,
+      frames,
+      totalSplineLength,
+      getInterpolatedFrame,
+      activeRoadIntervals,
+      curvedCrosswalkArcs,
+      startMarkingTrim,
+      endMarkingTrim,
+      baseY,
+      sampleY,
+      evalY,
+      brailleMaterial: this.markings.getBrailleTileMaterial(),
+    });
+    this.registerPuddleMaterials(curvedSidewalkRes.puddleMaterials);
+    segmentPuddleMaterials.push(...curvedSidewalkRes.puddleMaterials);
+    const {
+      leftSidewalkIntervals,
+      rightSidewalkIntervals,
+      leftGuardrailIntervals,
+      rightGuardrailIntervals,
+    } = curvedSidewalkRes;
 
     // 6. 交差点アプローチ標示・横断歩道（バッチ統合）・停止線・細街路「止まれ」・進行方向矢印（SSOT）・制限速度ペイント・マンホール・信号機
     const hasStopTextApproaches = Boolean(
