@@ -4,6 +4,7 @@ import ogImageUrl from "../../public/og-image.png";
 
 describe("Open Graph & Twitter Card Metadata", () => {
   it("should contain standard Open Graph tags in index.html", () => {
+    expect(indexHtml).toContain('prefix="og: https://ogp.me/ns#"');
     expect(indexHtml).toContain('property="og:type"');
     expect(indexHtml).toContain('content="website"');
     expect(indexHtml).toContain('content="https://kexi.github.io/antigravity-deep-drive/"');
@@ -13,23 +14,27 @@ describe("Open Graph & Twitter Card Metadata", () => {
     expect(indexHtml).toContain(
       'content="https://kexi.github.io/antigravity-deep-drive/og-image.png"',
     );
+    expect(indexHtml).toContain('property="og:image:secure_url"');
+    expect(indexHtml).toContain('property="og:image:type"');
+    expect(indexHtml).toContain('content="image/png"');
     expect(indexHtml).toContain('property="og:image:width"');
     expect(indexHtml).toContain('content="1200"');
     expect(indexHtml).toContain('property="og:image:height"');
     expect(indexHtml).toContain('content="630"');
     expect(indexHtml).toContain('content="en_US"');
+    expect(indexHtml).toContain('property="og:locale:alternate"');
+    expect(indexHtml).toContain('content="ja_JP"');
+    expect(indexHtml).toContain('content="zh_CN"');
   });
 
   it("should contain Twitter Card summary_large_image tags for X preview", () => {
     expect(indexHtml).toContain('name="twitter:card"');
     expect(indexHtml).toContain('content="summary_large_image"');
-    expect(indexHtml).toContain('name="twitter:site"');
-    expect(indexHtml).toContain('content="@7_tsuno"');
-    expect(indexHtml).toContain('name="twitter:creator"');
     expect(indexHtml).toContain('name="twitter:image"');
     expect(indexHtml).toContain(
       'content="https://kexi.github.io/antigravity-deep-drive/og-image.png"',
     );
+    expect(indexHtml).not.toContain("7_tsuno");
   });
 
   it("should have a valid og-image.png asset available in public directory", () => {

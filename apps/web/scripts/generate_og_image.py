@@ -167,16 +167,13 @@ def create_og_image():
         d.text((cur_x + 12, tag_y + 8), tag, font=font_tag, fill=(241, 245, 249, 240))
         cur_x += pw + 12
 
-    # Bottom Right Info: URL & Author
+    # Bottom Right Info: URL
     url_text = "kexi.github.io/antigravity-deep-drive"
-    author_text = "By @7_tsuno"
-    
+
     url_bbox = d.textbbox((0, 0), url_text, font=font_url)
-    author_bbox = d.textbbox((0, 0), author_text, font=font_tag)
-    
+
     rx = width - 48
     d.text((rx - (url_bbox[2] - url_bbox[0]), height - 82), url_text, font=font_url, fill=(56, 189, 248, 240))
-    d.text((rx - (author_bbox[2] - author_bbox[0]), height - 58), author_text, font=font_tag, fill=(148, 163, 184, 200))
 
     canvas = Image.alpha_composite(canvas, text_overlay)
     
