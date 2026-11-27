@@ -190,17 +190,17 @@ export class CarModel {
     );
     this.leftBlinkerMaterial = new THREE.MeshStandardMaterial({
       name: "BlinkerAmber_L",
-      color: 0xf59e0b,
+      color: 0x1a1410,
       emissive: 0xff8c00,
-      emissiveIntensity: 0.08,
-      roughness: 0.22,
+      emissiveIntensity: 0.0,
+      roughness: 0.18,
     });
     this.rightBlinkerMaterial = new THREE.MeshStandardMaterial({
       name: "BlinkerAmber_R",
-      color: 0xf59e0b,
+      color: 0x1a1410,
       emissive: 0xff8c00,
-      emissiveIntensity: 0.08,
-      roughness: 0.22,
+      emissiveIntensity: 0.0,
+      roughness: 0.18,
     });
 
     // 1. 車体外装（シャシー）
@@ -358,10 +358,10 @@ export class CarModel {
                   const isPianoBlack =
                     matName.includes("BlackTrim") || matName.includes("WiperBlack");
                   const isTireRubber = matName.includes("TireRubber");
-                  const isWheelAlloy =
-                    matName.includes("WheelAlloy") ||
-                    (matName.includes("Chrome") && !isInteriorChrome);
+                  const isExteriorChrome = matName.includes("Chrome") && !isInteriorChrome;
+                  const isWheelAlloy = matName.includes("WheelAlloy");
                   const isHeadlightLED = matName.includes("HeadlightLED");
+                  const isTaillightLED = matName.includes("TaillightLED");
                   const isBrakeRotor =
                     matName.includes("BrakeRotor") || matName.includes("BrakeCaliper");
 
@@ -386,9 +386,11 @@ export class CarModel {
                     stdMat.color.setHex(0x94a3b8);
                     this.applyCrownInterior3DTexture(stdMat, "satin");
                   } else if (isBodyPaint) {
-                    stdMat.color.setHex(0x767d8a);
-                    stdMat.metalness = 0.88;
-                    stdMat.roughness = 0.28;
+                    // トヨタ クラウン セダン象徴色「プレシャスメタル (1L5)」:
+                    // PMREM 空環境マップを美しく映り込ませつつ黒潰れしない明度・メタリック比に調整
+                    stdMat.color.setHex(0x9aa4b4);
+                    stdMat.metalness = 0.78;
+                    stdMat.roughness = 0.2;
                     this.applyVehicleExterior3DTexture(stdMat, "body_mica");
                   } else if (isPianoBlack) {
                     stdMat.color.setHex(0x0b0e14);
@@ -396,19 +398,29 @@ export class CarModel {
                   } else if (isTireRubber) {
                     stdMat.color.setHex(0x14171c);
                     this.applyVehicleExterior3DTexture(stdMat, "tire_rubber");
-                  } else if (isWheelAlloy) {
-                    // Why 外装クローム/ホイールアロイにダークサテンチタンカラー (0x323a46) を明示設定するか:
-                    // glTF 2.0 エクスポートで Chrome / WheelAlloy は baseColorFactor = [1, 1, 1, 1]（純白）となり、
-                    // 夜間や夕暮れの暗闇環境でアンダーモールやエンブレム、ホイールが真っ白に白飛びして棒のように浮き上がるのを防ぎ、
-                    // トヨタ クラウン セダン（プレシャスメタル仕様）本来の深みのあるダークスモークメッキ・サテンチタンの重厚なPBR物性を実現するため。
-                    stdMat.color.setHex(0x323a46);
+                  } else if (isExteriorChrome) {
+                    // 外装クローム（6ライトモール・王冠/トヨタエンブレム・C R O W Nレタリング・ホイール切削面）:
+                    // 自己発光はゼロに保ちつつ高光沢サテンクローム (0xcfd8e6) でダークチタンホイールとの2トーン対比を際立たせる
+                    stdMat.color.setHex(0xcfd8e6);
                     stdMat.metalness = 0.88;
+                    stdMat.roughness = 0.16;
+                    stdMat.emissive.setHex(0x000000);
+                    stdMat.emissiveIntensity = 0.0;
+                    this.applyVehicleExterior3DTexture(stdMat, "wheel_alloy");
+                  } else if (isWheelAlloy) {
+                    // クラウン セダン Z 20インチマルチスポークのダークプレミアムメタリック部 (0x3e4756)
+                    stdMat.color.setHex(0x3e4756);
+                    stdMat.metalness = 0.86;
                     stdMat.roughness = 0.22;
                     this.applyVehicleExterior3DTexture(stdMat, "wheel_alloy");
                   } else if (isHeadlightLED) {
                     this.glbHeadlightMaterial = stdMat;
                     stdMat.emissive.setHex(0xdbeafe);
                     stdMat.emissiveIntensity = this.headlightsEnabled ? 4.5 : 0.4;
+                  } else if (isTaillightLED) {
+                    stdMat.color.setHex(0xdc2626);
+                    stdMat.emissive.setHex(0xff1428);
+                    stdMat.emissiveIntensity = 3.6;
                   } else if (isBrakeRotor) {
                     this.applyVehicleExterior3DTexture(stdMat, "brake_rotor");
                   }
@@ -4018,46 +4030,49 @@ export class CarModel {
     const group = new THREE.Group();
     group.name = "TurnSignalLamps";
 
-    const frontStripGeo = new THREE.BoxGeometry(0.18, 0.016, 0.024);
-    const rearStripGeo = new THREE.BoxGeometry(0.2, 0.018, 0.024);
-    const mirrorStripGeo = new THREE.BoxGeometry(0.128, 0.014, 0.018);
+    const frontStripGeo = new THREE.BoxGeometry(0.145, 0.012, 0.01);
+    const rearStripGeo = new THREE.BoxGeometry(0.155, 0.012, 0.01);
+    const mirrorStripGeo = new THREE.BoxGeometry(0.088, 0.009, 0.008);
 
     // 左フロント（+X側: 助手席側）& 右フロント（-X側: 運転席側）
+    // Why 左フロント rotY > 0 / 左リア rotY < 0 とするか:
+    // Three.js の Ry(θ) は (1,0,0) -> (cos θ, 0, -sin θ) となるため、車体フロント外縁 (+X 側で後方 -Z へ回り込む曲率) に沿うには rotY > 0、
+    // リア外縁 (+X 側で前方 +Z へ回り込む曲率) に沿うには rotY < 0 を与え、バンパー曲面からの突き出しをゼロにする。
     const frontLeftMesh = new THREE.Mesh(frontStripGeo, this.leftBlinkerMaterial);
     frontLeftMesh.name = "TurnSignalFront_L";
-    frontLeftMesh.position.set(0.74, 0.675, 2.285);
-    frontLeftMesh.rotation.y = -0.18;
+    frontLeftMesh.position.set(0.68, 0.692, 2.248);
+    frontLeftMesh.rotation.y = 0.45;
     group.add(frontLeftMesh);
 
     const frontRightMesh = new THREE.Mesh(frontStripGeo, this.rightBlinkerMaterial);
     frontRightMesh.name = "TurnSignalFront_R";
-    frontRightMesh.position.set(-0.74, 0.675, 2.285);
-    frontRightMesh.rotation.y = 0.18;
+    frontRightMesh.position.set(-0.68, 0.692, 2.248);
+    frontRightMesh.rotation.y = -0.45;
     group.add(frontRightMesh);
 
-    // 左リア（+X側）& 右リア（-X側）
+    // 左リア（+X側）& 右リア（-X側）— 曲面テールハウジング外翼下縁に 0.0mm 密着
     const rearLeftMesh = new THREE.Mesh(rearStripGeo, this.leftBlinkerMaterial);
     rearLeftMesh.name = "TurnSignalRear_L";
-    rearLeftMesh.position.set(0.72, 0.875, -2.342);
-    rearLeftMesh.rotation.y = 0.12;
+    rearLeftMesh.position.set(0.71, 0.872, -2.238);
+    rearLeftMesh.rotation.y = -0.5;
     group.add(rearLeftMesh);
 
     const rearRightMesh = new THREE.Mesh(rearStripGeo, this.rightBlinkerMaterial);
     rearRightMesh.name = "TurnSignalRear_R";
-    rearRightMesh.position.set(-0.72, 0.875, -2.342);
-    rearRightMesh.rotation.y = -0.12;
+    rearRightMesh.position.set(-0.71, 0.872, -2.238);
+    rearRightMesh.rotation.y = 0.5;
     group.add(rearRightMesh);
 
-    // ドアミラーLEDストリップ（GLB表示時にもハウジング前面で確実に発光するオーバーレイ）
+    // ドアミラーLEDストリップ（曲面エアロミラーハウジング前面に沿わせてフラッシュ配置）
     const mirrorRightLed = new THREE.Mesh(mirrorStripGeo, this.rightBlinkerMaterial);
     mirrorRightLed.name = "TurnSignalMirror_R";
-    mirrorRightLed.position.set(-0.922, 0.97, 1.082);
+    mirrorRightLed.position.set(-0.945, 0.96, 1.064);
     mirrorRightLed.rotation.y = -THREE.MathUtils.degToRad(22.0);
     group.add(mirrorRightLed);
 
     const mirrorLeftLed = new THREE.Mesh(mirrorStripGeo, this.leftBlinkerMaterial);
     mirrorLeftLed.name = "TurnSignalMirror_L";
-    mirrorLeftLed.position.set(0.922, 0.97, 0.957);
+    mirrorLeftLed.position.set(0.945, 0.96, 0.942);
     mirrorLeftLed.rotation.y = THREE.MathUtils.degToRad(27.0);
     group.add(mirrorLeftLed);
 
@@ -4128,11 +4143,11 @@ export class CarModel {
       (this.turnSignalState === "right" || this.turnSignalState === "hazard") &&
       this.turnSignalBlinkOn;
 
-    this.leftBlinkerMaterial.emissiveIntensity = isLeftFlashing ? 2.8 : 0.08;
-    this.leftBlinkerMaterial.color.setHex(isLeftFlashing ? 0xffb703 : 0x78350f);
+    this.leftBlinkerMaterial.emissiveIntensity = isLeftFlashing ? 3.2 : 0.0;
+    this.leftBlinkerMaterial.color.setHex(isLeftFlashing ? 0xffb703 : 0x1a1410);
 
-    this.rightBlinkerMaterial.emissiveIntensity = isRightFlashing ? 2.8 : 0.08;
-    this.rightBlinkerMaterial.color.setHex(isRightFlashing ? 0xffb703 : 0x78350f);
+    this.rightBlinkerMaterial.emissiveIntensity = isRightFlashing ? 3.2 : 0.0;
+    this.rightBlinkerMaterial.color.setHex(isRightFlashing ? 0xffb703 : 0x1a1410);
 
     // JIS規格 右ウインカーレバー角度連動（右ウインカー=下へ押し下げ +0.22rad、左ウインカー=上へ引き上げ -0.22rad）
     if (this.turnSignalStalkGroup) {

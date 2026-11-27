@@ -73,3 +73,4 @@ trust_signals:
 - [058-unified-traffic-signal-system-and-phase-interlock.md](./058-unified-traffic-signal-system-and-phase-interlock.md): 統一交通信号作成システム・交差点トポロジー連動配置・排他フェーズ制御
 - [059-unified-sidewalk-creation-system.md](./059-unified-sidewalk-creation-system.md): 統一歩道作成システム・共有マテリアルキャッシュ・交差点切下げスロープ・集水桝・歩道ネットワーク SSOT
 - [060-japanese-road-8-system-infrastructure.md](./060-japanese-road-8-system-infrastructure.md): 日本の道路全8系統インフラ統合アーキテクチャ（照明・防護安全・路面インフラ・沿道ファニチャー・統合監査）
+- [061-blender-toyota-crown-sedan-class-a-sculpted-overhaul.md](./061-blender-toyota-crown-sedan-class-a-sculpted-overhaul.md): Blender MCP トヨタ クラウン セダン (AZSH32) Class-A 曲面オーバーホールと4ラウンド360度収束レビュー
