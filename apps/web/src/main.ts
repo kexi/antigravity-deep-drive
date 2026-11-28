@@ -160,7 +160,18 @@ export function parseUrlLocationQuery(
 
   const localFromLatLon = hasLatLonQuery ? wgs84ToLocal(parsedLat, parsedLon) : null;
 
-  let resolvedArea: DriveAreaId = rawQueryArea === "tokyo" ? "tokyo" : defaultArea;
+  const validAreas: readonly DriveAreaId[] = [
+    "shibuya",
+    "tokyo",
+    "shinjuku",
+    "odaiba",
+    "skytree",
+    "sangenjaya",
+  ];
+  const isValidQueryArea = (value: string | null): value is DriveAreaId =>
+    value !== null && (validAreas as readonly string[]).includes(value);
+
+  let resolvedArea: DriveAreaId = isValidQueryArea(rawQueryArea) ? rawQueryArea : defaultArea;
   if (hasLatLonQuery && localFromLatLon) {
     const isShibuyaByLonOrX = parsedLon < 139.735 || localFromLatLon.x < -345;
     resolvedArea = isShibuyaByLonOrX ? "shibuya" : "tokyo";
@@ -631,6 +642,10 @@ async function bootstrap() {
   }
   vehiclePhysics.setObstacleColliderHandles(cityMap.obstacleColliderHandles);
   vehiclePhysics.setDrivableColliderHandles(cityMap.getDrivableColliderHandles());
+  // 非同期ロードされる GLB ランドマーク・PLATEAU 建物群の物理コライダー追加/解放を車両レイキャスト除外リストへ自動同期する
+  cityMap.onObstacleCollidersChanged = (handles) => {
+    vehiclePhysics.setObstacleColliderHandles(handles);
+  };
   const carModel = new CarModel();
   carModel.setLocale(i18n.getLocale());
   scene.add(carModel.group);
@@ -1253,8 +1268,16 @@ async function bootstrap() {
       applyGazePreset(shouldToggleBackToForward ? "forward" : preset);
     },
     onToggleArea: () => {
-      const nextArea: DriveAreaId = currentDriveArea === "tokyo" ? "shibuya" : "tokyo";
-      setDriveArea(nextArea);
+      const areaCycle: readonly DriveAreaId[] = [
+        "shibuya",
+        "tokyo",
+        "shinjuku",
+        "odaiba",
+        "skytree",
+        "sangenjaya",
+      ];
+      const nextIdx = (areaCycle.indexOf(currentDriveArea) + 1) % areaCycle.length;
+      setDriveArea(areaCycle[nextIdx]);
     },
     onToggleGraphicsQuality: () => {
       applyGraphicsQuality(getNextGraphicsQuality(currentGraphicsQuality), "quickbar");
@@ -1352,14 +1375,32 @@ async function bootstrap() {
 
   areaBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
-      const nextArea = btn.dataset.area === "tokyo" ? "tokyo" : "shibuya";
+      const rawArea = btn.dataset.area;
+      const validAreaSet = new Set<DriveAreaId>([
+        "shibuya",
+        "tokyo",
+        "shinjuku",
+        "odaiba",
+        "skytree",
+        "sangenjaya",
+      ]);
+      const nextArea: DriveAreaId =
+        rawArea && validAreaSet.has(rawArea as DriveAreaId) ? (rawArea as DriveAreaId) : "shibuya";
       setDriveArea(nextArea);
     });
   });
 
   inputManager.onAreaToggle = () => {
-    const nextArea: DriveAreaId = currentDriveArea === "tokyo" ? "shibuya" : "tokyo";
-    setDriveArea(nextArea);
+    const areaCycle: readonly DriveAreaId[] = [
+      "shibuya",
+      "tokyo",
+      "shinjuku",
+      "odaiba",
+      "skytree",
+      "sangenjaya",
+    ];
+    const nextIdx = (areaCycle.indexOf(currentDriveArea) + 1) % areaCycle.length;
+    setDriveArea(areaCycle[nextIdx]);
   };
 
   // 時間帯ボタンイベント
@@ -2218,8 +2259,8 @@ async function bootstrap() {
       currentDriveArea = inferredArea;
       syncAreaButtons(currentDriveArea);
     }
-    // Why y = groundY + 0.62m (wheelRadius 0.38 + suspensionRestLength 0.32 - 0.08):
-    // 渋谷エリアの3D起伏標高へ追従させつつサスペンション静止高へ配置し、路面下へのめり込み・反発パルスを防止する
+    // Why y = groundY + 0.62m (wheelRadius 0.34 + equilibriumSuspensionLength 0.262 - wheelConnectionY (-0.02) ≈ 0.622m):
+    // 渋谷エリアの3D起伏標高へ追従させつつ1,980kg車重の静的サスペンション平衡高へ配置し、路面下へのめり込み・反発パルスを防止する
     const groundY = x < -395 ? sampleShibuyaTerrainY(x, z) : 0;
     const targetPos = new THREE.Vector3(x, groundY + 0.62, z);
     activeSpawnTransform = {

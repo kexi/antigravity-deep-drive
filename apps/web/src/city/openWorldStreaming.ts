@@ -3,8 +3,10 @@ import { logger } from "../core/logger";
 
 /**
  * 都市空間のオープンワールド分割セクター（チャンク）ID
- * 渋谷（西 x ≈ -850）〜 青山通り・国道246号（中央 x ≈ -550..-350）〜 東京駅・丸の内・皇居外苑（東 x ≈ 0..+450）を
- * 9つの空間セクターに分割し、優先ロード・進行方向先読み・メモリ解放（Eviction）を行う。
+ * 従来の20チャンク（7.8 km²）を11倍超となる 48チャンク（86.0 km²: 東西 10.0 km × 南北 8.6 km）へ大拡張。
+ * 西は三軒茶屋・世田谷・下北沢・中野・西新宿都庁、北は新宿・四ツ谷・市ヶ谷・品川、
+ * 南は中目黒・五反田・麻布十番・東京タワー・後楽園・上野・浅草、東は築地・豊洲・お台場・両国・東京スカイツリーまで
+ * 隙間なく網羅し、優先ロード・進行方向先読み・メモリ解放（Eviction）を行う。
  */
 export type WorldChunkId =
   | "shibuya-core"
@@ -26,7 +28,36 @@ export type WorldChunkId =
   | "yurakucho-east"
   | "ginza-sukiyabashi"
   | "shimbashi-shiodome"
-  | "yaesu-showadori-east";
+  | "yaesu-showadori-east"
+  // --- 大東京 10倍拡張 外周リング（28チャンク: 78.2 km² 追加 → 計 86.0 km²） ---
+  | "nakano-sakaue-honcho"
+  | "shinjuku-west-tocho"
+  | "shimokitazawa-daita"
+  | "hatsudai-sasazuka"
+  | "setagaya-komazawa"
+  | "sangenjaya-ikejiri"
+  | "jiyugaoka-futako"
+  | "gakugeidaigaku-yutenji"
+  | "yoyogi-shinjuku-south"
+  | "shinjuku-kabukicho-east"
+  | "yotsuya-shinanomachi"
+  | "ichigaya-kagurazaka"
+  | "shinagawa-tamachi"
+  | "shinagawa-tennozu"
+  | "meguro-nakameguro"
+  | "gotanda-osaki"
+  | "hiroo-azabu-juban"
+  | "korakuen-bunkyo"
+  | "ueno-okachimachi"
+  | "asakusa-kuramae"
+  | "odaiba-rainbow-bridge"
+  | "ariake-tokyo-bigsight"
+  | "tsukiji-kachidoki"
+  | "toyosu-harumi"
+  | "monzennakacho-kiyosumi"
+  | "kiba-toyosu-east"
+  | "ryogoku-sumida"
+  | "kinshicho-skytree";
 
 /**
  * チャンクのライフサイクル状態
@@ -161,8 +192,9 @@ export interface OpenWorldStreamingStatus {
 }
 
 /**
- * 全9チャンクの空間定義カタログ
- * 渋谷（西）〜 国道246号（中央）〜 東京駅・丸の内（東）を隙間なくカバーする。
+ * 全48チャンクの空間定義カタログ（東西 10.0 km × 南北 8.6 km = 86.0 km²、従来20チャンク 7.8 km² の 11.0 倍）
+ * 中央コア20チャンク（渋谷〜青山〜東京駅・丸の内・銀座・神田）の座標・IDを完全維持しつつ、
+ * 外周28チャンク（西新宿都庁・中野・下北沢・三軒茶屋・駒沢・中目黒・五反田・品川・東京タワー・後楽園・上野・浅草・築地・豊洲・お台場・両国・東京スカイツリー）で隙間なく囲む。
  */
 export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
   {
@@ -188,7 +220,7 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     centerZ: 760,
     bounds: { minX: -1200, maxX: -540, minZ: 640, maxZ: 920 },
     estimatedMemoryMb: 18,
-    associatedGlbModelIds: ["shibuya_stream", "street_tree"],
+    associatedGlbModelIds: ["shibuya_stream", "shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: false,
   },
   {
@@ -214,7 +246,7 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     centerZ: 200,
     bounds: { minX: -610, maxX: -465, minZ: 60, maxZ: 340 },
     estimatedMemoryMb: 16,
-    associatedGlbModelIds: ["street_tree"],
+    associatedGlbModelIds: ["shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: false,
   },
   {
@@ -303,9 +335,9 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     zone: "shibuya",
     centerX: -860,
     centerZ: -320,
-    bounds: { minX: -1600, maxX: -610, minZ: -800, maxZ: -160 },
+    bounds: { minX: -1800, maxX: -610, minZ: -1200, maxZ: -160 },
     estimatedMemoryMb: 20,
-    associatedGlbModelIds: ["street_tree"],
+    associatedGlbModelIds: ["shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: false,
   },
   {
@@ -316,9 +348,9 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     zone: "shibuya",
     centerX: -720,
     centerZ: 1050,
-    bounds: { minX: -1600, maxX: -320, minZ: 920, maxZ: 1400 },
+    bounds: { minX: -1800, maxX: -320, minZ: 920, maxZ: 1400 },
     estimatedMemoryMb: 18,
-    associatedGlbModelIds: ["street_tree"],
+    associatedGlbModelIds: ["shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: false,
   },
   {
@@ -331,7 +363,7 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     centerZ: 480,
     bounds: { minX: -610, maxX: -120, minZ: 340, maxZ: 920 },
     estimatedMemoryMb: 24,
-    associatedGlbModelIds: ["street_tree"],
+    associatedGlbModelIds: ["shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: false,
   },
   {
@@ -342,9 +374,9 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     zone: "corridor",
     centerX: -480,
     centerZ: -120,
-    bounds: { minX: -610, maxX: -320, minZ: -600, maxZ: 60 },
+    bounds: { minX: -610, maxX: -320, minZ: -1200, maxZ: 60 },
     estimatedMemoryMb: 18,
-    associatedGlbModelIds: ["street_tree"],
+    associatedGlbModelIds: ["shibuya_plateau_buildings", "street_tree"],
     isPrimaryHub: false,
   },
   {
@@ -355,7 +387,7 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     zone: "tokyo",
     centerX: -220,
     centerZ: 810,
-    bounds: { minX: -320, maxX: -120, minZ: 420, maxZ: 1200 },
+    bounds: { minX: -320, maxX: -120, minZ: 420, maxZ: 1400 },
     estimatedMemoryMb: 20,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
@@ -368,7 +400,7 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     zone: "tokyo",
     centerX: 0,
     centerZ: 830,
-    bounds: { minX: -120, maxX: 125, minZ: 460, maxZ: 1200 },
+    bounds: { minX: -120, maxX: 125, minZ: 460, maxZ: 1400 },
     estimatedMemoryMb: 20,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
@@ -381,7 +413,7 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     zone: "tokyo",
     centerX: 385,
     centerZ: 830,
-    bounds: { minX: 125, maxX: 1200, minZ: 460, maxZ: 1200 },
+    bounds: { minX: 125, maxX: 1200, minZ: 460, maxZ: 1400 },
     estimatedMemoryMb: 22,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
@@ -394,7 +426,7 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     zone: "tokyo",
     centerX: 200,
     centerZ: -425,
-    bounds: { minX: -120, maxX: 520, minZ: -650, maxZ: -200 },
+    bounds: { minX: -320, maxX: 520, minZ: -650, maxZ: -200 },
     estimatedMemoryMb: 24,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
@@ -407,7 +439,7 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     zone: "tokyo",
     centerX: 200,
     centerZ: -925,
-    bounds: { minX: -120, maxX: 520, minZ: -1200, maxZ: -650 },
+    bounds: { minX: -320, maxX: 1200, minZ: -1200, maxZ: -650 },
     estimatedMemoryMb: 22,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
@@ -424,6 +456,375 @@ export const WORLD_CHUNK_DEFINITIONS: readonly WorldChunkDefinition[] = [
     estimatedMemoryMb: 20,
     associatedGlbModelIds: ["street_tree"],
     isPrimaryHub: false,
+  },
+  // === 大東京 10倍拡張 外周リング（28チャンク: 西・北・南・東 全面連続展開） ===
+  // 1. 西側ウイング (X: -5600..-1800, 8チャンク)
+  {
+    id: "nakano-sakaue-honcho",
+    nameJa: "中野坂上・青梅街道・方南通り",
+    nameEn: "Nakano-Sakaue, Ome-kaido & Honan-dori",
+    nameZh: "中野坂上・青梅街道・方南通",
+    zone: "shibuya",
+    centerX: -4650,
+    centerZ: -2700,
+    bounds: { minX: -5600, maxX: -3700, minZ: -4200, maxZ: -1200 },
+    estimatedMemoryMb: 12,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "shinjuku-west-tocho",
+    nameJa: "西新宿・東京都庁・超高層ビル街",
+    nameEn: "West Shinjuku & Tokyo Metropolitan Gov. Towers",
+    nameZh: "西新宿・东京都厅・超高层建筑群",
+    zone: "shibuya",
+    centerX: -2750,
+    centerZ: -2700,
+    bounds: { minX: -3700, maxX: -1800, minZ: -4200, maxZ: -1200 },
+    estimatedMemoryMb: 16,
+    associatedGlbModelIds: [],
+    isPrimaryHub: true,
+  },
+  {
+    id: "shimokitazawa-daita",
+    nameJa: "下北沢・世田谷代田・環七通り西",
+    nameEn: "Shimokitazawa, Setagaya-Daita & Kannana West",
+    nameZh: "下北泽・世田谷代田・环七通西",
+    zone: "shibuya",
+    centerX: -4650,
+    centerZ: -500,
+    bounds: { minX: -5600, maxX: -3700, minZ: -1200, maxZ: 200 },
+    estimatedMemoryMb: 12,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "hatsudai-sasazuka",
+    nameJa: "初台・笹塚・甲州街道・オペラシティ",
+    nameEn: "Hatsudai, Sasazuka, Koshu-kaido & Opera City",
+    nameZh: "初台・笹冢・甲州街道・歌剧城",
+    zone: "shibuya",
+    centerX: -2750,
+    centerZ: -500,
+    bounds: { minX: -3700, maxX: -1800, minZ: -1200, maxZ: 200 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "setagaya-komazawa",
+    nameJa: "世田谷・駒沢オリンピック公園・玉川通り西",
+    nameEn: "Setagaya, Komazawa Olympic Park & Route 246 West",
+    nameZh: "世田谷・驹泽公园・玉川通西",
+    zone: "shibuya",
+    centerX: -4650,
+    centerZ: 900,
+    bounds: { minX: -5600, maxX: -3700, minZ: 200, maxZ: 1600 },
+    estimatedMemoryMb: 12,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "sangenjaya-ikejiri",
+    nameJa: "三軒茶屋・池尻大橋・キャロットタワー",
+    nameEn: "Sangenjaya, Ikejiri-Ohashi & Carrot Tower",
+    nameZh: "三轩茶屋・池尻大桥・胡萝卜塔",
+    zone: "shibuya",
+    centerX: -2750,
+    centerZ: 900,
+    bounds: { minX: -3700, maxX: -1800, minZ: 200, maxZ: 1600 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: true,
+  },
+  {
+    id: "jiyugaoka-futako",
+    nameJa: "自由が丘・等々力・目黒通り西",
+    nameEn: "Jiyugaoka, Todoroki & Meguro-dori West",
+    nameZh: "自由之丘・等等力・目黑通西",
+    zone: "shibuya",
+    centerX: -4650,
+    centerZ: 3000,
+    bounds: { minX: -5600, maxX: -3700, minZ: 1600, maxZ: 4400 },
+    estimatedMemoryMb: 12,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "gakugeidaigaku-yutenji",
+    nameJa: "祐天寺・学芸大学・駒沢通り南",
+    nameEn: "Yutenji, Gakugei-Daigaku & Komazawa-dori South",
+    nameZh: "祐天寺・学艺大学・驹泽通南",
+    zone: "shibuya",
+    centerX: -2750,
+    centerZ: 3000,
+    bounds: { minX: -3700, maxX: -1800, minZ: 1600, maxZ: 4400 },
+    estimatedMemoryMb: 12,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  // 2. 北・南東回廊外周 (X: -1800..+1200, Z: -4200..-1200, 6チャンク)
+  {
+    id: "yoyogi-shinjuku-south",
+    nameJa: "代々木・新宿南口・バスタ新宿・明治通り北",
+    nameEn: "Yoyogi, Shinjuku South Gate & Meiji-dori North",
+    nameZh: "代代木・新宿南口・明治通北",
+    zone: "shibuya",
+    centerX: -1205,
+    centerZ: -1950,
+    bounds: { minX: -1800, maxX: -610, minZ: -2700, maxZ: -1200 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "shinjuku-kabukicho-east",
+    nameJa: "新宿三丁目・歌舞伎町・明治通り新宿",
+    nameEn: "Shinjuku-Sanchome, Kabukicho & Meiji-dori",
+    nameZh: "新宿三丁目・歌舞伎町・明治通",
+    zone: "shibuya",
+    centerX: -1205,
+    centerZ: -3450,
+    bounds: { minX: -1800, maxX: -610, minZ: -4200, maxZ: -2700 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "yotsuya-shinanomachi",
+    nameJa: "信濃町・四ツ谷・外苑東通り北",
+    nameEn: "Shinanomachi, Yotsuya & Gaien-Higashi North",
+    nameZh: "信浓町・四谷・外苑东通北",
+    zone: "corridor",
+    centerX: -205,
+    centerZ: -1950,
+    bounds: { minX: -610, maxX: 200, minZ: -2700, maxZ: -1200 },
+    estimatedMemoryMb: 12,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "ichigaya-kagurazaka",
+    nameJa: "市ヶ谷・飯田橋・神楽坂・外堀通り",
+    nameEn: "Ichigaya, Iidabashi, Kagurazaka & Sotobori-dori",
+    nameZh: "市谷・饭田桥・神乐坂・外堀通",
+    zone: "corridor",
+    centerX: -205,
+    centerZ: -3450,
+    bounds: { minX: -610, maxX: 200, minZ: -4200, maxZ: -2700 },
+    estimatedMemoryMb: 12,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "shinagawa-tamachi",
+    nameJa: "田町・高輪ゲートウェイ・第一京浜国道15号",
+    nameEn: "Tamachi, Takanawa Gateway & Route 15",
+    nameZh: "田町・高轮Gateway・第一京滨",
+    zone: "tokyo",
+    centerX: 700,
+    centerZ: -1950,
+    bounds: { minX: 200, maxX: 1200, minZ: -2700, maxZ: -1200 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "shinagawa-tennozu",
+    nameJa: "品川駅前・品川インターシティ・天王洲アイル",
+    nameEn: "Shinagawa Intercity & Tennozu Isle",
+    nameZh: "品川站前・天王洲岛・海岸通",
+    zone: "tokyo",
+    centerX: 700,
+    centerZ: -3450,
+    bounds: { minX: 200, maxX: 1200, minZ: -4200, maxZ: -2700 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  // 3. 南西・北東回廊外周 (X: -1800..+1200, Z: +1400..+4400, 6チャンク)
+  {
+    id: "meguro-nakameguro",
+    nameJa: "中目黒・目黒駅前・山手通り南進",
+    nameEn: "Nakameguro, Meguro Station & Yamate-dori South",
+    nameZh: "中目黑・目黑站・山手通南",
+    zone: "shibuya",
+    centerX: -1205,
+    centerZ: 2150,
+    bounds: { minX: -1800, maxX: -610, minZ: 1400, maxZ: 2900 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "gotanda-osaki",
+    nameJa: "五反田・大崎ゲートシティ・目黒川",
+    nameEn: "Gotanda, Osaki Gate City & Meguro River",
+    nameZh: "五反田・大崎・目黑川",
+    zone: "shibuya",
+    centerX: -1205,
+    centerZ: 3650,
+    bounds: { minX: -1800, maxX: -610, minZ: 2900, maxZ: 4400 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "hiroo-azabu-juban",
+    nameJa: "広尾・麻布十番・芝公園・東京タワー",
+    nameEn: "Hiroo, Azabu-Juban, Shiba Park & Tokyo Tower",
+    nameZh: "广尾・麻布十番・芝公园・东京塔",
+    zone: "corridor",
+    centerX: -205,
+    centerZ: 2150,
+    bounds: { minX: -610, maxX: 200, minZ: 1400, maxZ: 2900 },
+    estimatedMemoryMb: 15,
+    associatedGlbModelIds: [],
+    isPrimaryHub: true,
+  },
+  {
+    id: "korakuen-bunkyo",
+    nameJa: "後楽園・東京ドーム・春日通り・白山通り",
+    nameEn: "Korakuen, Tokyo Dome & Hakusan-dori",
+    nameZh: "后乐园・东京巨蛋・白山通",
+    zone: "corridor",
+    centerX: -205,
+    centerZ: 3650,
+    bounds: { minX: -610, maxX: 200, minZ: 2900, maxZ: 4400 },
+    estimatedMemoryMb: 13,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "ueno-okachimachi",
+    nameJa: "御徒町・上野駅前・昭和通り北進",
+    nameEn: "Okachimachi, Ueno Station & Showa-dori North",
+    nameZh: "御徒町・上野站・昭和通北",
+    zone: "tokyo",
+    centerX: 700,
+    centerZ: 2150,
+    bounds: { minX: 200, maxX: 1200, minZ: 1400, maxZ: 2900 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "asakusa-kuramae",
+    nameJa: "浅草・雷門・蔵前・江戸通り",
+    nameEn: "Asakusa, Kaminarimon, Kuramae & Edo-dori",
+    nameZh: "浅草・雷门・藏前・江户通",
+    zone: "tokyo",
+    centerX: 700,
+    centerZ: 3650,
+    bounds: { minX: 200, maxX: 1200, minZ: 2900, maxZ: 4400 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  // 4. 東側東京湾・隅田川ウイング (X: +1200..+4400, 8チャンク)
+  {
+    id: "odaiba-rainbow-bridge",
+    nameJa: "レインボーブリッジ・お台場海浜公園・臨海副都心",
+    nameEn: "Rainbow Bridge, Odaiba & Fuji TV Bayfront",
+    nameZh: "彩虹大桥・台场海滨公园・临海副都心",
+    zone: "tokyo",
+    centerX: 2000,
+    centerZ: -2900,
+    bounds: { minX: 1200, maxX: 2800, minZ: -4200, maxZ: -1600 },
+    estimatedMemoryMb: 16,
+    associatedGlbModelIds: [],
+    isPrimaryHub: true,
+  },
+  {
+    id: "ariake-tokyo-bigsight",
+    nameJa: "有明・東京ビッグサイト・湾岸道路国道357号",
+    nameEn: "Ariake, Tokyo Big Sight & Bayshore Route 357",
+    nameZh: "有明・东京国际展示场・湾岸道路",
+    zone: "tokyo",
+    centerX: 3600,
+    centerZ: -2900,
+    bounds: { minX: 2800, maxX: 4400, minZ: -4200, maxZ: -1600 },
+    estimatedMemoryMb: 13,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "tsukiji-kachidoki",
+    nameJa: "築地・勝鬨橋・勝どき・晴海通り東",
+    nameEn: "Tsukiji, Kachidoki Bridge & Harumi-dori East",
+    nameZh: "筑地・胜哄桥・晴海通东",
+    zone: "tokyo",
+    centerX: 2000,
+    centerZ: -800,
+    bounds: { minX: 1200, maxX: 2800, minZ: -1600, maxZ: 0 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "toyosu-harumi",
+    nameJa: "晴海フラッグ・豊洲市場・豊洲大橋",
+    nameEn: "Harumi Flag, Toyosu Market & Toyosu Bridge",
+    nameZh: "晴海・丰洲市场・丰洲大桥",
+    zone: "tokyo",
+    centerX: 3600,
+    centerZ: -800,
+    bounds: { minX: 2800, maxX: 4400, minZ: -1600, maxZ: 0 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "monzennakacho-kiyosumi",
+    nameJa: "永代橋・門前仲町・清澄白河・永代通り東",
+    nameEn: "Eitai Bridge, Monzennakacho & Kiyosumi-Shirakawa",
+    nameZh: "永代桥・门前仲町・清澄白河",
+    zone: "tokyo",
+    centerX: 2000,
+    centerZ: 800,
+    bounds: { minX: 1200, maxX: 2800, minZ: 0, maxZ: 1600 },
+    estimatedMemoryMb: 13,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "kiba-toyosu-east",
+    nameJa: "木場・東陽町・三ツ目通り・葛西橋通り",
+    nameEn: "Kiba, Toyocho & Mitsume-dori",
+    nameZh: "木场・东阳町・三目通",
+    zone: "tokyo",
+    centerX: 3600,
+    centerZ: 800,
+    bounds: { minX: 2800, maxX: 4400, minZ: 0, maxZ: 1600 },
+    estimatedMemoryMb: 12,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "ryogoku-sumida",
+    nameJa: "両国国技館・隅田川・京葉道路国道14号",
+    nameEn: "Ryogoku Kokugikan, Sumida River & Route 14",
+    nameZh: "两国国技馆・隅田川・京叶道路",
+    zone: "tokyo",
+    centerX: 2000,
+    centerZ: 3000,
+    bounds: { minX: 1200, maxX: 2800, minZ: 1600, maxZ: 4400 },
+    estimatedMemoryMb: 14,
+    associatedGlbModelIds: [],
+    isPrimaryHub: false,
+  },
+  {
+    id: "kinshicho-skytree",
+    nameJa: "錦糸町・押上・東京スカイツリータウン",
+    nameEn: "Kinshicho, Oshiage & Tokyo Skytree Town",
+    nameZh: "锦糸町・押上・东京晴空塔",
+    zone: "tokyo",
+    centerX: 3600,
+    centerZ: 3000,
+    bounds: { minX: 2800, maxX: 4400, minZ: 1600, maxZ: 4400 },
+    estimatedMemoryMb: 16,
+    associatedGlbModelIds: [],
+    isPrimaryHub: true,
   },
 ] as const;
 

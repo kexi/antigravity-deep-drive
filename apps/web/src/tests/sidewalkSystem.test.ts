@@ -236,5 +236,80 @@ describe("Unified Sidewalk Creation System（統一歩道作成・共有マテ�
     const shibuyaNearest = swSys.findNearestSidewalk(-993, 249, 12);
     expect(shibuyaNearest).not.toBeNull();
     expect(shibuyaNearest!.record.pavingStyle).toBe("interlocking_brick");
+
+    // 交差点歩道連続性検証:
+    // 1. 和田倉門西・楠公通りアプローチ (-23.5, 250) の南連続歩道が途切れていないこと
+    expect(swSys.isPointOnSidewalk(-23.5, 236.0)).toBe(true);
+    // 2. 東京駅前 (0, 5) の日比谷通り南延伸歩道 (x=±14.5) が隅切り拡張ポケットへ途切れなく接続すること
+    expect(swSys.isPointOnSidewalk(14.5, -5.5)).toBe(true);
+    expect(swSys.isPointOnSidewalk(-14.5, -5.5)).toBe(true);
+    // 3. L字交差点（半蔵門 (-350, 850)・竹橋 (0, 850)・六本木 (-380, -350)・汐留 (650, -750)）に外周連続歩道が存在すること
+    expect(scene.getObjectByName("IntersectionSidewalkEdge_OuterBend")).toBeDefined();
+    expect(swSys.isPointOnSidewalk(-364.0, 864.0)).toBe(true);
+    expect(swSys.isPointOnSidewalk(14.0, 864.0)).toBe(true);
+    // 4. 渋谷の主要交差点（スクランブル・宮益坂下・東口・セルリアンT字・山手神泉等）に任意角度歩道コネクタが構築されていること
+    const connectors = scene.getObjectByName("JunctionSidewalkConnectors");
+    expect(connectors).toBeDefined();
+    expect(connectors!.children.length).toBeGreaterThanOrEqual(45);
+    // T字路の非合流側（セルリアン前玉川通り北歩道・山手神泉山手通り西歩道・神宮前明治通り東歩道）が連続していること
+    expect(swSys.findNearestSidewalk(-976.0, 505.5, 3.0)).not.toBeNull();
+    expect(swSys.findNearestSidewalk(-1639.0, 740.0, 3.0)).not.toBeNull();
+    expect(swSys.findNearestSidewalk(-829.5, -61.2, 3.0)).not.toBeNull();
   }, 45_000);
+
+  it("L字直交交差点の外周連続カーブ歩道と幅差ポケット拡張および接続端0.15m段差なしを保証する", async () => {
+    await RAPIER.init();
+    const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    const builder = new JapaneseRoadBuilder();
+    const groundBody = world.createRigidBody(
+      RAPIER.RigidBodyDesc.fixed().setTranslation(0, -0.5, 0),
+    );
+
+    const lCorner = builder.buildIntersection(
+      {
+        name: "TestLCornerIntersection",
+        x: 0,
+        z: 0,
+        widthX: 32,
+        depthZ: 32,
+        lanesX: 3,
+        lanesZ: 3,
+        hasCrosswalks: true,
+        hasCornerSidewalks: true,
+        arms: {
+          north: { carriagewayWidth: 24, sidewalkLeft: 4, sidewalkRight: 4 },
+          east: { carriagewayWidth: 24, sidewalkLeft: 4, sidewalkRight: 4 },
+        },
+      },
+      world,
+      RAPIER,
+      groundBody,
+    );
+
+    expect(lCorner.group.getObjectByName("IntersectionSidewalkCorner_NE")).toBeDefined();
+    expect(lCorner.group.getObjectByName("IntersectionSidewalkEdge_OuterBend")).toBeDefined();
+    expect(lCorner.group.getObjectByName("IntersectionCurbEdge_OuterBend")).toBeDefined();
+
+    const swSys = builder.getSidewalkSystem();
+    // 内側コーナー(NE)および外側連続L字歩道(NW/SW/SE外周)のすべてが歩道ポリゴン内に含まれること
+    expect(swSys.isPointOnSidewalk(14.5, 14.5)).toBe(true);
+    expect(swSys.isPointOnSidewalk(-14.5, 10.0)).toBe(true);
+    expect(swSys.isPointOnSidewalk(-14.5, -14.5)).toBe(true);
+    expect(swSys.isPointOnSidewalk(10.0, -14.5)).toBe(true);
+    // 車道中央は歩道でないこと
+    expect(swSys.isPointOnSidewalk(0, 0)).toBe(false);
+
+    // 外周L字歩道およびNE隅切り歩道の接続端縁石が0.15m高さを維持していること
+    const neCurb = lCorner.group.getObjectByName("IntersectionCurbCorner_NE") as THREE.Mesh;
+    const posAttr = neCurb.geometry.getAttribute("position") as THREE.BufferAttribute;
+    let maxEndHeightAtEdge = 0;
+    for (let i = 0; i < posAttr.count; i++) {
+      if (Math.abs(posAttr.getZ(i) - 16.0) < 0.05 || Math.abs(posAttr.getX(i) - 16.0) < 0.05) {
+        if (posAttr.getY(i) > maxEndHeightAtEdge) {
+          maxEndHeightAtEdge = posAttr.getY(i);
+        }
+      }
+    }
+    expect(maxEndHeightAtEdge).toBeCloseTo(0.15, 2);
+  });
 });

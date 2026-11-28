@@ -12,6 +12,10 @@ export interface RoadExclusionCorridor {
   id?: string;
   sampledPoints: ReadonlyArray<{ x: number; z: number }>;
   halfWidth: number;
+  /** 交差道路側の歩道幅員（交差点コーナーの歩道重複を防ぎ、隅切りコネクタ用スペースをクリーンに確保する） */
+  sidewalkClearance?: number;
+  /** T字路等の端点キャップ長手余白（既定 1.5m）。道路終端の先へ半球状に張り出して対向側歩道を切断するのを防ぐ */
+  endCapMargin?: number;
 }
 
 export interface RoadExclusionBox {

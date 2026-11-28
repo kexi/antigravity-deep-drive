@@ -62,7 +62,9 @@ export class CameraController {
     const safeAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 16 / 9;
     this.currentAspect = safeAspect;
     const initialFov = this.computeResponsiveFov(safeAspect);
-    this.camera = new THREE.PerspectiveCamera(initialFov, safeAspect, 0.1, 2600);
+    // 10倍大拡張大東京オープンワールド（86km²: 新宿都庁〜渋谷〜東京タワー〜お台場〜東京スカイツリー634m）の
+    // 遠景超高層スカイラインを水平線まで美しく視認できるよう far plane を 5500m へ拡張
+    this.camera = new THREE.PerspectiveCamera(initialFov, safeAspect, 0.1, 5500);
   }
 
   /**

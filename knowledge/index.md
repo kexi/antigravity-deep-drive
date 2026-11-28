@@ -74,3 +74,10 @@ trust_signals:
 - [059-unified-sidewalk-creation-system.md](./059-unified-sidewalk-creation-system.md): 統一歩道作成システム・共有マテリアルキャッシュ・交差点切下げスロープ・集水桝・歩道ネットワーク SSOT
 - [060-japanese-road-8-system-infrastructure.md](./060-japanese-road-8-system-infrastructure.md): 日本の道路全8系統インフラ統合アーキテクチャ（照明・防護安全・路面インフラ・沿道ファニチャー・統合監査）
 - [061-blender-toyota-crown-sedan-class-a-sculpted-overhaul.md](./061-blender-toyota-crown-sedan-class-a-sculpted-overhaul.md): Blender MCP トヨタ クラウン セダン (AZSH32) Class-A 曲面オーバーホールと4ラウンド360度収束レビュー
+- [062-crown-sedan-realistic-vehicle-mass-and-dynamics.md](./062-crown-sedan-realistic-vehicle-mass-and-dynamics.md): トヨタ クラウン セダン (AZSH32, 1,980 kg FR) 実車質量・重心・慣性モーメント・荷重移動物理オーバーホール
+- [063-comprehensive-object-and-glb-trimesh-collisions.md](./063-comprehensive-object-and-glb-trimesh-collisions.md): 都市・道路・GLB建築物全域の当たり判定網羅修正と地上帯 Trimesh コライダー統合
+- [064-intersection-sidewalk-continuity-and-arbitrary-angle-connectors.md](./064-intersection-sidewalk-continuity-and-arbitrary-angle-connectors.md): 交差点歩道の完全連続化・L字外周歩道・T字端キャップクリッピング・任意角度歩道コネクタ設計
+- [065-shibuya-plateau-20-tile-full-density-and-lod-sync.md](./065-shibuya-plateau-20-tile-full-density-and-lod-sync.md): 渋谷PLATEAU公式20リーフタイル全面展開・斜面誤削除解消・歩道外縁セットバック・LOD2スカイライン刷新
+- [066-shibuya-plateau-3d-architectural-modeling-and-3tier-lod.md](./066-shibuya-plateau-3d-architectural-modeling-and-3tier-lod.md): 渋谷PLATEAU全4,159棟のBlender 3D建築モデリング・3段階距離LOD・Draco配信最適化
+- [067-shibuya-plateau-lod-baked-textures-and-uv-convergence.md](./067-shibuya-plateau-lod-baked-textures-and-uv-convergence.md): 渋谷PLATEAU建築の3D-to-LODテクスチャベイク基盤・整数スパンUV同期・夜間窓専用発光収束
+- [068-greater-tokyo-tenfold-expansion-86sqkm-open-world.md](./068-greater-tokyo-tenfold-expansion-86sqkm-open-world.md): 大東京10倍大拡張（86.0km²・48空間チャンク・125km超幹線網・2,200棟ビル・7大ランドマーク）アーキテクチャ

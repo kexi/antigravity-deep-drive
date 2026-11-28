@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
-import { VehiclePhysics } from "../physics/vehicle";
+import { CROWN_SEDAN_PHYSICS_SPEC, VehiclePhysics } from "../physics/vehicle";
 import { CarModel } from "../vehicle/carModel";
 import type { WeatherType, WiperMode } from "../types";
 
@@ -1053,5 +1053,195 @@ describe("車両およびゲームシステムの仕様検証", () => {
     );
     expect(afterAccelerate.speedKmh).toBeGreaterThan(10.0);
     expect(movedDist).toBeGreaterThan(1.0);
+  });
+
+  it("トヨタ クラウン セダン (1,980 kg FR) の質量・52:48重心・3軸慣性モーメント・加減速荷重移動・空気抵抗・路面別制動距離が物理的に再現されることを保証する", async () => {
+    await RAPIER.init();
+    const dt = 1 / 60;
+
+    const createFlatWorldAndVehicle = (surface: "dry" | "wet" | "puddle") => {
+      const world = new RAPIER.World(new RAPIER.Vector3(0.0, -9.81, 0.0));
+      world.createCollider(
+        RAPIER.ColliderDesc.cuboid(1200, 0.5, 1200).setTranslation(0, -0.5, 0).setFriction(0.95),
+      );
+      const vehicle = new VehiclePhysics(world, RAPIER, new THREE.Vector3(0, 0.622, 0));
+      vehicle.setRoadSurfaceCondition(surface);
+      return { world, vehicle };
+    };
+
+    // 1. 質量 (1,980 kg)・ローカル重心 (52:48, h_cg≈0.54m)・3軸慣性モーメント (I_x=3450, I_y=3850, I_z=780) の厳密検証
+    const { world, vehicle } = createFlatWorldAndVehicle("dry");
+    expect(vehicle.rigidBody.mass()).toBeCloseTo(CROWN_SEDAN_PHYSICS_SPEC.massKg, 1);
+    const com = vehicle.rigidBody.localCom();
+    expect(com.x).toBeCloseTo(0, 4);
+    expect(com.y).toBeCloseTo(CROWN_SEDAN_PHYSICS_SPEC.centerOfMassLocal.y, 4);
+    expect(com.z).toBeCloseTo(CROWN_SEDAN_PHYSICS_SPEC.centerOfMassLocal.z, 4);
+
+    // 各ローカル軸へ単位トルクインパルスを与えて真の慣性モーメント I = τ / ω を実測検証
+    const measureAxisInertia = (tx: number, ty: number, tz: number): number => {
+      vehicle.rigidBody.setAngvel(new RAPIER.Vector3(0, 0, 0), true);
+      vehicle.rigidBody.applyTorqueImpulse(new RAPIER.Vector3(tx, ty, tz), true);
+      const w = vehicle.rigidBody.angvel();
+      const mag = Math.hypot(tx, ty, tz);
+      const wAxis = tx !== 0 ? w.x : ty !== 0 ? w.y : w.z;
+      vehicle.rigidBody.setAngvel(new RAPIER.Vector3(0, 0, 0), true);
+      return mag / wAxis;
+    };
+    expect(measureAxisInertia(100, 0, 0)).toBeCloseTo(3450, -1); // ピッチ慣性
+    expect(measureAxisInertia(0, 100, 0)).toBeCloseTo(3850, -1); // ヨー慣性
+    expect(measureAxisInertia(0, 0, 100)).toBeCloseTo(780, -1); // ロール慣性
+
+    // 2. 静的平衡時の4輪合計接地荷重 = m*g (19,424 N) かつ前後重量配分 52:48、水平静止・路面接地 0mm 整合の検証
+    for (let i = 0; i < 120; i += 1) {
+      vehicle.update(dt, { throttle: 0, brake: 0, steer: 0, handbrake: false });
+      world.timestep = dt;
+      world.step();
+    }
+    const settled = vehicle.getState();
+    const staticFrontLoadN =
+      (settled.wheels[0].suspensionForce ?? 0) + (settled.wheels[1].suspensionForce ?? 0);
+    const staticRearLoadN =
+      (settled.wheels[2].suspensionForce ?? 0) + (settled.wheels[3].suspensionForce ?? 0);
+    const staticTotalLoadN = staticFrontLoadN + staticRearLoadN;
+    const expectedWeightN = CROWN_SEDAN_PHYSICS_SPEC.massKg * CROWN_SEDAN_PHYSICS_SPEC.gravityMs2;
+    expect(staticTotalLoadN).toBeGreaterThan(expectedWeightN * 0.96);
+    expect(staticTotalLoadN).toBeLessThan(expectedWeightN * 1.04);
+    const staticFrontRatio = staticFrontLoadN / staticTotalLoadN;
+    expect(staticFrontRatio).toBeGreaterThan(0.505);
+    expect(staticFrontRatio).toBeLessThan(0.535);
+    expect(Math.abs(THREE.MathUtils.radToDeg(settled.pitchAngle))).toBeLessThan(0.35);
+    expect(Math.abs(settled.position.y)).toBeLessThan(0.02);
+
+    // 3. FR 後輪駆動（前輪駆動力 0 / 後輪2本合計 <= launchTractionForceCapN）・0-100 km/h 実車相当加速 (6.2〜9.0秒)・加速スクワット荷重移動の検証
+    let timeTo100S = -1;
+    let peakSquatPitchDeg = 0;
+    let peakRearLoadDuringAccelN = 0;
+    let peakLongG = 0;
+    const gearsSeen = new Set<string>();
+
+    for (let step = 1; step <= 600; step += 1) {
+      vehicle.update(dt, { throttle: 1.0, brake: 0, steer: 0, handbrake: false });
+      if (step === 10) {
+        expect(vehicle.vehicleController.wheelEngineForce(0)).toBe(0);
+        expect(vehicle.vehicleController.wheelEngineForce(1)).toBe(0);
+        const rearLeftF = vehicle.vehicleController.wheelEngineForce(2) ?? 0;
+        const rearRightF = vehicle.vehicleController.wheelEngineForce(3) ?? 0;
+        expect(rearLeftF).toBeGreaterThan(2000);
+        expect(rearRightF).toBeCloseTo(rearLeftF, 3);
+        expect(rearLeftF + rearRightF).toBeLessThanOrEqual(
+          CROWN_SEDAN_PHYSICS_SPEC.launchTractionForceCapN + 1,
+        );
+      }
+      world.timestep = dt;
+      world.step();
+      const s = vehicle.getState();
+      gearsSeen.add(s.gear);
+      const pitchDeg = THREE.MathUtils.radToDeg(s.pitchAngle);
+      peakSquatPitchDeg = Math.max(peakSquatPitchDeg, pitchDeg);
+      const rearLoadN = (s.wheels[2].suspensionForce ?? 0) + (s.wheels[3].suspensionForce ?? 0);
+      peakRearLoadDuringAccelN = Math.max(peakRearLoadDuringAccelN, rearLoadN);
+      peakLongG = Math.max(peakLongG, s.longitudinalG ?? 0);
+      if (timeTo100S < 0 && s.speedKmh >= 100.0) {
+        timeTo100S = step * dt;
+        break;
+      }
+    }
+    expect(timeTo100S).toBeGreaterThan(6.2);
+    expect(timeTo100S).toBeLessThan(9.0);
+    expect(peakSquatPitchDeg).toBeGreaterThan(0.35);
+    expect(peakRearLoadDuringAccelN).toBeGreaterThan(staticRearLoadN + 1200);
+    expect(peakLongG).toBeGreaterThan(0.28);
+    expect(peakLongG).toBeLessThan(0.65);
+    expect(gearsSeen.has("D 2")).toBe(true);
+
+    // 4. 100 -> 0 km/h フルブレーキング制動距離 (30〜48m)・ノーズダイブ・前輪荷重増加の検証（乾燥路面 vs 水たまり路面）
+    const measureBrakeFrom100 = (surface: "dry" | "puddle") => {
+      const env = createFlatWorldAndVehicle(surface);
+      for (let i = 0; i < 60; i += 1) {
+        env.vehicle.update(dt, { throttle: 0, brake: 0, steer: 0, handbrake: false });
+        env.world.timestep = dt;
+        env.world.step();
+      }
+      env.vehicle.rigidBody.setLinvel(new RAPIER.Vector3(0, 0, 100 / 3.6), true);
+      const startZ = env.vehicle.rigidBody.translation().z;
+      let minPitchDeg = 99;
+      let maxFrontLoadN = 0;
+      for (let i = 1; i <= 500; i += 1) {
+        env.vehicle.update(dt, { throttle: 0, brake: 1.0, steer: 0, handbrake: false });
+        env.world.timestep = dt;
+        env.world.step();
+        const s = env.vehicle.getState();
+        minPitchDeg = Math.min(minPitchDeg, THREE.MathUtils.radToDeg(s.pitchAngle));
+        const frontLoadN = (s.wheels[0].suspensionForce ?? 0) + (s.wheels[1].suspensionForce ?? 0);
+        maxFrontLoadN = Math.max(maxFrontLoadN, frontLoadN);
+        if (s.speedKmh < 1.0) {
+          return {
+            distM: env.vehicle.rigidBody.translation().z - startZ,
+            minPitchDeg,
+            maxFrontLoadN,
+          };
+        }
+      }
+      return {
+        distM: env.vehicle.rigidBody.translation().z - startZ,
+        minPitchDeg,
+        maxFrontLoadN,
+      };
+    };
+
+    const dryBrake = measureBrakeFrom100("dry");
+    const puddleBrake = measureBrakeFrom100("puddle");
+    expect(dryBrake.distM).toBeGreaterThan(30.0);
+    expect(dryBrake.distM).toBeLessThan(48.0);
+    expect(dryBrake.minPitchDeg).toBeLessThan(-1.0);
+    expect(dryBrake.maxFrontLoadN).toBeGreaterThan(staticFrontLoadN + 3000);
+    expect(puddleBrake.distM).toBeGreaterThan(dryBrake.distM + 6.0);
+
+    // 5. 空気抵抗 (v^2) 検証: 高速域 (120 km/h) からの惰性減速度が低速域 (40 km/h) より大きいこと
+    const measureCoastDecelMs2 = (initialKmh: number): number => {
+      const env = createFlatWorldAndVehicle("dry");
+      for (let i = 0; i < 45; i += 1) {
+        env.vehicle.update(dt, { throttle: 0, brake: 0, steer: 0, handbrake: false });
+        env.world.timestep = dt;
+        env.world.step();
+      }
+      const v0 = initialKmh / 3.6;
+      env.vehicle.rigidBody.setLinvel(new RAPIER.Vector3(0, 0, v0), true);
+      for (let i = 0; i < 60; i += 1) {
+        env.vehicle.update(dt, { throttle: 0, brake: 0, steer: 0, handbrake: false });
+        env.world.timestep = dt;
+        env.world.step();
+      }
+      const v1 = env.vehicle.rigidBody.linvel().z;
+      return (v0 - v1) / 1.0;
+    };
+    const decelAt120 = measureCoastDecelMs2(120);
+    const decelAt40 = measureCoastDecelMs2(40);
+    expect(decelAt120).toBeGreaterThan(decelAt40 + 0.15);
+
+    // 6. 旋回時の外輪荷重移動とアンチロールバー制御下の自然なボディロール検証
+    const cornerEnv = createFlatWorldAndVehicle("dry");
+    for (let i = 0; i < 60; i += 1) {
+      cornerEnv.vehicle.update(dt, { throttle: 0, brake: 0, steer: 0, handbrake: false });
+      cornerEnv.world.timestep = dt;
+      cornerEnv.world.step();
+    }
+    cornerEnv.vehicle.rigidBody.setLinvel(new RAPIER.Vector3(0, 0, 58 / 3.6), true);
+    let maxAbsRollDeg = 0;
+    let peakOutsideMinusInsideN = 0;
+    for (let i = 0; i < 90; i += 1) {
+      cornerEnv.vehicle.update(dt, { throttle: 0.25, brake: 0, steer: 0.75, handbrake: false });
+      cornerEnv.world.timestep = dt;
+      cornerEnv.world.step();
+      const s = cornerEnv.vehicle.getState();
+      maxAbsRollDeg = Math.max(maxAbsRollDeg, Math.abs(THREE.MathUtils.radToDeg(s.rollAngle)));
+      // 右旋回 (steer > 0) では外輪 (+X側: wheels[1], wheels[3]) の荷重が内輪 (-X側: wheels[0], wheels[2]) より増える
+      const outsideLoad = (s.wheels[1].suspensionForce ?? 0) + (s.wheels[3].suspensionForce ?? 0);
+      const insideLoad = (s.wheels[0].suspensionForce ?? 0) + (s.wheels[2].suspensionForce ?? 0);
+      peakOutsideMinusInsideN = Math.max(peakOutsideMinusInsideN, outsideLoad - insideLoad);
+    }
+    expect(maxAbsRollDeg).toBeGreaterThan(0.4);
+    expect(maxAbsRollDeg).toBeLessThan(4.5);
+    expect(peakOutsideMinusInsideN).toBeGreaterThan(1000);
   });
 });

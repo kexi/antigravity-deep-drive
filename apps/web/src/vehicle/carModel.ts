@@ -29,6 +29,10 @@ import {
   localToWgs84,
 } from "../openData/gsiPlateauLoader";
 import {
+  GREATER_TOKYO_ARTERIAL_ROADS,
+  GREATER_TOKYO_LANDMARKS,
+} from "../city/greaterTokyoExpansion";
+import {
   formatLabelPair,
   getNavigationMapLabels,
   getUiTranslations,
@@ -1560,8 +1564,14 @@ export class CarModel {
     ctx.arc(midCx, gBoxY, 15, 0, Math.PI * 2);
     ctx.stroke();
 
-    const gDotX = midCx - THREE.MathUtils.clamp(state.steeringAngle * 24, -12, 12);
-    const gDotY = gBoxY + THREE.MathUtils.clamp(state.pitchAngle * 80, -12, 12);
+    const gDotX =
+      state.lateralG !== undefined
+        ? midCx + THREE.MathUtils.clamp(state.lateralG * 13, -12, 12)
+        : midCx - THREE.MathUtils.clamp(state.steeringAngle * 24, -12, 12);
+    const gDotY =
+      state.longitudinalG !== undefined
+        ? gBoxY + THREE.MathUtils.clamp(state.longitudinalG * 13, -12, 12)
+        : gBoxY + THREE.MathUtils.clamp(state.pitchAngle * 80, -12, 12);
     ctx.beginPath();
     ctx.arc(gDotX, gDotY, 5, 0, Math.PI * 2);
     ctx.fillStyle = "#38bdf8";
@@ -2011,12 +2021,15 @@ export class CarModel {
         { localX: -692.0, localZ: 562.0, width: 10.0, depth: 115.0 },
         { localX: -612.0, localZ: 676.0, width: 10.0, depth: 125.0 },
         { localX: -522.0, localZ: 804.0, width: 10.0, depth: 135.0 },
+        // 大東京10倍拡張：隅田川および東京湾海域
+        { localX: 1785.0, localZ: 1600.0, width: 270.0, depth: 5600.0 },
+        { localX: 1900.0, localZ: -2700.0, width: 1100.0, depth: 3000.0 },
       ];
     }
     const waterBodiesForNav = this.cachedNavWaterBodies;
     for (const wb of waterBodiesForNav) {
       const distWater = Math.hypot(wb.localX - carX, wb.localZ - carZ);
-      const isWaterVisible = distWater < 650;
+      const isWaterVisible = distWater < Math.max(650, Math.hypot(wb.width, wb.depth) * 0.55 + 450);
       if (!isWaterVisible) {
         continue;
       }
@@ -2056,6 +2069,14 @@ export class CarModel {
           h: 46,
         },
         ...getShibuyaPlateauBuildingsForMap(),
+        ...GREATER_TOKYO_LANDMARKS.map((lm) => ({
+          buildingId: lm.id,
+          x: lm.x,
+          z: lm.z,
+          w: lm.width,
+          d: lm.depth,
+          h: lm.height,
+        })),
       ];
     }
     const mapBuildings = this.cachedNavMapBuildings;
@@ -2120,17 +2141,34 @@ export class CarModel {
     // 既存の道路塗りを上書きし、ソーセージの継ぎ目状の黒いスジや段差（「カクカクで変な道路表現」）が発生する。
     // 全道路の外枠（Pass 1）→ 全道路の路面塗り（Pass 2）→ 車線・交差点フィレット（Pass 3）の順に階層合成し、
     // さらに lineCap = "round" とすることで T字路・十字路のすべてが段差なく滑らかに結合される。
-    const navCorridors = getNavigationRoadCorridors();
+    const navCorridors = [
+      ...getNavigationRoadCorridors(),
+      ...GREATER_TOKYO_ARTERIAL_ROADS.map((road) => ({
+        id: road.id,
+        displayName: road.displayName,
+        routeCode: road.routeCode,
+        category: road.routeCode.startsWith("国道")
+          ? ("national_highway" as const)
+          : ("major_avenue" as const),
+        widthMeters: road.widthMeters,
+        hasMedianLine: true,
+        points: road.points,
+      })),
+    ];
     const navIntersections = getNavigationIntersections();
     const visibleNavCorridors = navCorridors.filter((corridor) => {
       const isValidCorridor = corridor.points.length >= 2;
       if (!isValidCorridor) {
         return false;
       }
-      for (let i = 0; i < corridor.points.length; i++) {
-        const pt = corridor.points[i];
-        const isPtNearCar = Math.abs(pt.x - carX) < 560 && Math.abs(pt.z - carZ) < 560;
-        if (isPtNearCar) {
+      for (let i = 0; i < corridor.points.length - 1; i++) {
+        const a = corridor.points[i];
+        const b = corridor.points[i + 1];
+        const minSegX = Math.min(a.x, b.x) - 560;
+        const maxSegX = Math.max(a.x, b.x) + 560;
+        const minSegZ = Math.min(a.z, b.z) - 560;
+        const maxSegZ = Math.max(a.z, b.z) + 560;
+        if (carX >= minSegX && carX <= maxSegX && carZ >= minSegZ && carZ <= maxSegZ) {
           return true;
         }
       }
@@ -3855,9 +3893,13 @@ export class CarModel {
     this.steeringWheel.rotation.z = state.steeringAngle * 2.8;
 
     // 3. 4輪のサスペンション上下ストローク・前輪操舵角・ホイール回転の同期
-    const wheelRotSpeed = (state.speedKmh / 3.6 / 0.38) * dt;
+    const effectiveWheelRadius = state.wheelRadius ?? 0.34;
+    const wheelRotSpeed = (state.speedKmh / 3.6 / effectiveWheelRadius) * dt;
     const hasWheelTelemetry = Array.isArray(state.wheels) && state.wheels.length >= 4;
-    const restLength = 0.32;
+    // Why equilibriumSuspensionLength (0.2622m) を基準にするか:
+    // 自由長 (restLength) を基準にすると静的たわみ量 (+0.11m) だけ常にホイールがフェンダー側へ押し上げられてしまうため、
+    // 静的平衡長を 0 基準とし、加減速・旋回・段差による動的ストローク変化分のみホイールを上下させる。
+    const neutralSuspensionLength = state.equilibriumSuspensionLength ?? 0.2622;
 
     for (let i = 0; i < this.wheels.length; i++) {
       const wheelObj = this.wheels[i];
@@ -3873,7 +3915,7 @@ export class CarModel {
         const basePos = this.wheelBasePositions[i];
         // サスペンションの伸縮（圧縮時はホイールが車体に対して相対的に上へ移動）
         const compressionOffset = THREE.MathUtils.clamp(
-          restLength - telemetry.suspensionLength,
+          neutralSuspensionLength - telemetry.suspensionLength,
           -0.12,
           0.14,
         );

@@ -610,27 +610,54 @@ export function buildProfiledSidewalkRibbonGeometry(
   return geom;
 }
 
-function minDistanceSqToPointSequence(
+/**
+ * 点 (px, pz) からポリライン中心線までの最短距離の二乗を算出する。
+ *
+ * Why not 単純な全セグメント最短距離をそのまま使うか:
+ * T字路で支線が本線の中心線で終端する場合、単純なユークリッド距離は終端から半径 (halfWidth + sidewalk) の
+ * 半球状に本線の反対側まで突き抜けてしまい、本線側の途切れるべきでない連続歩道まで切断してしまう。
+ * ポリライン全体の最近接点が先頭セグメントの前方（rawT < 0）または末尾セグメントの後方（rawT > 1）にあり、
+ * かつ長手方向の端キャップ余白（endCapMargin）を超える場合は非干渉（Infinity）として扱う。
+ */
+function minDistanceSqToCorridorRibbon(
   px: number,
   pz: number,
   pts: ReadonlyArray<{ x: number; z: number }>,
+  endCapMargin: number,
 ): number {
   let minSq = Infinity;
-  for (let i = 0; i < pts.length - 1; i++) {
+  let bestSegIdx = -1;
+  let bestRawT = 0;
+  let bestSegLen = 0;
+  const lastSegIdx = pts.length - 2;
+
+  for (let i = 0; i <= lastSegIdx; i++) {
     const a = pts[i];
     const b = pts[i + 1];
     const dx = b.x - a.x;
     const dz = b.z - a.z;
     const lenSq = dx * dx + dz * dz;
     const hasLength = lenSq > 1e-8;
-    const t = hasLength ? Math.max(0, Math.min(1, ((px - a.x) * dx + (pz - a.z) * dz) / lenSq)) : 0;
+    const rawT = hasLength ? ((px - a.x) * dx + (pz - a.z) * dz) / lenSq : 0;
+    const t = Math.max(0, Math.min(1, rawT));
     const cx = a.x + dx * t;
     const cz = a.z + dz * t;
     const distSq = (px - cx) ** 2 + (pz - cz) ** 2;
     if (distSq < minSq) {
       minSq = distSq;
+      bestSegIdx = i;
+      bestRawT = rawT;
+      bestSegLen = Math.sqrt(lenSq);
     }
   }
+
+  const isPastStartCap = bestSegIdx === 0 && bestRawT < 0 && -bestRawT * bestSegLen > endCapMargin;
+  const isPastEndCap =
+    bestSegIdx === lastSegIdx && bestRawT > 1 && (bestRawT - 1) * bestSegLen > endCapMargin;
+  if (isPastStartCap || isPastEndCap) {
+    return Infinity;
+  }
+
   return minSq;
 }
 
@@ -752,8 +779,9 @@ export function computePerSideCorridorIntervals(
       }
 
       for (const other of exclusionCorridors) {
-        const minDistSq = minDistanceSqToPointSequence(px, pz, other.sampledPoints);
-        const safeThreshold = other.halfWidth + 0.25;
+        const endCapMargin = other.endCapMargin ?? 1.5;
+        const minDistSq = minDistanceSqToCorridorRibbon(px, pz, other.sampledPoints, endCapMargin);
+        const safeThreshold = other.halfWidth + (other.sidewalkClearance ?? 0) + 0.25;
         if (minDistSq < safeThreshold * safeThreshold) {
           return true;
         }

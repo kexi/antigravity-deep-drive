@@ -15,7 +15,26 @@ export type ShibuyaTextureId =
   | "dogenzakaCommercial"
   | "plateauLod2Facade"
   | "plateauLod2Storefront"
-  | "plateauLod2Roof";
+  | "plateauLod2Roof"
+  | "plateauLod0Glass"
+  | "plateauLod0GlassEmissive"
+  | "plateauLod0Commercial"
+  | "plateauLod0CommercialEmissive"
+  | "plateauLod0Storefront"
+  | "plateauLod0StorefrontEmissive"
+  | "plateauLod0Alley"
+  | "plateauLod0AlleyEmissive"
+  | "plateauLod0Roof"
+  | "plateauLod0PitchedRoof"
+  | "plateauLod1Glass"
+  | "plateauLod1GlassEmissive"
+  | "plateauLod1Commercial"
+  | "plateauLod1CommercialEmissive"
+  | "plateauLod1Alley"
+  | "plateauLod1AlleyEmissive"
+  | "plateauLod1Roof"
+  | "plateauLod2Proxy"
+  | "plateauLod2ProxyEmissive";
 
 export interface ShibuyaTextureConfig {
   id: ShibuyaTextureId;
@@ -162,6 +181,146 @@ export const SHIBUYA_TEXTURE_CONFIGS: Record<ShibuyaTextureId, ShibuyaTextureCon
     metalness: 0.12,
     emissiveIntensityDay: 0.02,
     emissiveIntensityNight: 0.15,
+  },
+  // --- Blender 3D建築リグ連動 LOD0 (1024px) / LOD1 (512px) / LOD2 (256px) ＆夜間窓専用発光マスク ---
+  plateauLod0Glass: {
+    id: "plateauLod0Glass",
+    url: "/textures/shibuya/plateau_lod0_glass.jpg",
+    repeat: [1, 1],
+    roughness: 0.2,
+    metalness: 0.48,
+    emissiveIntensityDay: 0.02,
+    emissiveIntensityNight: 1.15,
+  },
+  plateauLod0GlassEmissive: {
+    id: "plateauLod0GlassEmissive",
+    url: "/textures/shibuya/plateau_lod0_glass_emissive.jpg",
+    repeat: [1, 1],
+  },
+  plateauLod0Commercial: {
+    id: "plateauLod0Commercial",
+    url: "/textures/shibuya/plateau_lod0_commercial.jpg",
+    repeat: [1, 1],
+    roughness: 0.44,
+    metalness: 0.18,
+    emissiveIntensityDay: 0.02,
+    emissiveIntensityNight: 1.14,
+  },
+  plateauLod0CommercialEmissive: {
+    id: "plateauLod0CommercialEmissive",
+    url: "/textures/shibuya/plateau_lod0_commercial_emissive.jpg",
+    repeat: [1, 1],
+  },
+  plateauLod0Storefront: {
+    id: "plateauLod0Storefront",
+    url: "/textures/shibuya/plateau_lod0_storefront.jpg",
+    repeat: [1, 1],
+    roughness: 0.34,
+    metalness: 0.2,
+    emissiveIntensityDay: 0.04,
+    emissiveIntensityNight: 0.95,
+  },
+  plateauLod0StorefrontEmissive: {
+    id: "plateauLod0StorefrontEmissive",
+    url: "/textures/shibuya/plateau_lod0_storefront_emissive.jpg",
+    repeat: [1, 1],
+  },
+  plateauLod0Alley: {
+    id: "plateauLod0Alley",
+    url: "/textures/shibuya/plateau_lod0_alley.jpg",
+    repeat: [1, 1],
+    roughness: 0.5,
+    metalness: 0.12,
+    emissiveIntensityDay: 0.02,
+    emissiveIntensityNight: 1.14,
+  },
+  plateauLod0AlleyEmissive: {
+    id: "plateauLod0AlleyEmissive",
+    url: "/textures/shibuya/plateau_lod0_alley_emissive.jpg",
+    repeat: [1, 1],
+  },
+  plateauLod0Roof: {
+    id: "plateauLod0Roof",
+    url: "/textures/shibuya/plateau_lod0_roof.jpg",
+    repeat: [1, 1],
+    roughness: 0.82,
+    metalness: 0.08,
+    emissiveIntensityDay: 0.0,
+    emissiveIntensityNight: 0.0,
+  },
+  plateauLod0PitchedRoof: {
+    id: "plateauLod0PitchedRoof",
+    url: "/textures/shibuya/plateau_lod0_pitched_roof.jpg",
+    repeat: [1, 1],
+    roughness: 0.76,
+    metalness: 0.06,
+    emissiveIntensityDay: 0.0,
+    emissiveIntensityNight: 0.0,
+  },
+  plateauLod1Glass: {
+    id: "plateauLod1Glass",
+    url: "/textures/shibuya/plateau_lod1_glass.jpg",
+    repeat: [1, 1],
+    roughness: 0.28,
+    metalness: 0.38,
+    emissiveIntensityDay: 0.02,
+    emissiveIntensityNight: 1.18,
+  },
+  plateauLod1GlassEmissive: {
+    id: "plateauLod1GlassEmissive",
+    url: "/textures/shibuya/plateau_lod1_glass_emissive.jpg",
+    repeat: [1, 1],
+  },
+  plateauLod1Commercial: {
+    id: "plateauLod1Commercial",
+    url: "/textures/shibuya/plateau_lod1_commercial.jpg",
+    repeat: [1, 1],
+    roughness: 0.5,
+    metalness: 0.16,
+    emissiveIntensityDay: 0.02,
+    emissiveIntensityNight: 1.16,
+  },
+  plateauLod1CommercialEmissive: {
+    id: "plateauLod1CommercialEmissive",
+    url: "/textures/shibuya/plateau_lod1_commercial_emissive.jpg",
+    repeat: [1, 1],
+  },
+  plateauLod1Alley: {
+    id: "plateauLod1Alley",
+    url: "/textures/shibuya/plateau_lod1_alley.jpg",
+    repeat: [1, 1],
+    roughness: 0.54,
+    metalness: 0.1,
+    emissiveIntensityDay: 0.02,
+    emissiveIntensityNight: 1.16,
+  },
+  plateauLod1AlleyEmissive: {
+    id: "plateauLod1AlleyEmissive",
+    url: "/textures/shibuya/plateau_lod1_alley_emissive.jpg",
+    repeat: [1, 1],
+  },
+  plateauLod1Roof: {
+    id: "plateauLod1Roof",
+    url: "/textures/shibuya/plateau_lod1_roof.jpg",
+    repeat: [1, 1],
+    roughness: 0.84,
+    metalness: 0.06,
+    emissiveIntensityDay: 0.0,
+    emissiveIntensityNight: 0.0,
+  },
+  plateauLod2Proxy: {
+    id: "plateauLod2Proxy",
+    url: "/textures/shibuya/plateau_lod2_proxy.jpg",
+    repeat: [1, 1],
+    roughness: 0.68,
+    metalness: 0.14,
+    emissiveIntensityDay: 0.02,
+    emissiveIntensityNight: 1.16,
+  },
+  plateauLod2ProxyEmissive: {
+    id: "plateauLod2ProxyEmissive",
+    url: "/textures/shibuya/plateau_lod2_proxy_emissive.jpg",
+    repeat: [1, 1],
   },
 };
 
@@ -330,13 +489,14 @@ export class ShibuyaTextureManager {
    * 遠景（LOD2）用の軽量プロキシマテリアルを生成する（単一ドローコール・テクスチャMipmap・低負荷シェーディング）
    */
   public createPlateauLod2ProxyMaterial(isNight = false): THREE.MeshStandardMaterial {
-    const tex = this.getTexture("plateauLod2Facade");
+    const tex = this.getTexture("plateauLod2Proxy");
+    const emissiveTex = this.getTexture("plateauLod2ProxyEmissive");
     const mat = new THREE.MeshStandardMaterial({
       map: tex,
       roughness: 0.65,
       metalness: 0.15,
       emissive: new THREE.Color(0xffe8ba),
-      emissiveMap: tex,
+      emissiveMap: emissiveTex,
       emissiveIntensity: isNight ? 0.45 : 0.05,
     });
     mat.name = "PlateauLod2ProxyMat";

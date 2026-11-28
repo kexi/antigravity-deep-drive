@@ -47,6 +47,8 @@ export interface WheelTelemetry {
   inContact: boolean;
   rotation: number;
   steering: number;
+  /** 各輪の鉛直サスペンション反力（接地荷重）[N] */
+  suspensionForce?: number;
 }
 
 export interface VehicleState {
@@ -62,4 +64,14 @@ export interface VehicleState {
   rollAngle: number;
   wheels: WheelTelemetry[];
   turnSignal?: TurnSignalState;
+  /** 車体前後加速度 [G]（加速=正 / 制動=負） */
+  longitudinalG?: number;
+  /** 車体横加速度 [G]（右旋回遠心力=+X方向=正） */
+  lateralG?: number;
+  /** 車両総質量 [kg] */
+  massKg?: number;
+  /** 静的平衡時のサスペンション基準長 [m] */
+  equilibriumSuspensionLength?: number;
+  /** 物理タイヤ半径 [m] */
+  wheelRadius?: number;
 }

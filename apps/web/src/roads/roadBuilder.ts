@@ -2621,8 +2621,27 @@ export class JapaneseRoadBuilder {
             },
           );
           this.props.signalController.registerSignal(managedTl.handle);
-          managedTl.group.position.y = evalY(lightPosX, lightPosZ, baseY);
+          const signalGroundY = evalY(lightPosX, lightPosZ, baseY);
+          managedTl.group.position.y = signalGroundY;
           group.add(managedTl.group);
+
+          // 曲線道路の信号支柱にも物理コライダーを付与してすり抜けを防止する
+          const hasCyl = typeof rapier.ColliderDesc.cylinder === "function";
+          const signalPoleBody = physicsWorld.createRigidBody(
+            rapier.RigidBodyDesc.fixed().setTranslation(lightPosX, signalGroundY + 2.5, lightPosZ),
+          );
+          const signalPoleDesc = (
+            hasCyl
+              ? rapier.ColliderDesc.cylinder(2.5, 0.16)
+              : rapier.ColliderDesc.cuboid(0.16, 2.5, 0.16)
+          )
+            .setFriction(0.4)
+            .setRestitution(0.12);
+          const signalPoleCol = physicsWorld.createCollider(signalPoleDesc, signalPoleBody);
+          segmentColliders.push(signalPoleCol);
+          if (typeof signalPoleCol?.handle === "number") {
+            obstacleColliderHandles.push(signalPoleCol.handle);
+          }
         }
       }
     }

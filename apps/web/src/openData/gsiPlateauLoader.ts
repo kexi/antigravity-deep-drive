@@ -1,5 +1,9 @@
 import { assetManager } from "../assets/assetManager";
 import { TOKYO_MARUNOUCHI_OPEN_DATA } from "./tokyoMarunouchiOpenData";
+import {
+  findNearestGreaterTokyoLandmark,
+  findNearestGreaterTokyoRoad,
+} from "../city/greaterTokyoExpansion";
 
 export type TokyoOpenDataBundle = typeof TOKYO_MARUNOUCHI_OPEN_DATA;
 export type PlateauBuildingRecord = TokyoOpenDataBundle["plateauBuildings"][number];
@@ -287,11 +291,13 @@ function computeFallbackShibuyaValleyTp(x: number, z: number): number {
 /**
  * 渋谷エリア（`x < -395`）の平滑済み実測 3D 地形・道路標高 Y (m) を計算する。
  * How: 国土地理院 DEM5A 5mメッシュに 2 パス分離平滑化を適用し、渋谷川・明治通り谷底 (`TP +15.0m`) を
- * `y = 0.0m` 基準として実勾配 (`SLOPE_SCALE = 0.72`) を算出する。`x ∈ [-500, -395]` はコサインテーパーで
- * 外苑東通り (`x = -380`) 以降の平坦面 `y = 0.0m` へ滑らかに着地させる。
+ * `y = 0.0m` 基準として実勾配 (`SLOPE_SCALE = 0.72`) を算出する。
+ * 渋谷 PLATEAU コア領域（`x ∈ [-1700, -500], z ∈ [-440, +1120]`）の標高を完全維持しつつ、
+ * 東（`[-500, -395]`）・西（`[-1920, -1700]`）・北（`[-660, -440]`）・南（`[1120, 1340]`）の4辺で
+ * コサインテーパーにより大東京広域平坦面 `y = 0.0m` へ段差なく滑らかに着地させる。
  */
 export function sampleShibuyaTerrainY(x: number, z: number): number {
-  if (x >= -395) {
+  if (x >= -395 || x <= -1920 || z <= -660 || z >= 1340) {
     return 0;
   }
 
@@ -311,12 +317,22 @@ export function sampleShibuyaTerrainY(x: number, z: number): number {
       : computeFallbackShibuyaValleyTp(x, z);
 
   const rawY = Math.max(-0.4, (smoothedTp - SHIBUYA_VALLEY_BASE_TP) * SHIBUYA_SLOPE_SCALE);
+  let taper = 1.0;
   if (x > -500) {
     const t = (x - -500) / (-395 - -500);
-    const taper = 0.5 + 0.5 * Math.cos(Math.PI * t);
-    return Number((rawY * taper).toFixed(3));
+    taper *= 0.5 + 0.5 * Math.cos(Math.PI * t);
+  } else if (x < -1700) {
+    const t = (-1700 - x) / (-1700 - -1920);
+    taper *= 0.5 + 0.5 * Math.cos(Math.PI * t);
   }
-  return Number(rawY.toFixed(3));
+  if (z < -440) {
+    const t = (-440 - z) / (-440 - -660);
+    taper *= 0.5 + 0.5 * Math.cos(Math.PI * t);
+  } else if (z > 1120) {
+    const t = (z - 1120) / (1340 - 1120);
+    taper *= 0.5 + 0.5 * Math.cos(Math.PI * t);
+  }
+  return Number((rawY * taper).toFixed(3));
 }
 
 /**
@@ -1329,6 +1345,21 @@ export function findNearestGsiRoad(x: number, z: number): NearestGsiRoadResult {
     minDistance = minExpresswayDistance;
   }
 
+  // 大東京10倍拡張外周幹線（三軒茶屋・西新宿・品川・上野・浅草・豊洲・お台場・東京スカイツリー等）が
+  // 既存コア道路より近い場合は外周幹線名を優先返却する
+  const greaterRoad = findNearestGreaterTokyoRoad(x, z);
+  const isOuterRoadCloser = greaterRoad !== null && greaterRoad.distanceMeters < minDistance;
+  if (isOuterRoadCloser && greaterRoad) {
+    return {
+      rID: greaterRoad.id,
+      rdCtg: greaterRoad.routeCode.startsWith("国道") ? "国道" : "主要地方道等",
+      rnkWidth: "22m",
+      displayName: greaterRoad.displayName,
+      routeCode: greaterRoad.routeCode,
+      distanceMeters: greaterRoad.distanceMeters,
+    };
+  }
+
   return {
     rID: bestSegment.rID,
     rdCtg: bestSegment.rdCtg,
@@ -1375,6 +1406,28 @@ export function findNearestPlateauBuilding(x: number, z: number): NearestPlateau
       bestCenterDistance = centerDist;
       bestBuilding = b;
     }
+  }
+
+  // 大東京外周7大ランドマーク（東京都庁・東京タワー・東京スカイツリー・レインボーブリッジ等）が
+  // 既存コア建築物より近い場合は外周ランドマークを返す
+  const greaterLandmark = findNearestGreaterTokyoLandmark(x, z);
+  const isGreaterLandmarkCloser =
+    greaterLandmark !== null && greaterLandmark.edgeDistanceMeters < minEdgeDistance;
+  if (isGreaterLandmarkCloser && greaterLandmark) {
+    const lm = greaterLandmark.landmark;
+    return {
+      buildingId: lm.id,
+      gmlId: `13100-${lm.id}`,
+      name: lm.nameJa,
+      nameEn: lm.nameEn,
+      usage: lm.usage,
+      measuredHeight: lm.height,
+      storeysAboveGround: lm.storeys,
+      storeysBelowGround: 2,
+      groundElevationM: 12.0,
+      centerDistanceMeters: greaterLandmark.centerDistanceMeters,
+      edgeDistanceMeters: greaterLandmark.edgeDistanceMeters,
+    };
   }
 
   return {

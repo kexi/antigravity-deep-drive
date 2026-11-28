@@ -31,7 +31,7 @@ export function parseHudVisibilityQuery(search: string): boolean {
 export interface MobileHudQuickBarState {
   cameraMode: CameraMode;
   gazePreset: GazePreset;
-  area: "tokyo" | "shibuya";
+  area: "tokyo" | "shibuya" | "shinjuku" | "odaiba" | "skytree" | "sangenjaya";
   graphicsQuality?: GraphicsQuality;
   locale?: SupportedLocale;
 }
@@ -528,9 +528,16 @@ export class MobileHudController {
     const quickAreaBtn = document.getElementById("quick-area-btn");
     const hasQuickAreaBtn = quickAreaBtn !== null;
     if (hasQuickAreaBtn) {
-      const isShibuya = state.area === "shibuya";
-      quickAreaBtn.textContent = isShibuya ? dict.quickAreaShibuya : dict.quickAreaTokyo;
-      quickAreaBtn.classList.toggle("active", isShibuya);
+      const quickAreaLabelMap: Record<MobileHudQuickBarState["area"], string> = {
+        shibuya: dict.quickAreaShibuya,
+        tokyo: dict.quickAreaTokyo,
+        shinjuku: dict.quickAreaShinjuku,
+        odaiba: dict.quickAreaOdaiba,
+        skytree: dict.quickAreaSkytree,
+        sangenjaya: dict.quickAreaSangenjaya,
+      };
+      quickAreaBtn.textContent = quickAreaLabelMap[state.area] ?? dict.quickAreaShibuya;
+      quickAreaBtn.classList.toggle("active", state.area !== "tokyo");
     }
 
     const quickGraphicsBtn = document.getElementById("quick-graphics-btn");

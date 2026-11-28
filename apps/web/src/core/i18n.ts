@@ -71,6 +71,10 @@ export interface UiTranslationDictionary {
   quickNavGazeTitle: string;
   quickAreaTokyo: string;
   quickAreaShibuya: string;
+  quickAreaShinjuku: string;
+  quickAreaOdaiba: string;
+  quickAreaSkytree: string;
+  quickAreaSangenjaya: string;
   quickGraphicsTitle: string;
   quickResetBtn: string;
   quickLangTitle: string;
@@ -88,6 +92,10 @@ export interface UiTranslationDictionary {
   panelAreaLabel: string;
   areaTokyoBtn: string;
   areaShibuyaBtn: string;
+  areaShinjukuBtn: string;
+  areaOdaibaBtn: string;
+  areaSkytreeBtn: string;
+  areaSangenjayaBtn: string;
   panelTimePrefix: string;
   panelWeatherLabel: string;
   panelSurfaceLabel: string;
@@ -1126,6 +1134,10 @@ export const UI_TRANSLATIONS: Readonly<Record<SupportedLocale, UiTranslationDict
     quickNavGazeTitle: "車内メーター・カーナビ確認",
     quickAreaTokyo: "エリア: 東京駅",
     quickAreaShibuya: "エリア: 渋谷",
+    quickAreaShinjuku: "エリア: 西新宿",
+    quickAreaOdaiba: "エリア: お台場",
+    quickAreaSkytree: "エリア: スカイツリー",
+    quickAreaSangenjaya: "エリア: 三軒茶屋",
     quickGraphicsTitle: "グラフィック品質切替 (高 / 中 / 低)",
     quickResetBtn: "位置リセット",
     quickLangTitle: "表示言語切替 (日本語 / English / 中文)",
@@ -1143,6 +1155,10 @@ export const UI_TRANSLATIONS: Readonly<Record<SupportedLocale, UiTranslationDict
     panelAreaLabel: "走行エリア (Area) [P]",
     areaTokyoBtn: "東京駅・丸の内",
     areaShibuyaBtn: "渋谷",
+    areaShinjukuBtn: "西新宿・都庁",
+    areaOdaibaBtn: "お台場・虹橋",
+    areaSkytreeBtn: "スカイツリー",
+    areaSangenjayaBtn: "三軒茶屋",
     panelTimePrefix: "時間 (Time) [T] — ",
     panelWeatherLabel: "天候 (Weather)",
     panelSurfaceLabel: "路面状態 (Surface) [G]",
@@ -1333,6 +1349,10 @@ export const UI_TRANSLATIONS: Readonly<Record<SupportedLocale, UiTranslationDict
     quickNavGazeTitle: "Check Meters & Center Navigation",
     quickAreaTokyo: "Area: Tokyo Sta.",
     quickAreaShibuya: "Area: Shibuya",
+    quickAreaShinjuku: "Area: Shinjuku",
+    quickAreaOdaiba: "Area: Odaiba",
+    quickAreaSkytree: "Area: Skytree",
+    quickAreaSangenjaya: "Area: Sangenjaya",
     quickGraphicsTitle: "Switch Graphics Quality (High / Med / Low)",
     quickResetBtn: "Reset Pos",
     quickLangTitle: "Switch Language (日本語 / English / 中文)",
@@ -1350,6 +1370,10 @@ export const UI_TRANSLATIONS: Readonly<Record<SupportedLocale, UiTranslationDict
     panelAreaLabel: "Driving Area [P]",
     areaTokyoBtn: "Tokyo Sta. · Marunouchi",
     areaShibuyaBtn: "Shibuya",
+    areaShinjukuBtn: "West Shinjuku",
+    areaOdaibaBtn: "Odaiba · Rainbow Br.",
+    areaSkytreeBtn: "Tokyo Skytree",
+    areaSangenjayaBtn: "Sangenjaya",
     panelTimePrefix: "Time of Day [T] — ",
     panelWeatherLabel: "Weather",
     panelSurfaceLabel: "Road Surface [G]",
@@ -1540,6 +1564,10 @@ export const UI_TRANSLATIONS: Readonly<Record<SupportedLocale, UiTranslationDict
     quickNavGazeTitle: "查看车内仪表与中控导航",
     quickAreaTokyo: "区域: 东京站",
     quickAreaShibuya: "区域: 涩谷",
+    quickAreaShinjuku: "区域: 西新宿",
+    quickAreaOdaiba: "区域: 台场",
+    quickAreaSkytree: "区域: 晴空塔",
+    quickAreaSangenjaya: "区域: 三轩茶屋",
     quickGraphicsTitle: "切换图形画质 (高 / 中 / 低)",
     quickResetBtn: "重置位置",
     quickLangTitle: "切换显示语言 (日本語 / English / 中文)",
@@ -1557,6 +1585,10 @@ export const UI_TRANSLATIONS: Readonly<Record<SupportedLocale, UiTranslationDict
     panelAreaLabel: "驾驶区域 (Area) [P]",
     areaTokyoBtn: "东京站・丸之内",
     areaShibuyaBtn: "涩谷",
+    areaShinjukuBtn: "西新宿・都厅",
+    areaOdaibaBtn: "台场・彩虹桥",
+    areaSkytreeBtn: "东京晴空塔",
+    areaSangenjayaBtn: "三轩茶屋",
     panelTimePrefix: "时间段 (Time) [T] — ",
     panelWeatherLabel: "天气 (Weather)",
     panelSurfaceLabel: "路面状态 (Surface) [G]",
@@ -2275,6 +2307,10 @@ export function applyDocumentTranslations(
   setText("#area-panel-label", dict.panelAreaLabel);
   setText('#area-buttons .hud-btn[data-area="tokyo"]', dict.areaTokyoBtn);
   setText('#area-buttons .hud-btn[data-area="shibuya"]', dict.areaShibuyaBtn);
+  setText('#area-buttons .hud-btn[data-area="shinjuku"]', dict.areaShinjukuBtn);
+  setText('#area-buttons .hud-btn[data-area="odaiba"]', dict.areaOdaibaBtn);
+  setText('#area-buttons .hud-btn[data-area="skytree"]', dict.areaSkytreeBtn);
+  setText('#area-buttons .hud-btn[data-area="sangenjaya"]', dict.areaSangenjayaBtn);
 
   // タイトル画面・ローディング画面
   setText("#title-screen-badge", dict.titleScreenBadge);
@@ -2287,6 +2323,10 @@ export function applyDocumentTranslations(
   setText("#title-controls-hint", dict.titleControlsHint);
   setText('#title-area-buttons .hud-btn[data-area="tokyo"]', dict.areaTokyoBtn);
   setText('#title-area-buttons .hud-btn[data-area="shibuya"]', dict.areaShibuyaBtn);
+  setText('#title-area-buttons .hud-btn[data-area="shinjuku"]', dict.areaShinjukuBtn);
+  setText('#title-area-buttons .hud-btn[data-area="odaiba"]', dict.areaOdaibaBtn);
+  setText('#title-area-buttons .hud-btn[data-area="skytree"]', dict.areaSkytreeBtn);
+  setText('#title-area-buttons .hud-btn[data-area="sangenjaya"]', dict.areaSangenjayaBtn);
   setText('#title-graphics-buttons .hud-btn[data-graphics="high"]', dict.graphicsHighBtn);
   setText('#title-graphics-buttons .hud-btn[data-graphics="medium"]', dict.graphicsMediumBtn);
   setText('#title-graphics-buttons .hud-btn[data-graphics="low"]', dict.graphicsLowBtn);

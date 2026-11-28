@@ -10,12 +10,25 @@ import {
   WORLD_CHUNK_DEFINITIONS,
   type WorldChunkId,
 } from "../city/openWorldStreaming";
-import { TokyoStationMap } from "../city/tokyoStationMap";
+import { TokyoStationMap, type DriveAreaId } from "../city/tokyoStationMap";
+import {
+  GREATER_TOKYO_ARTERIAL_ROADS,
+  GREATER_TOKYO_LANDMARKS,
+  GREATER_TOKYO_WORLD_BOUNDS,
+  OUTER_GREATER_TOKYO_CHUNK_IDS,
+} from "../city/greaterTokyoExpansion";
+import {
+  findNearestGsiRoad,
+  findNearestPlateauBuilding,
+  sampleShibuyaTerrainY,
+} from "../openData/gsiPlateauLoader";
 import { RoadProps } from "../roads/roadProps";
 
 describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
-  it("全20の空間チャンクが10倍広域マップ（渋谷・原宿・恵比寿・山手通り・青山・六本木・大手町・丸の内・皇居周回・有楽町・銀座・新橋・神田・八重洲）を隙間なく網羅し、現在座標から適切なチャンクIDを解決できることを保証する", () => {
-    expect(WORLD_CHUNK_DEFINITIONS.length).toBe(20);
+  it("全48の空間チャンクが10倍大拡張大東京マップ（86.0km²: 西新宿・三軒茶屋・駒沢・下北沢・渋谷・東京駅・お台場・豊洲・上野・浅草・東京スカイツリー）を隙間なく網羅し、現在座標から適切なチャンクIDを解決できることを保証する", () => {
+    expect(WORLD_CHUNK_DEFINITIONS.length).toBe(48);
+    expect(OUTER_GREATER_TOKYO_CHUNK_IDS.size).toBe(28);
+    expect(GREATER_TOKYO_WORLD_BOUNDS.areaSqKm).toBeGreaterThanOrEqual(80);
 
     // 渋谷ストリーム周辺
     expect(resolveChunkIdAtPosition(-750, 480)).toBe("shibuya-core");
@@ -68,6 +81,48 @@ describe("OpenWorldStreamingSystem & Spatial Chunk Management", () => {
     expect(resolveChunkIdAtPosition(156, -750)).toBe("shimbashi-shiodome");
     // 八重洲東・昭和通り
     expect(resolveChunkIdAtPosition(700, 0)).toBe("yaesu-showadori-east");
+
+    // 10倍大拡張 外周28チャンク（86.0km² 全域）の代表座標解決を検証
+    expect(resolveChunkIdAtPosition(-2450, -2450)).toBe("shinjuku-west-tocho");
+    expect(resolveChunkIdAtPosition(-4600, -2200)).toBe("nakano-sakaue-honcho");
+    expect(resolveChunkIdAtPosition(-3100, -350)).toBe("hatsudai-sasazuka");
+    expect(resolveChunkIdAtPosition(-4600, -350)).toBe("shimokitazawa-daita");
+    expect(resolveChunkIdAtPosition(-3100, 1020)).toBe("sangenjaya-ikejiri");
+    expect(resolveChunkIdAtPosition(-4600, 1260)).toBe("setagaya-komazawa");
+    expect(resolveChunkIdAtPosition(-3100, 2150)).toBe("gakugeidaigaku-yutenji");
+    expect(resolveChunkIdAtPosition(-4600, 3650)).toBe("jiyugaoka-futako");
+    expect(resolveChunkIdAtPosition(-920, -1850)).toBe("yoyogi-shinjuku-south");
+    expect(resolveChunkIdAtPosition(-920, -3400)).toBe("shinjuku-kabukicho-east");
+    expect(resolveChunkIdAtPosition(-380, -1850)).toBe("yotsuya-shinanomachi");
+    expect(resolveChunkIdAtPosition(-380, -3400)).toBe("ichigaya-kagurazaka");
+    expect(resolveChunkIdAtPosition(650, -1850)).toBe("shinagawa-tamachi");
+    expect(resolveChunkIdAtPosition(650, -3400)).toBe("shinagawa-tennozu");
+    expect(resolveChunkIdAtPosition(-1620, 2150)).toBe("meguro-nakameguro");
+    expect(resolveChunkIdAtPosition(-1620, 3650)).toBe("gotanda-osaki");
+    expect(resolveChunkIdAtPosition(-45, 1780)).toBe("hiroo-azabu-juban");
+    expect(resolveChunkIdAtPosition(-160, 3180)).toBe("korakuen-bunkyo");
+    expect(resolveChunkIdAtPosition(650, 2150)).toBe("ueno-okachimachi");
+    expect(resolveChunkIdAtPosition(650, 3650)).toBe("asakusa-kuramae");
+    expect(resolveChunkIdAtPosition(1900, -1850)).toBe("odaiba-rainbow-bridge");
+    expect(resolveChunkIdAtPosition(3600, -3400)).toBe("ariake-tokyo-bigsight");
+    expect(resolveChunkIdAtPosition(2100, -350)).toBe("tsukiji-kachidoki");
+    expect(resolveChunkIdAtPosition(3600, -350)).toBe("toyosu-harumi");
+    expect(resolveChunkIdAtPosition(2100, 250)).toBe("monzennakacho-kiyosumi");
+    expect(resolveChunkIdAtPosition(3600, 250)).toBe("kiba-toyosu-east");
+    expect(resolveChunkIdAtPosition(2100, 2150)).toBe("ryogoku-sumida");
+    expect(resolveChunkIdAtPosition(3860, 3360)).toBe("kinshicho-skytree");
+
+    // 東西 10.0km × 南北 8.6km (= 86.0km²) 全域が隙間なく 48 チャンクで被覆されていること
+    for (let gx = -5400; gx <= 4200; gx += 400) {
+      for (let gz = -4000; gz <= 4200; gz += 400) {
+        const chunkId = resolveChunkIdAtPosition(gx, gz);
+        const def = WORLD_CHUNK_DEFINITIONS.find((c) => c.id === chunkId)!;
+        expect(gx).toBeGreaterThanOrEqual(def.bounds.minX);
+        expect(gx).toBeLessThanOrEqual(def.bounds.maxX);
+        expect(gz).toBeGreaterThanOrEqual(def.bounds.minZ);
+        expect(gz).toBeLessThanOrEqual(def.bounds.maxZ);
+      }
+    }
   });
 
   it("チャンク境界ボックス（AABB）への最短距離が正しく計算されることを保証する", () => {
@@ -821,45 +876,193 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
     expect(namikibashiTileMesh.userData.appliedLodTier).toBe("culled");
   });
 
-  it("実在 PLATEAU GLB モデル読み込み時に全8タイルと低ポリゴンプロキシメッシュが正しくペアリングされることを保証する", async () => {
+  it("実在 PLATEAU GLB モデル（shibuya_plateau_buildings.glb）が渋谷区公式20リーフタイル＋20遠景プロキシを網羅し、広域渋谷チャンク連携およびペアリングが成立することを保証する", async () => {
     const { mockWorld, mockRapier } = createMockPhysicsContext();
     const scene = new THREE.Scene();
     const cityMap = new TokyoStationMap(scene, mockWorld, mockRapier, { deferGlbLoads: true });
 
-    // 模擬GLB（8タイル＋8プロキシ）
-    const mockGlbScene = new THREE.Group();
-    const tileIds = [
+    const expectedTileIds = [
+      "data140",
+      "data141",
       "data142",
       "data143",
+      "data145",
+      "data146",
       "data147",
+      "data148",
       "data150",
       "data151",
+      "data152",
       "data153",
       "data155",
+      "data156",
       "data157",
+      "data158",
+      "data182",
+      "data183",
+      "data187",
+      "data188",
     ];
-    for (const id of tileIds) {
-      const detailed = new THREE.Mesh(new THREE.BufferGeometry(), [
+
+    // 1. 実アセット shibuya_plateau_buildings.glb の JSON チャンクを検証し、全20タイル × 3段階LOD（LOD0詳細 + LOD1中距離 + LOD2遠景プロキシ）＋Draco圧縮＋ローカルデコーダー存在を保証
+    const fsSpec = "node:fs";
+    const nodeFs = (await import(/* @vite-ignore */ fsSpec)) as {
+      readFileSync: (fileUrl: URL) => Uint8Array;
+      existsSync: (fileUrl: URL) => boolean;
+    };
+    const dracoWasmUrl = new URL("../../public/draco/draco_decoder.wasm", import.meta.url);
+    expect(nodeFs.existsSync(dracoWasmUrl), "missing local public/draco/draco_decoder.wasm").toBe(
+      true,
+    );
+    const expectedLodTextures = [
+      "plateau_lod0_glass.jpg",
+      "plateau_lod0_glass_emissive.jpg",
+      "plateau_lod0_commercial.jpg",
+      "plateau_lod0_commercial_emissive.jpg",
+      "plateau_lod0_storefront.jpg",
+      "plateau_lod0_storefront_emissive.jpg",
+      "plateau_lod0_alley.jpg",
+      "plateau_lod0_alley_emissive.jpg",
+      "plateau_lod0_roof.jpg",
+      "plateau_lod0_pitched_roof.jpg",
+      "plateau_lod1_glass.jpg",
+      "plateau_lod1_glass_emissive.jpg",
+      "plateau_lod1_commercial.jpg",
+      "plateau_lod1_commercial_emissive.jpg",
+      "plateau_lod1_alley.jpg",
+      "plateau_lod1_alley_emissive.jpg",
+      "plateau_lod1_roof.jpg",
+      "plateau_lod2_proxy.jpg",
+      "plateau_lod2_proxy_emissive.jpg",
+    ];
+    for (const texFile of expectedLodTextures) {
+      const texUrl = new URL(`../../public/textures/shibuya/${texFile}`, import.meta.url);
+      expect(nodeFs.existsSync(texUrl), `missing baked LOD texture ${texFile}`).toBe(true);
+    }
+    const glbUrl = new URL("../../public/models/shibuya_plateau_buildings.glb", import.meta.url);
+    const glbBytes = nodeFs.readFileSync(glbUrl);
+    const glbView = new DataView(glbBytes.buffer, glbBytes.byteOffset, glbBytes.byteLength);
+    const jsonChunkLen = glbView.getUint32(12, true);
+    const jsonText = new TextDecoder("utf-8").decode(glbBytes.subarray(20, 20 + jsonChunkLen));
+    const gltf = JSON.parse(jsonText) as {
+      extensionsUsed?: string[];
+      nodes: Array<{ name?: string; mesh?: number }>;
+      meshes: Array<{ primitives: Array<{ attributes: { POSITION?: number; COLOR_0?: number } }> }>;
+      accessors: Array<{ count: number; min?: number[]; max?: number[] }>;
+    };
+
+    expect(gltf.extensionsUsed ?? []).toContain("KHR_draco_mesh_compression");
+
+    const nodeNames = new Set(gltf.nodes.map((n) => n.name ?? ""));
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    let totalDetailVerts = 0;
+    let totalMidVerts = 0;
+    let totalProxyVerts = 0;
+    for (const id of expectedTileIds) {
+      expect(nodeNames.has(`PlateauTile_${id}`), `missing PlateauTile_${id}`).toBe(true);
+      expect(nodeNames.has(`PlateauMidTile_${id}`), `missing PlateauMidTile_${id}`).toBe(true);
+      expect(nodeNames.has(`PlateauProxyTile_${id}`), `missing PlateauProxyTile_${id}`).toBe(true);
+    }
+    for (const nd of gltf.nodes) {
+      if (nd.mesh === undefined || !nd.name) {
+        continue;
+      }
+      const mesh = gltf.meshes[nd.mesh];
+      if (nd.name.startsWith("PlateauTile_")) {
+        for (const prim of mesh.primitives) {
+          const posIdx = prim.attributes.POSITION;
+          if (posIdx === undefined) continue;
+          const acc = gltf.accessors[posIdx];
+          totalDetailVerts += acc.count;
+          if (acc.min && acc.max) {
+            minX = Math.min(minX, acc.min[0]);
+            maxX = Math.max(maxX, acc.max[0]);
+            minZ = Math.min(minZ, acc.min[2]);
+            maxZ = Math.max(maxZ, acc.max[2]);
+          }
+        }
+      } else if (nd.name.startsWith("PlateauMidTile_")) {
+        for (const prim of mesh.primitives) {
+          expect(prim.attributes.COLOR_0, `${nd.name} missing vertex color COLOR_0`).toBeDefined();
+          const posIdx = prim.attributes.POSITION;
+          if (posIdx !== undefined) {
+            totalMidVerts += gltf.accessors[posIdx].count;
+          }
+        }
+      } else if (nd.name.startsWith("PlateauProxyTile_")) {
+        for (const prim of mesh.primitives) {
+          expect(prim.attributes.COLOR_0, `${nd.name} missing vertex color COLOR_0`).toBeDefined();
+          const posIdx = prim.attributes.POSITION;
+          if (posIdx !== undefined) {
+            totalProxyVerts += gltf.accessors[posIdx].count;
+          }
+        }
+      }
+    }
+    expect(minX).toBeLessThan(-1700);
+    expect(maxX).toBeLessThan(-310);
+    expect(minZ).toBeLessThan(-500);
+    expect(maxZ).toBeGreaterThan(1200);
+    // LOD0 立体建築ディテール >> LOD1 中距離軽量躯体 >> LOD2 遠景スカイライン の厳密なポリゴン階層を検証
+    expect(totalDetailVerts).toBeGreaterThan(1_000_000);
+    expect(totalMidVerts).toBeGreaterThan(100_000);
+    expect(totalMidVerts).toBeLessThan(totalDetailVerts * 0.2);
+    expect(totalProxyVerts).toBeGreaterThan(40_000);
+    expect(totalProxyVerts).toBeLessThan(totalMidVerts * 0.65);
+
+    // 2. 渋谷広域チャンク定義がすべて shibuya_plateau_buildings と紐づいていること
+    for (const chunkId of [
+      "shibuya-core",
+      "shibuya-north",
+      "shibuya-south",
+      "shibuya-west",
+      "harajuku-yoyogi",
+      "ebisu-daikanyama",
+      "aoyama-west",
+      "roppongi-nishiazabu",
+      "omotesando-aoyama-north",
+    ] as const) {
+      const def = WORLD_CHUNK_DEFINITIONS.find((c) => c.id === chunkId)!;
+      expect(def.associatedGlbModelIds, `${chunkId} associatedGlbModelIds`).toContain(
+        "shibuya_plateau_buildings",
+      );
+    }
+
+    // 3. 模擬GLB（20タイル × 3段階LOD）のペアリングおよび LOD0 -> LOD1 -> LOD2 -> Culled 遷移検証
+    const mockGlbScene = new THREE.Group();
+    for (const id of expectedTileIds) {
+      const detailed = new THREE.Mesh(new THREE.BoxGeometry(20, 30, 20), [
         new THREE.MeshStandardMaterial({ name: "PlateauGlassTower" }),
-        new THREE.MeshStandardMaterial({ name: "PlateauRooftop" }),
+        new THREE.MeshStandardMaterial({ name: "PlateauArchTrim" }),
       ]);
       detailed.name = `PlateauTile_${id}`;
+      const mid = new THREE.Mesh(
+        new THREE.BoxGeometry(20, 30, 20),
+        new THREE.MeshStandardMaterial({ name: "PlateauMidLod" }),
+      );
+      mid.name = `PlateauMidTile_${id}`;
       const proxy = new THREE.Mesh(
-        new THREE.BufferGeometry(),
+        new THREE.BoxGeometry(20, 30, 20),
         new THREE.MeshStandardMaterial({ name: "PlateauLod2Proxy" }),
       );
       proxy.name = `PlateauProxyTile_${id}`;
       mockGlbScene.add(detailed);
+      mockGlbScene.add(mid);
       mockGlbScene.add(proxy);
     }
 
-    // loadShibuyaPlateauBuildingsGlb のパースロジックを直接テスト
     const detailedTileMeshes: THREE.Mesh[] = [];
+    const midTileMap = new Map<string, THREE.Mesh>();
     const proxyTileMap = new Map<string, THREE.Mesh>();
     mockGlbScene.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (!mesh.isMesh) return;
-      if (mesh.name.startsWith("PlateauProxyTile_")) {
+      if (mesh.name.startsWith("PlateauMidTile_")) {
+        midTileMap.set(mesh.name.replace("PlateauMidTile_", ""), mesh);
+      } else if (mesh.name.startsWith("PlateauProxyTile_")) {
         proxyTileMap.set(mesh.name.replace("PlateauProxyTile_", ""), mesh);
       } else if (mesh.name.startsWith("PlateauTile_")) {
         detailedTileMeshes.push(mesh);
@@ -868,22 +1071,97 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
 
     for (const tileMesh of detailedTileMeshes) {
       const tileId = tileMesh.name.replace("PlateauTile_", "");
+      const midMesh = midTileMap.get(tileId);
       const proxyMesh = proxyTileMap.get(tileId);
+      expect(midMesh).toBeDefined();
       expect(proxyMesh).toBeDefined();
+      tileMesh.userData.midMesh = midMesh;
       tileMesh.userData.proxyMesh = proxyMesh;
       tileMesh.userData.detailedGeometry = tileMesh.geometry;
+      tileMesh.userData.midGeometry = midMesh?.geometry;
       tileMesh.userData.proxyGeometry = proxyMesh?.geometry;
       tileMesh.userData.detailedMaterial = tileMesh.material;
+      tileMesh.userData.midMaterial = midMesh?.material;
       tileMesh.userData.proxyMaterial = proxyMesh?.material;
+      tileMesh.position.set(-990, 15, 275);
+      tileMesh.userData.cullingBounds = new THREE.Box3().setFromObject(tileMesh);
       cityMap.plateauTileMeshes.push(tileMesh);
     }
 
-    expect(cityMap.plateauTileMeshes).toHaveLength(8);
-    for (const tileMesh of cityMap.plateauTileMeshes) {
-      expect(tileMesh.userData.proxyMesh).toBeDefined();
-      expect(tileMesh.userData.proxyGeometry).toBeDefined();
-      expect(tileMesh.userData.proxyMaterial).toBeDefined();
-    }
+    expect(cityMap.plateauTileMeshes).toHaveLength(20);
+    cityMap.glbShibuyaPlateauGroup = mockGlbScene;
+    await cityMap.activateWorldChunk("shibuya-core");
+
+    const sampleTile = cityMap.plateauTileMeshes[0];
+    // 近景 (<= 135m): LOD0 詳細メッシュ + 影有効
+    cityMap.updateDistanceCulling(new THREE.Vector3(-990, 0, 275), 380, true);
+    expect(sampleTile.userData.appliedLodTier).toBe("high");
+    expect(sampleTile.geometry).toBe(sampleTile.userData.detailedGeometry);
+    expect(sampleTile.userData.isMidLodActive).toBe(false);
+    expect(sampleTile.userData.isProxyActive).toBe(false);
+    expect(sampleTile.castShadow).toBe(true);
+
+    // 中景 (135m < dist <= 235m): LOD1 中距離軽量躯体 (PlateauMidTile) + 影OFF
+    cityMap.updateDistanceCulling(new THREE.Vector3(-990 + 190, 0, 275), 380, true);
+    expect(sampleTile.userData.appliedLodTier).toBe("medium");
+    expect(sampleTile.geometry).toBe(sampleTile.userData.midGeometry);
+    expect(sampleTile.material).toBe(sampleTile.userData.midMaterial);
+    expect(sampleTile.userData.isMidLodActive).toBe(true);
+    expect(sampleTile.userData.isProxyActive).toBe(false);
+    expect(sampleTile.castShadow).toBe(false);
+
+    // 遠景 (235m < dist <= 800m): LOD2 超軽量スカイライン (PlateauProxyTile) + 影OFF
+    cityMap.updateDistanceCulling(new THREE.Vector3(-990 + 360, 0, 275), 380, true);
+    expect(sampleTile.userData.appliedLodTier).toBe("low");
+    expect(sampleTile.geometry).toBe(sampleTile.userData.proxyGeometry);
+    expect(sampleTile.material).toBe(sampleTile.userData.proxyMaterial);
+    expect(sampleTile.userData.isMidLodActive).toBe(false);
+    expect(sampleTile.userData.isProxyActive).toBe(true);
+    expect(sampleTile.castShadow).toBe(false);
+
+    // 最遠方 (> 800m): Culled (visible = false)
+    cityMap.updateDistanceCulling(new THREE.Vector3(-990 + 950, 0, 275), 380, true);
+    expect(sampleTile.visible).toBe(false);
+    expect(sampleTile.userData.appliedLodTier).toBe("culled");
+    expect(sampleTile.userData.isMidLodActive).toBe(false);
+    expect(sampleTile.userData.isProxyActive).toBe(false);
+
+    // 4. マルチマテリアル LOD1 (midGroup: THREE.Group) を持つタイルの高→中→低→Culled遷移検証
+    const multiMatTile = cityMap.plateauTileMeshes[1];
+    const midGroup = new THREE.Group();
+    midGroup.name = "PlateauMidTile_multimat";
+    midGroup.visible = false;
+    midGroup.add(
+      new THREE.Mesh(
+        new THREE.BoxGeometry(20, 30, 20),
+        new THREE.MeshStandardMaterial({ name: "PlateauMidCommercial" }),
+      ),
+      new THREE.Mesh(
+        new THREE.BoxGeometry(20, 1, 20),
+        new THREE.MeshStandardMaterial({ name: "PlateauMidRoof" }),
+      ),
+    );
+    multiMatTile.userData.midGroup = midGroup;
+    delete multiMatTile.userData.midGeometry;
+    delete multiMatTile.userData.midMaterial;
+
+    cityMap.updateDistanceCulling(new THREE.Vector3(-990, 0, 275), 380, true);
+    expect(multiMatTile.visible).toBe(true);
+    expect(midGroup.visible).toBe(false);
+
+    cityMap.updateDistanceCulling(new THREE.Vector3(-990 + 190, 0, 275), 380, true);
+    expect(multiMatTile.visible).toBe(false);
+    expect(midGroup.visible).toBe(true);
+    expect(multiMatTile.userData.isMidLodActive).toBe(true);
+
+    cityMap.updateDistanceCulling(new THREE.Vector3(-990 + 360, 0, 275), 380, true);
+    expect(multiMatTile.visible).toBe(true);
+    expect(midGroup.visible).toBe(false);
+    expect(multiMatTile.userData.isProxyActive).toBe(true);
+
+    cityMap.updateDistanceCulling(new THREE.Vector3(-990 + 950, 0, 275), 380, true);
+    expect(multiMatTile.visible).toBe(false);
+    expect(midGroup.visible).toBe(false);
   });
 
   it("全建物グループ（拡張ビル群 exp-bldg-* を含む）が high/medium/low 各 LOD 距離で上部パーツだけ宙に浮かず接地状態を保つことを保証する", async () => {
@@ -929,5 +1207,57 @@ describe("遠方3Dモデルの距離ベース多段階LOD（Level of Detail）�
         expect(visibleLowestY - lowestMeshY).toBeLessThanOrEqual(0.5);
       }
     }
+  });
+
+  it("大東京10倍拡張（125km超幹線道路・7大象徴ランドマーク・外周地形テーパー・6エリアスポーン・外周コライダー展開）が正常動作することを保証する", async () => {
+    expect(GREATER_TOKYO_ARTERIAL_ROADS.length).toBeGreaterThanOrEqual(20);
+    expect(GREATER_TOKYO_LANDMARKS).toHaveLength(7);
+
+    // 渋谷盆地外周の4辺テーパーで y=0 の大東京広域平坦面へ段差なく接続すること
+    expect(sampleShibuyaTerrainY(-2100, 400)).toBe(0);
+    expect(sampleShibuyaTerrainY(-900, -800)).toBe(0);
+    expect(sampleShibuyaTerrainY(-900, 1500)).toBe(0);
+    expect(sampleShibuyaTerrainY(3600, 3360)).toBe(0);
+
+    // 外周エリアのカーナビ道路名・ランドマーク検索が動作すること
+    expect(findNearestGsiRoad(-3100, 1020).displayName).toContain("玉川通り");
+    expect(findNearestGsiRoad(1900, -1850).displayName).toContain("レインボーブリッジ");
+    expect(findNearestPlateauBuilding(-2450, -2450).name).toContain("東京都庁");
+    expect(findNearestPlateauBuilding(-45, 1780).name).toContain("東京タワー");
+    expect(findNearestPlateauBuilding(3860, 3360).name).toContain("東京スカイツリー");
+
+    // 6エリア全てのスポーン座標が有効な道路上に配置されていること
+    const areas: DriveAreaId[] = [
+      "shibuya",
+      "tokyo",
+      "shinjuku",
+      "odaiba",
+      "skytree",
+      "sangenjaya",
+    ];
+    for (const area of areas) {
+      const spawn = TokyoStationMap.getAreaSpawnTransform(area);
+      expect(spawn.area).toBe(area);
+      expect(Number.isFinite(spawn.position.x)).toBe(true);
+      expect(Number.isFinite(spawn.position.z)).toBe(true);
+    }
+
+    const { mockWorld, mockRapier } = createMockPhysicsContext();
+    const scene = new THREE.Scene();
+    const cityMap = new TokyoStationMap(scene, mockWorld, mockRapier, { deferGlbLoads: true });
+
+    // 外周道路ネットワーク・水面・7大象徴ランドマーク・28外周チャンクビル群が構築されていること
+    expect(cityMap.group.getObjectByName("GreaterTokyoArterialRoadNetwork")).toBeDefined();
+    expect(cityMap.group.getObjectByName("GreaterTokyoBayAndSumidaWater")).toBeDefined();
+    expect(cityMap.group.getObjectByName("GreaterTokyoSignatureLandmarks")).toBeDefined();
+    expect(cityMap.group.getObjectByName("GreaterTokyoChunk_shinjuku-west-tocho")).toBeDefined();
+    expect(cityMap.group.getObjectByName("GreaterTokyoChunk_kinshicho-skytree")).toBeDefined();
+
+    // 外周チャンクのアクティベート＆退避でビル物理コライダーがオンデマンド展開・解放されること
+    const beforeCols = cityMap.colliders.length;
+    await cityMap.activateWorldChunk("shinjuku-west-tocho");
+    expect(cityMap.colliders.length).toBeGreaterThan(beforeCols);
+    cityMap.evictWorldChunk("shinjuku-west-tocho");
+    expect(cityMap.colliders.length).toBe(beforeCols);
   });
 });

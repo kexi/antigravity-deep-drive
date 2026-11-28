@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type RAPIER from "@dimforge/rapier3d-compat";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { JapaneseRoadBuilder } from "../roads/roadBuilder";
 import { RoadProps } from "../roads/roadProps";
 import {
@@ -64,8 +65,14 @@ import {
   resolveChunkIdAtPosition,
   type WorldChunkId,
 } from "./openWorldStreaming";
+import {
+  buildGreaterTokyoExpansion,
+  OUTER_GREATER_TOKYO_CHUNK_IDS,
+  type GreaterTokyoExpansionBundle,
+} from "./greaterTokyoExpansion";
+import { createGlbGroundSliceColliders } from "../physics/meshColliderBuilder";
 
-export type DriveAreaId = "tokyo" | "shibuya";
+export type DriveAreaId = "tokyo" | "shibuya" | "shinjuku" | "odaiba" | "skytree" | "sangenjaya";
 
 export interface TokyoStationMapOptions {
   /**
@@ -123,7 +130,11 @@ export class TokyoStationMap {
   public signSpotLights: THREE.SpotLight[] = [];
   public colliders: RAPIER.Collider[] = [];
   public obstacleColliderHandles: number[] = [];
+  public onObstacleCollidersChanged?: (handles: ReadonlyArray<number>) => void;
   private drivableColliderHandles: number[] = [];
+  private physicsWorld!: RAPIER.World;
+  private rapier!: typeof RAPIER;
+  private worldOriginStaticBody!: RAPIER.RigidBody;
   public plateauBuildingGroups: THREE.Group[] = [];
   public glbStationGroup: THREE.Group | null = null;
   public glbShibuyaStreamGroup: THREE.Group | null = null;
@@ -163,6 +174,11 @@ export class TokyoStationMap {
   private proceduralHachikoStatueGroup: THREE.Group | null = null;
   private proceduralShutokoCoreMeshes: THREE.Mesh[] = [];
   private proceduralGlbOverlappingColliders: RAPIER.Collider[] = [];
+  private shibuyaStreamGlbColliders: RAPIER.Collider[] = [];
+  private shibuyaStreamGlbBody: RAPIER.RigidBody | null = null;
+  private shibuyaPlateauGlbColliders: RAPIER.Collider[] = [];
+  private shibuyaPlateauGlbBody: RAPIER.RigidBody | null = null;
+  private greaterTokyoExpansion: GreaterTokyoExpansionBundle | null = null;
   private treeSlots: {
     slotGroup: THREE.Group;
     fallbackGroup: THREE.Group;
@@ -233,12 +249,111 @@ export class TokyoStationMap {
       : rapier.ColliderDesc.cuboid(radius, halfHeight, radius);
   }
 
+  private notifyObstacleCollidersChanged(): void {
+    this.onObstacleCollidersChanged?.(this.obstacleColliderHandles);
+  }
+
+  private disposeGlbColliderBundle(
+    colliders: RAPIER.Collider[],
+    body: RAPIER.RigidBody | null,
+  ): void {
+    for (let i = 0; i < colliders.length; i += 1) {
+      const col = colliders[i];
+      const colIdx = this.colliders.indexOf(col);
+      if (colIdx !== -1) {
+        this.colliders.splice(colIdx, 1);
+      }
+      const handleIdx = this.obstacleColliderHandles.indexOf(col.handle);
+      if (handleIdx !== -1) {
+        this.obstacleColliderHandles.splice(handleIdx, 1);
+      }
+      if (typeof this.physicsWorld?.removeCollider === "function") {
+        this.physicsWorld.removeCollider(col, false);
+      }
+    }
+    colliders.length = 0;
+    if (body && typeof this.physicsWorld?.removeRigidBody === "function") {
+      this.physicsWorld.removeRigidBody(body);
+    }
+  }
+
+  /**
+   * ロード済み GLB ランドマーク (`shibuya_stream.glb`) の実体メッシュから地上帯 Rapier Trimesh コライダーを構築する。
+   * Why: 旧実装は GLB ロード時にプロシージャル直方体コライダーを無効化 (`setEnabled(false)`) するだけで
+   * GLB 側の物理形状を生成していなかったため、渋谷ストリーム・スクランブルスクエア・ヒカリエ・109・PARCO・ハチ公像等が
+   * すべてすり抜ける状態になっていた。実体メッシュの地上スライスから Trimesh を生成することで見た目と当たり判定を完全一致させる。
+   */
+  public attachShibuyaStreamGlbColliders(glbModel: THREE.Object3D, enabled = true): number {
+    this.disposeGlbColliderBundle(this.shibuyaStreamGlbColliders, this.shibuyaStreamGlbBody);
+    this.shibuyaStreamGlbBody = null;
+
+    const created = createGlbGroundSliceColliders(glbModel, this.physicsWorld, this.rapier, {
+      getGroundY: (x, z) => (x < -395 ? sampleShibuyaTerrainY(x, z) : 0),
+    });
+    this.shibuyaStreamGlbBody = created.body;
+    for (let i = 0; i < created.colliders.length; i += 1) {
+      const col = created.colliders[i];
+      if (typeof col.setEnabled === "function") {
+        col.setEnabled(enabled);
+      }
+      this.registerCollider(col, true);
+      this.shibuyaStreamGlbColliders.push(col);
+    }
+    this.notifyObstacleCollidersChanged();
+    return created.triangleCount;
+  }
+
+  /**
+   * ロード済み渋谷 PLATEAU 建物群 (`shibuya_plateau_buildings.glb`) の各タイルから地上帯 Rapier Trimesh コライダーを構築する。
+   * Why LOD1 軽量躯体 (`PlateauMidTile_*`) を優先使用するか:
+   * LOD0 の微細 3D マリオン・庇・コーニス等の装飾メッシュを物理判定に含めると三角形数が数倍に膨張し車両が引っ掛かるため、
+   * 実測外壁と完全一致するクリーンな `PlateauMidTile_*` から地上帯 Trimesh を抽出して高速・滑らかな衝突応答を実現する。
+   */
+  public attachShibuyaPlateauGlbColliders(glbModel: THREE.Object3D, enabled = true): number {
+    this.disposeGlbColliderBundle(this.shibuyaPlateauGlbColliders, this.shibuyaPlateauGlbBody);
+    this.shibuyaPlateauGlbBody = null;
+
+    const isMidTileMesh = (obj: THREE.Object3D): boolean =>
+      Boolean(obj.userData?.isPlateauMid) ||
+      obj.name.startsWith("PlateauMidTile_") ||
+      Boolean(obj.parent?.name.startsWith("PlateauMidTile_"));
+
+    let hasMidTiles = false;
+    glbModel.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh && isMidTileMesh(obj)) {
+        hasMidTiles = true;
+      }
+    });
+
+    const created = createGlbGroundSliceColliders(glbModel, this.physicsWorld, this.rapier, {
+      getGroundY: (x, z) => (x < -395 ? sampleShibuyaTerrainY(x, z) : 0),
+      includeMidLodMeshes: hasMidTiles,
+      shouldSkipMesh: hasMidTiles ? (mesh) => !isMidTileMesh(mesh) : undefined,
+    });
+    this.shibuyaPlateauGlbBody = created.body;
+    for (let i = 0; i < created.colliders.length; i += 1) {
+      const col = created.colliders[i];
+      if (typeof col.setEnabled === "function") {
+        col.setEnabled(enabled);
+      }
+      this.registerCollider(col, true);
+      this.shibuyaPlateauGlbColliders.push(col);
+    }
+    this.notifyObstacleCollidersChanged();
+    return created.triangleCount;
+  }
+
   constructor(
     scene: THREE.Scene,
     world: RAPIER.World,
     rapier: typeof RAPIER,
     options?: TokyoStationMapOptions,
   ) {
+    this.physicsWorld = world;
+    this.rapier = rapier;
+    this.worldOriginStaticBody = world.createRigidBody(
+      rapier.RigidBodyDesc.fixed().setTranslation(0, 0, 0),
+    );
     this.deferGlbLoads = Boolean(options?.deferGlbLoads);
     this.group = new THREE.Group();
     scene.add(this.group);
@@ -300,8 +415,11 @@ export class TokyoStationMap {
     // 4. 周辺高層ビル群（丸ビル、新丸ビル、大手町・丸の内オフィス群）
     this.buildSurroundingSkyscrapers(world, rapier);
 
-    // 4b. 10倍広域マップ拡張エリアの都市街並み・ビル群（原宿、恵比寿、六本木、赤坂、銀座、新橋、神田、八重洲）
+    // 4b. 広域マップ拡張エリアの都市街並み・ビル群（原宿、恵比寿、六本木、赤坂、銀座、新橋、神田、八重洲）
     this.buildExpandedMetropolitanDistricts(world, rapier);
+
+    // 4c. 大東京10倍大拡張（86.0km²: 28外周チャンク・125km超幹線道路・約2,200棟ビル・東京湾/隅田川・7大象徴ランドマーク）
+    this.buildGreaterTokyoTenfoldExpansion(world, rapier);
 
     // 5. 街灯・街路樹・環境小物
     this.buildStreetProps(world, rapier);
@@ -324,11 +442,11 @@ export class TokyoStationMap {
   }
 
   /**
-   * 指定したドライブエリア（渋谷 / 東京駅・丸の内）の初期スポーン位置・向きを取得する。
+   * 指定したドライブエリア（渋谷 / 東京駅・丸の内 / 西新宿都庁 / お台場レインボーブリッジ / 東京スカイツリー / 三軒茶屋）の
+   * 初期スポーン位置・向きを取得する。
    */
   public static getAreaSpawnTransform(area: DriveAreaId = "shibuya"): AreaSpawnTransform {
-    const isShibuya = area === "shibuya";
-    if (isShibuya) {
+    if (area === "shibuya") {
       // Why (-709.3, 492.2), yawRadians = -2.324 か:
       // 非鏡像 1:1 座標系 (+X=東, -Z=北) の明治通り（渋谷ストリーム (-750, 527.6) 前: (-678.0, 518.2)→(-737.3, 462.6)）における
       // 左側通行（北西向き）第1車線中央にスポーンさせ、右手前方へ渋谷ヒカリエ・スクランブルスクエア・首都高3号線高架・JRガードを望む。
@@ -340,6 +458,42 @@ export class TokyoStationMap {
         areaLabel: "渋谷 (渋谷ストリーム / 明治通り)",
         position: new THREE.Vector3(spawnX, groundY + 0.62, spawnZ),
         yawRadians: -2.324,
+      };
+    }
+
+    if (area === "shinjuku") {
+      return {
+        area: "shinjuku",
+        areaLabel: "西新宿 (新宿通り / 東京都庁前)",
+        position: new THREE.Vector3(-2180, 0.72, -1844),
+        yawRadians: -Math.PI * 0.5,
+      };
+    }
+
+    if (area === "odaiba") {
+      return {
+        area: "odaiba",
+        areaLabel: "お台場 (レインボーブリッジ / 臨海副都心)",
+        position: new THREE.Vector3(1280, 0.72, -1856),
+        yawRadians: Math.PI * 0.5,
+      };
+    }
+
+    if (area === "skytree") {
+      return {
+        area: "skytree",
+        areaLabel: "押上・墨田 (三ツ目通り / 東京スカイツリー前)",
+        position: new THREE.Vector3(3605, 0.72, 2860),
+        yawRadians: 0.0,
+      };
+    }
+
+    if (area === "sangenjaya") {
+      return {
+        area: "sangenjaya",
+        areaLabel: "三軒茶屋 (国道246号玉川通り / キャロットタワー)",
+        position: new THREE.Vector3(-2780, 0.72, 956),
+        yawRadians: -1.39,
       };
     }
 
@@ -404,16 +558,20 @@ export class TokyoStationMap {
   }
 
   private buildJapaneseRoadNetwork(world: RAPIER.World, rapier: typeof RAPIER): void {
-    // 基礎地面（8000m × 8000m = 64 km²、従来の10倍以上）- 国土地理院 地理院タイル DEM5A (5mメッシュ標高) を反映した広域都市地形ベース
-    // How: 道路コリドー外周の頂点Y座標に DEM5A の実測標高変位を適用し、車道領域は Rapier コライダーと一致する y=0 を維持する
-    const groundGeo = new THREE.PlaneGeometry(8000, 8000, 96, 96);
+    // 基礎地面（24000m × 24000m = 576 km²）- 10倍拡張大東京オープンワールド（86km²）＋外周地平線まで隙間なく網羅
+    // How: 渋谷盆地外周のコサインテーパーと丸の内・大東京平坦面を継ぎ目なく接続し、車道領域の物理高さと完全一致させる
+    const groundGeo = new THREE.PlaneGeometry(24000, 24000, 144, 144);
     groundGeo.rotateX(-Math.PI / 2);
     const posAttr = groundGeo.attributes.position;
     for (let i = 0; i < posAttr.count; i++) {
       const vx = posAttr.getX(i);
       const vz = posAttr.getZ(i);
-      const terrainDeltaY =
-        vx < -395 ? sampleShibuyaTerrainY(vx, vz) - 1.5 : getRelativeTerrainDisplacement(vx, vz);
+      const isInShibuyaBasin = vx >= -1944 && vx < -395 && vz >= -680 && vz <= 1360;
+      const terrainDeltaY = isInShibuyaBasin
+        ? sampleShibuyaTerrainY(vx, vz) - 1.5
+        : vx >= -395 && vx <= 1200 && vz >= -1200 && vz <= 1400
+          ? getRelativeTerrainDisplacement(vx, vz)
+          : 0;
       posAttr.setY(i, terrainDeltaY);
     }
     groundGeo.computeVertexNormals();
@@ -429,12 +587,12 @@ export class TokyoStationMap {
     groundMesh.receiveShadow = true;
     this.group.add(groundMesh);
 
-    // 渋谷全域（x ∈ [-1720, -392], z ∈ [-460, 1140]）連続 3D 起伏地形メッシュ＆Rapier Trimesh 走行コライダー
-    // 8m 間隔グリッドで標高差と谷・坂道勾配を連続表現し、x ∈ [-500, -395] のコサインテーパーで丸の内平坦面 (y=0) へ着地させる。
-    const terrainXMin = -1720;
+    // 渋谷全域（x ∈ [-1944, -392], z ∈ [-680, 1360]）連続 3D 起伏地形メッシュ＆Rapier Trimesh 走行コライダー
+    // 8m 間隔グリッドで標高差と谷・坂道勾配を連続表現し、東西南北4辺のコサインテーパーで大東京平坦面 (y=0) へ無縫着地させる。
+    const terrainXMin = -1944;
     const terrainXMax = -392;
-    const terrainZMin = -460;
-    const terrainZMax = 1140;
+    const terrainZMin = -680;
+    const terrainZMax = 1360;
     const terrainStep = 8;
     const terrainCols = Math.floor((terrainXMax - terrainXMin) / terrainStep) + 1;
     const terrainRows = Math.floor((terrainZMax - terrainZMin) / terrainStep) + 1;
@@ -501,15 +659,28 @@ export class TokyoStationMap {
     const shibuyaTerrainCollider = world.createCollider(shibuyaTrimeshDesc, shibuyaTerrainBody);
     this.registerCollider(shibuyaTerrainCollider, false, true);
 
-    // 丸の内・千代田側平坦地面コライダー（x ∈ [-395, +4000] のみカバーし、渋谷側の連続起伏 Trimesh・谷底と干渉しない）
+    // 大東京全域（24km × 24km: x,z ∈ [-12000, +12000]）の無縫平坦地面コライダー群
+    // 渋谷起伏 Trimesh 領域 (x ∈ [-1944, -392], z ∈ [-680, +1360]) の周囲4象限を隙間なく囲み、
+    // 三軒茶屋・西新宿・中野・お台場・豊洲・東京スカイツリー方面のどこへ走行しても落下ゼロを保証する。
     const groundBody = world.createRigidBody(
       rapier.RigidBodyDesc.fixed().setTranslation(0, -0.5, 0),
     );
-    const groundColliderDesc = rapier.ColliderDesc.cuboid(2197.5, 0.5, 4000)
-      .setTranslation(1802.5, 0, 0)
-      .setFriction(0.9);
-    const groundCollider = world.createCollider(groundColliderDesc, groundBody);
-    this.registerCollider(groundCollider, false, true);
+    const groundQuadrants: Array<{ hx: number; hz: number; cx: number; cz: number }> = [
+      // 東側全域: x ∈ [-395, +12000], z ∈ [-12000, +12000]
+      { hx: 6197.5, hz: 12000, cx: 5802.5, cz: 0 },
+      // 西側全域: x ∈ [-12000, -1940], z ∈ [-12000, +12000]
+      { hx: 5030.0, hz: 12000, cx: -6970.0, cz: 0 },
+      // 渋谷北側外帯: x ∈ [-1948, -390], z ∈ [-12000, -676]
+      { hx: 779.0, hz: 5662.0, cx: -1169.0, cz: -6338.0 },
+      // 渋谷南側外帯: x ∈ [-1948, -390], z ∈ [+1356, +12000]
+      { hx: 779.0, hz: 5322.0, cx: -1169.0, cz: 6678.0 },
+    ];
+    for (const q of groundQuadrants) {
+      const desc = rapier.ColliderDesc.cuboid(q.hx, 0.5, q.hz)
+        .setTranslation(q.cx, 0, q.cz)
+        .setFriction(0.9);
+      this.registerCollider(world.createCollider(desc, groundBody), false, true);
+    }
 
     // 登録済み直線道路・交差点パッドのメタデータを保持し、交差点隅切り・曲線歩道クリッピングで共有する
     interface StraightRoadRecord {
@@ -1146,9 +1317,17 @@ export class TokyoStationMap {
       segMesh.name = `Shibuya109TriangularPlazaCurb_${ci}`;
       segMesh.userData.isRoadInfrastructure = true;
       segMesh.position.set(midX, midY + 0.04, midZ);
-      segMesh.rotation.y = Math.atan2(bx - ax, bz - az);
+      const curbYaw = Math.atan2(bx - ax, bz - az);
+      segMesh.rotation.y = curbYaw;
       segMesh.receiveShadow = true;
       plaza109CurbGroup.add(segMesh);
+
+      const curbColDesc = rapier.ColliderDesc.cuboid(0.16, 0.12, segLen * 0.5 + 0.08)
+        .setTranslation(midX, midY + 0.04, midZ)
+        .setRotation({ x: 0, y: Math.sin(curbYaw * 0.5), z: 0, w: Math.cos(curbYaw * 0.5) })
+        .setFriction(0.75)
+        .setRestitution(0.05);
+      this.registerCollider(world.createCollider(curbColDesc, this.worldOriginStaticBody), true);
     }
     this.group.add(plaza109CurbGroup);
 
@@ -1537,11 +1716,10 @@ export class TokyoStationMap {
         x: -23.5,
         z: 250,
         width: 21,
-        depth: 24,
+        depth: 32,
         lanesX: 1,
         lanesZ: 3,
-        hasCornerSidewalks: false,
-      }, // 楠公通りアプローチ拡幅接続（日比谷通り側開口）
+      }, // 楠公通りアプローチ拡幅接続（日比谷通り側南連続歩道＋北側隅切り接続）
       { x: 156, z: 379, width: 24, depth: 24, lanesX: 2, lanesZ: 2 }, // 内堀通り・中央通り交点
       { x: -350, z: 365, width: 32, depth: 32, lanesX: 3, lanesZ: 2 }, // 三宅坂交差点
       { x: -350, z: 850, width: 32, depth: 32, lanesX: 3, lanesZ: 3 }, // 半蔵門・千鳥ヶ淵交差点
@@ -1651,17 +1829,28 @@ export class TokyoStationMap {
           id: c.id,
           sampledPoints,
           halfWidth: spec.halfWidth,
+          sidewalkClearance: spec.sidewalkWidth,
+          endCapMargin: 1.5,
         } satisfies RoadExclusionCorridor,
       };
     });
 
+    // Why 渋谷・斜交交差点を巨大矩形 sidewalkExclusionBoxes から除外するか:
+    // 渋谷の放射状・T字・通過交差点に 26m〜44m の軸平行矩形除外ボックスを掛けると、T字路の非合流側や
+    // 通過点の連続歩道まで大きく穴あき切断される。直交隅切り交差点のみ矩形除外とし、渋谷・斜交交差点は
+    // exclusionCorridors（実車道＋歩道幅員＋T字端キャップ判定）と JunctionSidewalkConnectors で厳密接続する。
     const sidewalkExclusionBoxes: RoadExclusionBox[] = [
-      ...pendingIntersections.map((p) => ({
-        minX: p.ix - p.widthX * 0.5,
-        maxX: p.ix + p.widthX * 0.5,
-        minZ: p.iz - p.depthZ * 0.5,
-        maxZ: p.iz + p.depthZ * 0.5,
-      })),
+      ...pendingIntersections
+        .filter((p) => p.ix >= -395 && p.hasCornerSidewalks !== false)
+        .map((p) => ({
+          minX: p.ix - p.widthX * 0.5,
+          maxX: p.ix + p.widthX * 0.5,
+          minZ: p.iz - p.depthZ * 0.5,
+          maxZ: p.iz + p.depthZ * 0.5,
+        })),
+      // 外苑東通り (x=-380) の斜交2交差点（R246 z=98 / 六本木通り z=400）は南北幹線幅 (x=-391.7..-368.3) のみ確保
+      { minX: -391.7, maxX: -368.3, minZ: 78.0, maxZ: 118.0 },
+      { minX: -391.7, maxX: -368.3, minZ: 387.0, maxZ: 413.0 },
       ...registeredStraightRoads.map((r) => ({
         minX: r.minX,
         maxX: r.maxX,
@@ -2023,8 +2212,14 @@ export class TokyoStationMap {
         }
       }
 
+      // 4. 皇居外苑×内堀通り (0, 365): 北側の湾曲内堀通り (z=390) へ抜けるアプローチのため北アームを明示補完
+      const isKokyoUchiboriApproach = spec.ix === 0 && spec.iz === 365;
+      if (isKokyoUchiboriApproach && !arms.north) {
+        arms.north = { carriagewayWidth: 17.0, sidewalkLeft: 4.0, sidewalkRight: 4.0 };
+      }
+
       const armCount = [arms.north, arms.south, arms.east, arms.west].filter(Boolean).length;
-      const shouldBuildCorners = spec.hasCornerSidewalks ?? armCount >= 2;
+      const shouldBuildCorners = spec.hasCornerSidewalks ?? armCount >= 1;
       const isShibuyaIntersection = spec.ix < -395;
       const isScrambleIntersection = Math.hypot(spec.ix - -990.7, spec.iz - 275.8) < 2.0;
       const junctionId = `Intersection_${spec.ix}_${spec.iz}`;
@@ -2089,6 +2284,153 @@ export class TokyoStationMap {
       collectedJunctionTopologies.push(interRes.junctionTopology);
       collectedJunctionArcs.push(...interRes.junctionArcs);
     }
+
+    // --- Q-2. 任意角度交差点（渋谷放射状・スクランブル・109 Y字・外苑東斜交・無パッドT字合流・曲線×直線継ぎ目）の歩道シームレス接続 ---
+    const isPointInActiveCarriageway = (px: number, pz: number): boolean => {
+      for (const r of registeredStraightRoads) {
+        if (px > r.minX + 0.55 && px < r.maxX - 0.55 && pz > r.minZ + 0.55 && pz < r.maxZ - 0.55) {
+          return true;
+        }
+      }
+      for (const desc of corridorDescriptors) {
+        const safeHalf = desc.spec.halfWidth - 0.55;
+        if (safeHalf <= 0.5) {
+          continue;
+        }
+        const safeSq = safeHalf * safeHalf;
+        const pts = desc.samples;
+        let minSq = Infinity;
+        let bestIdx = -1;
+        let bestRawT = 0;
+        let bestLen = 0;
+        const lastIdx = pts.length - 2;
+        for (let i = 0; i <= lastIdx; i++) {
+          const a = pts[i];
+          const b = pts[i + 1];
+          const dx = b.x - a.x;
+          const dz = b.z - a.z;
+          const lenSq = dx * dx + dz * dz;
+          const rawT = lenSq > 1e-8 ? ((px - a.x) * dx + (pz - a.z) * dz) / lenSq : 0;
+          const t = Math.max(0, Math.min(1, rawT));
+          const dSq = (px - (a.x + dx * t)) ** 2 + (pz - (a.z + dz * t)) ** 2;
+          if (dSq < minSq) {
+            minSq = dSq;
+            bestIdx = i;
+            bestRawT = rawT;
+            bestLen = Math.sqrt(lenSq);
+          }
+        }
+        const isOutsideEnd =
+          (bestIdx === 0 && bestRawT < 0 && -bestRawT * bestLen > 0.35) ||
+          (bestIdx === lastIdx && bestRawT > 1 && (bestRawT - 1) * bestLen > 0.35);
+        if (!isOutsideEnd && minSq < safeSq) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const connectorTargets: Array<{
+      id: string;
+      x: number;
+      z: number;
+      searchRadius: number;
+      protectedCenterRadius?: number;
+      elevationSampler?: (x: number, z: number) => number;
+      maxBridgeDist?: number;
+    }> = [];
+
+    for (const spec of pendingIntersections) {
+      const isShibuya = spec.ix < -395;
+      const isScramble = Math.hypot(spec.ix - -990.7, spec.iz - 275.8) < 2.0;
+      const needsArbitraryConnector =
+        isShibuya || spec.hasCornerSidewalks === false || (spec.ix === 0 && spec.iz === 365);
+      if (!needsArbitraryConnector) {
+        continue;
+      }
+      connectorTargets.push({
+        id: `Intersection_${spec.ix}_${spec.iz}`,
+        x: spec.ix,
+        z: spec.iz,
+        searchRadius: isScramble ? 38.0 : Math.max(spec.widthX, spec.depthZ) * 0.9 + 18.0,
+        protectedCenterRadius: isScramble ? 21.8 : undefined,
+        elevationSampler: isShibuya ? sampleShibuyaTerrainY : undefined,
+        maxBridgeDist: isScramble ? 52.0 : 44.0,
+      });
+    }
+
+    // 非パッド交差点・Y字分岐・T字曲線合流点も一括接続
+    connectorTargets.push(
+      {
+        id: "Shibuya109YFork",
+        x: -1159.4,
+        z: 272.4,
+        searchRadius: 34.0,
+        protectedCenterRadius: 13.5,
+        elevationSampler: sampleShibuyaTerrainY,
+        maxBridgeDist: 36.0,
+      },
+      {
+        id: "OrganZakaMeijiJoin",
+        x: -839.2,
+        z: -16.0,
+        searchRadius: 30.0,
+        elevationSampler: sampleShibuyaTerrainY,
+        maxBridgeDist: 32.0,
+      },
+      {
+        id: "KoenOrganGraze",
+        x: -1083.5,
+        z: 0.0,
+        searchRadius: 24.0,
+        elevationSampler: sampleShibuyaTerrainY,
+        maxBridgeDist: 24.0,
+      },
+      {
+        id: "HikarieMiyamasuJoin",
+        x: -715.0,
+        z: 229.0,
+        searchRadius: 30.0,
+        elevationSampler: sampleShibuyaTerrainY,
+        maxBridgeDist: 32.0,
+      },
+      {
+        id: "HikarieR246Join",
+        x: -672.0,
+        z: 413.0,
+        searchRadius: 30.0,
+        elevationSampler: sampleShibuyaTerrainY,
+        maxBridgeDist: 32.0,
+      },
+      {
+        id: "KokyoPlazaUchiboriJoin",
+        x: -18.0,
+        z: 378.0,
+        searchRadius: 34.0,
+        maxBridgeDist: 36.0,
+      },
+    );
+
+    const connectorRes = this.roadBuilder.getSidewalkSystem().connectOpenJunctionSidewalks({
+      targets: connectorTargets,
+      brailleMaterial: this.roadBuilder.getMarkings().getBrailleTileMaterial(),
+      physicsWorld: world,
+      rapier,
+      staticBody: this.worldOriginStaticBody,
+      colliders: this.colliders,
+      isPointInCarriageway: isPointInActiveCarriageway,
+      resolveElevationSampler: (x) => (x < -395 ? sampleShibuyaTerrainY : undefined),
+    });
+    this.group.add(connectorRes.group);
+    for (const pm of connectorRes.puddleMaterials) {
+      if (!this.puddleMaterials.includes(pm)) {
+        this.puddleMaterials.push(pm);
+      }
+    }
+    logger.info("roads", "sidewalk_junction_connectors.built", "任意角度交差点歩道コネクタを構築", {
+      targetCount: connectorTargets.length,
+      createdBridgeCount: connectorRes.createdBridgeCount,
+    });
 
     this.laneGraph = {
       version: "1.0.0",
@@ -4394,6 +4736,7 @@ export class TokyoStationMap {
 
         const pierCol = rapier.ColliderDesc.cuboid(1.2, pierHeight * 0.5, 1.2)
           .setTranslation(px, pierMidY, pz)
+          .setRotation({ x: 0, y: Math.sin(yaw * 0.5), z: 0, w: Math.cos(yaw * 0.5) })
           .setFriction(0.6);
         const pierColInstance = world.createCollider(pierCol, shutokoPierBody);
         this.registerCollider(pierColInstance, true);
@@ -4743,6 +5086,14 @@ export class TokyoStationMap {
         dadoMesh.receiveShadow = true;
         jrGuardGroup.add(dadoMesh);
 
+        // JR ガード下化粧壁・腰壁の物理コライダー（車道外クリアランス確認済み位置へ回転一致配置）
+        const wallColDesc = rapier.ColliderDesc.cuboid((jrWidth - 0.52) * 0.5, wallH * 0.5, 0.96)
+          .setTranslation(wx, wallMidY, wz)
+          .setRotation({ x: 0, y: Math.sin(yaw * 0.5), z: 0, w: Math.cos(yaw * 0.5) })
+          .setFriction(0.6)
+          .setRestitution(0.08);
+        this.registerCollider(world.createCollider(wallColDesc, this.worldOriginStaticBody), true);
+
         for (const pxOff of [-5.2, 0, 5.2]) {
           const px = wx + right.x * pxOff;
           const pz = wz + right.z * pxOff;
@@ -4756,6 +5107,16 @@ export class TokyoStationMap {
           pierMesh.castShadow = true;
           pierMesh.receiveShadow = true;
           jrGuardGroup.add(pierMesh);
+
+          const jrPierColDesc = rapier.ColliderDesc.cuboid(1.0, wallH * 0.5, 1.1)
+            .setTranslation(px, wallMidY, pz)
+            .setRotation({ x: 0, y: Math.sin(yaw * 0.5), z: 0, w: Math.cos(yaw * 0.5) })
+            .setFriction(0.6)
+            .setRestitution(0.08);
+          this.registerCollider(
+            world.createCollider(jrPierColDesc, this.worldOriginStaticBody),
+            true,
+          );
         }
       }
     }
@@ -4959,6 +5320,17 @@ export class TokyoStationMap {
     }
     plazaGroup.add(monumentGroup);
 
+    // 忠犬ハチ公像＆御影石台座の物理コライダー（GLBロード時は shibuya_stream.glb の実体 Trimesh へシームレス切替）
+    const hachikoYaw = -2.35;
+    const hachikoColDesc = rapier.ColliderDesc.cuboid(0.76, 1.0, 0.86)
+      .setTranslation(hachikoX, hachikoBaseY + 1.0, hachikoZ)
+      .setRotation({ x: 0, y: Math.sin(hachikoYaw * 0.5), z: 0, w: Math.cos(hachikoYaw * 0.5) })
+      .setFriction(0.6)
+      .setRestitution(0.08);
+    const hachikoCol = world.createCollider(hachikoColDesc, this.worldOriginStaticBody);
+    this.registerCollider(hachikoCol, true);
+    this.proceduralGlbOverlappingColliders.push(hachikoCol);
+
     // 3. シンボル広場植栽（Raised Planters & Blender street_tree.glb イチョウ樹木へ統一）
     const planterMat = new THREE.MeshStandardMaterial({
       color: 0x57534e,
@@ -4979,6 +5351,12 @@ export class TokyoStationMap {
       planterBox.receiveShadow = true;
       plazaGroup.add(planterBox);
 
+      const planterColDesc = rapier.ColliderDesc.cuboid(2.1, 0.4, 2.1)
+        .setTranslation(hachikoX + p.x, hachikoBaseY + baseDeltaY + 0.1, hachikoZ + p.z)
+        .setFriction(0.65)
+        .setRestitution(0.06);
+      this.registerCollider(world.createCollider(planterColDesc, this.worldOriginStaticBody), true);
+
       // Why use createGinkgoTree instead of DodecahedronGeometry sphere:
       // ロリポップ状の簡易球体木を廃止し、渋谷全域と同一の Blender GLB 街路樹へ統一するため。
       this.createGinkgoTree(hachikoX + p.x, hachikoZ + p.z, 900 + i, world, rapier, groundBody);
@@ -4998,9 +5376,10 @@ export class TokyoStationMap {
     ];
     for (let i = 0; i < benchPositions.length; i++) {
       const b = benchPositions[i];
+      const benchDeltaY = localTerrainDelta(b.x, b.z);
       const benchGroup = new THREE.Group();
       benchGroup.name = `HachikoBench_${i}`;
-      benchGroup.position.set(b.x, localTerrainDelta(b.x, b.z), b.z);
+      benchGroup.position.set(b.x, benchDeltaY, b.z);
       benchGroup.rotation.y = b.rotY;
 
       const seat = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.08, 0.5), benchWoodMat);
@@ -5014,6 +5393,13 @@ export class TokyoStationMap {
         benchGroup.add(leg);
       }
       plazaGroup.add(benchGroup);
+
+      const benchColDesc = rapier.ColliderDesc.cuboid(1.0, 0.25, 0.25)
+        .setTranslation(hachikoX + b.x, hachikoBaseY + benchDeltaY + 0.25, hachikoZ + b.z)
+        .setRotation({ x: 0, y: Math.sin(b.rotY * 0.5), z: 0, w: Math.cos(b.rotY * 0.5) })
+        .setFriction(0.55)
+        .setRestitution(0.1);
+      this.registerCollider(world.createCollider(benchColDesc, this.worldOriginStaticBody), true);
     }
 
     // 5. 広場LED照明灯（Plaza Warm LED Lampposts）
@@ -5048,6 +5434,12 @@ export class TokyoStationMap {
       lampHead.name = "HachikoPlazaLamp";
       lampHead.position.set(lx, baseDeltaY + 5.0, lz);
       plazaGroup.add(lampHead);
+
+      const lampColDesc = this.createCylinderDesc(rapier, 2.5, 0.16)
+        .setTranslation(hachikoX + lx, hachikoBaseY + baseDeltaY + 2.5, hachikoZ + lz)
+        .setFriction(0.45)
+        .setRestitution(0.12);
+      this.registerCollider(world.createCollider(lampColDesc, this.worldOriginStaticBody), true);
     }
 
     // 6. JR渋谷駅 ハチ公改札口キャノピー（Station Entrance Canopy: 広場東端のJR側へ接地）
@@ -5074,6 +5466,15 @@ export class TokyoStationMap {
       pillar.position.set(cx, colDeltaY + 2.1, cz);
       pillar.castShadow = true;
       plazaGroup.add(pillar);
+
+      const canopyPillarColDesc = this.createCylinderDesc(rapier, 2.3, 0.2)
+        .setTranslation(hachikoX + cx, hachikoBaseY + colDeltaY + 2.1, hachikoZ + cz)
+        .setFriction(0.5)
+        .setRestitution(0.1);
+      this.registerCollider(
+        world.createCollider(canopyPillarColDesc, this.worldOriginStaticBody),
+        true,
+      );
     }
 
     // 7. 渋谷駅前バスターミナル バス停シェルター（ハチ公口側 & 東口側）
@@ -5118,7 +5519,7 @@ export class TokyoStationMap {
     routesText: string,
     world: RAPIER.World,
     rapier: typeof RAPIER,
-    groundBody: RAPIER.RigidBody,
+    _groundBody: RAPIER.RigidBody,
   ): THREE.Group {
     const shelterGroup = new THREE.Group();
     shelterGroup.name = name;
@@ -5223,13 +5624,13 @@ export class TokyoStationMap {
     signDisc.position.set(2.22, 2.25, 0.22);
     shelterGroup.add(signDisc);
 
-    // 物理コライダー（車道外歩道上のシェルター占有域のみ）
+    // 物理コライダー（車道外歩道上のシェルター占有域のみ、isObstacle=true で車輪レイキャスト誤接地を防止）
     const shelterColDesc = rapier.ColliderDesc.cuboid(2.05, 1.32, 0.8)
       .setTranslation(x, baseY + 1.32, z)
       .setRotation({ x: 0, y: Math.sin(rotY / 2), z: 0, w: Math.cos(rotY / 2) })
       .setFriction(0.6)
       .setRestitution(0.05);
-    this.registerCollider(world.createCollider(shelterColDesc, groundBody), false);
+    this.registerCollider(world.createCollider(shelterColDesc, this.worldOriginStaticBody), true);
 
     return shelterGroup;
   }
@@ -5288,7 +5689,7 @@ export class TokyoStationMap {
   private buildShibuyaCenterGaiInfrastructure(
     world: RAPIER.World,
     rapier: typeof RAPIER,
-    groundBody: RAPIER.RigidBody,
+    _groundBody: RAPIER.RigidBody,
   ): void {
     const centerGaiGroup = new THREE.Group();
     centerGaiGroup.name = "ShibuyaCenterGaiInfrastructure";
@@ -5464,16 +5865,20 @@ export class TokyoStationMap {
       baseMesh.castShadow = true;
       archGroup.add(baseMesh);
 
-      const isColliderSafe =
-        side === 1 && this.isPointClearOfRoadCorridors(worldColX, worldColZ, 0.35, corridors);
+      const isColliderSafe = this.isPointClearOfRoadCorridors(
+        worldColX,
+        worldColZ,
+        0.35,
+        corridors,
+      );
       if (isColliderSafe) {
         const pillarCol = world.createCollider(
-          rapier.ColliderDesc.cylinder(3.9, 0.3).setTranslation(
+          this.createCylinderDesc(rapier, 3.9, 0.3).setTranslation(
             worldColX,
             archBaseY + colDeltaY + 3.9,
             worldColZ,
           ),
-          groundBody,
+          this.worldOriginStaticBody,
         );
         this.registerCollider(pillarCol, true);
         this.proceduralGlbOverlappingColliders.push(pillarCol);
@@ -5568,6 +5973,17 @@ export class TokyoStationMap {
         bannerMesh.position.set(poleX, poleGroundY + 3.6, poleZ);
         bannerMesh.rotation.y = segAngle + (side > 0 ? 0 : Math.PI);
         centerGaiGroup.add(bannerMesh);
+
+        if (this.isPointClearOfRoadCorridors(poleX, poleZ, 0.25, corridors)) {
+          const bannerPoleCol = this.createCylinderDesc(rapier, 2.4, 0.12)
+            .setTranslation(poleX, poleGroundY + 2.4, poleZ)
+            .setFriction(0.45)
+            .setRestitution(0.12);
+          this.registerCollider(
+            world.createCollider(bannerPoleCol, this.worldOriginStaticBody),
+            true,
+          );
+        }
       }
     }
 
@@ -5704,7 +6120,7 @@ export class TokyoStationMap {
         .setRotation({ x: 0, y: Math.sin(bRotY / 2), z: 0, w: Math.cos(bRotY / 2) })
         .setFriction(0.65)
         .setRestitution(0.01);
-      this.registerCollider(world.createCollider(bColDesc, groundBody), false);
+      this.registerCollider(world.createCollider(bColDesc, this.worldOriginStaticBody), true);
 
       this.attachStreetFacingAwningAndSign({
         parent: centerGaiGroup,
@@ -5735,7 +6151,7 @@ export class TokyoStationMap {
   private buildShibuyaStreetscapeFillInfrastructure(
     world: RAPIER.World,
     rapier: typeof RAPIER,
-    groundBody: RAPIER.RigidBody,
+    _groundBody: RAPIER.RigidBody,
   ): void {
     const commTex = shibuyaTextureManager.getTexture("commercialFacade");
     const storefrontTex = shibuyaTextureManager.getTexture("plateauLod2Storefront");
@@ -5999,9 +6415,9 @@ export class TokyoStationMap {
           },
           {
             name: "MiyamasuSouth_EastTower",
-            x: -546.0,
-            z: 227.0,
-            w: 24.0,
+            x: -554.0,
+            z: 225.0,
+            w: 16.0,
             d: 13.0,
             h: 42.0,
             rotY: -1.71,
@@ -6269,7 +6685,7 @@ export class TokyoStationMap {
           .setRotation({ x: 0, y: Math.sin(b.rotY / 2), z: 0, w: Math.cos(b.rotY / 2) })
           .setFriction(0.65)
           .setRestitution(0.01);
-        this.registerCollider(world.createCollider(bColDesc, groundBody), false);
+        this.registerCollider(world.createCollider(bColDesc, this.worldOriginStaticBody), true);
 
         const isRetailBuilding = b.style === "commercial" || b.style === "storefront";
         if (isRetailBuilding && streetPts.length > 0) {
@@ -7443,6 +7859,7 @@ export class TokyoStationMap {
 
           const isShibuyaInactive = !this.hasActiveShibuyaChunk();
           glbModel.visible = !isShibuyaInactive;
+          this.attachShibuyaStreamGlbColliders(glbModel, !isShibuyaInactive);
           this.setShibuyaGlbOverlappingProceduralVisible(isShibuyaInactive);
 
           const hasValidLastFocus = !Number.isNaN(this.lastCulledFocusPos.x);
@@ -7483,11 +7900,15 @@ export class TokyoStationMap {
     const rawPath = config?.path ?? "/models/shibuya_plateau_buildings.glb";
     const modelPath = assetManager.resolveAssetUrl(rawPath);
     const loader = new GLTFLoader();
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath(assetManager.resolveAssetUrl("/draco/"));
+    loader.setDRACOLoader(dracoLoader);
 
     const loadPromise = new Promise<void>((resolve) => {
       loader.load(
         modelPath,
         (gltf) => {
+          dracoLoader.dispose();
           const glbModel = gltf.scene;
           const hasLoadedScene = Boolean(glbModel);
           if (!hasLoadedScene) {
@@ -7507,24 +7928,67 @@ export class TokyoStationMap {
 
           this.plateauTileMeshes = [];
           const detailedTileMeshes: THREE.Mesh[] = [];
+          const midTileMap = new Map<string, THREE.Object3D>();
           const proxyTileMap = new Map<string, THREE.Mesh>();
 
           glbModel.traverse((child) => {
             const isMesh = (child as THREE.Mesh).isMesh;
             if (!isMesh) {
+              if ((child.name || "").startsWith("PlateauMidTile_")) {
+                child.visible = false;
+                child.userData.isPlateauMid = true;
+                const tileId = child.name.replace("PlateauMidTile_", "");
+                midTileMap.set(tileId, child);
+              }
               return;
             }
             const mesh = child as THREE.Mesh;
             const meshName = mesh.name || "";
-            const isProxy = meshName.startsWith("PlateauProxyTile_");
+            const parentName = mesh.parent?.name || "";
+            const isProxy =
+              meshName.startsWith("PlateauProxyTile_") ||
+              parentName.startsWith("PlateauProxyTile_");
+            const isMid =
+              meshName.startsWith("PlateauMidTile_") || parentName.startsWith("PlateauMidTile_");
 
             if (isProxy) {
               mesh.castShadow = false;
               mesh.receiveShadow = false;
               mesh.visible = false;
               mesh.userData.isPlateauProxy = true;
-              const tileId = meshName.replace("PlateauProxyTile_", "");
+              const rawProxyName = parentName.startsWith("PlateauProxyTile_")
+                ? parentName
+                : meshName;
+              const tileId = rawProxyName.replace("PlateauProxyTile_", "");
               proxyTileMap.set(tileId, mesh);
+
+              const isMaterialArray = Array.isArray(mesh.material);
+              if (isMaterialArray) {
+                const matList = mesh.material as THREE.Material[];
+                for (let i = 0; i < matList.length; i++) {
+                  this.applyShibuyaPlateauGlbMaterial3DTexture(matList[i]);
+                }
+              } else {
+                this.applyShibuyaPlateauGlbMaterial3DTexture(mesh.material as THREE.Material);
+              }
+              return;
+            }
+
+            if (isMid) {
+              mesh.castShadow = false;
+              mesh.receiveShadow = true;
+              mesh.userData.isPlateauMid = true;
+              const isGroupedMid = parentName.startsWith("PlateauMidTile_");
+              if (isGroupedMid && mesh.parent) {
+                mesh.visible = true;
+                mesh.parent.visible = false;
+                const tileId = parentName.replace("PlateauMidTile_", "");
+                midTileMap.set(tileId, mesh.parent);
+              } else {
+                mesh.visible = false;
+                const tileId = meshName.replace("PlateauMidTile_", "");
+                midTileMap.set(tileId, mesh);
+              }
 
               const isMaterialArray = Array.isArray(mesh.material);
               if (isMaterialArray) {
@@ -7559,6 +8023,7 @@ export class TokyoStationMap {
             detailedTileMeshes.push(mesh);
           });
 
+          const assignedMidTileIds = new Set<string>();
           const assignedProxyTileIds = new Set<string>();
           const tileBoundsCache = new Map<string, THREE.Box3>();
           for (let i = 0; i < detailedTileMeshes.length; i++) {
@@ -7581,7 +8046,34 @@ export class TokyoStationMap {
                 sharedBounds = new THREE.Box3().setFromObject(tileMesh.parent);
                 tileBoundsCache.set(tileId, sharedBounds);
               }
+              // Why userData.cullingBounds も同一の共有バウンディングボックスへ統一するか:
+              // マルチマテリアルで分割された同一タイルのサブメッシュ同士で距離判定がズレると、
+              // 一部の材質だけ先に LOD1/LOD2 空ジオメトリへ切り替わりビル外壁やガラス面が部分消失するのを防ぐため。
+              tileMesh.userData.cullingBounds = sharedBounds;
               this.cullingBoundsCache.set(tileMesh, sharedBounds);
+            }
+
+            tileMesh.userData.detailedGeometry = tileMesh.geometry;
+            tileMesh.userData.detailedMaterial = tileMesh.material;
+
+            const midNode = midTileMap.get(tileId);
+            if (midNode) {
+              const isPrimaryMidCarrier = !assignedMidTileIds.has(tileId);
+              assignedMidTileIds.add(tileId);
+              const isSingleMidMesh = (midNode as THREE.Mesh).isMesh === true;
+              if (isSingleMidMesh) {
+                const midMesh = midNode as THREE.Mesh;
+                tileMesh.userData.midMesh = midMesh;
+                tileMesh.userData.isSecondaryMidCarrier = !isPrimaryMidCarrier;
+                tileMesh.userData.midGeometry = isPrimaryMidCarrier
+                  ? midMesh.geometry
+                  : new THREE.BufferGeometry();
+                tileMesh.userData.midMaterial = midMesh.material;
+              } else {
+                // マルチマテリアル LOD1（512px Glass/Commercial/Alley + 256px Roof）グループ制御
+                tileMesh.userData.midGroup = midNode;
+                tileMesh.userData.isSecondaryMidCarrier = !isPrimaryMidCarrier;
+              }
             }
 
             const proxyMesh = proxyTileMap.get(tileId);
@@ -7589,11 +8081,10 @@ export class TokyoStationMap {
               const isPrimaryProxyCarrier = !assignedProxyTileIds.has(tileId);
               assignedProxyTileIds.add(tileId);
               tileMesh.userData.proxyMesh = proxyMesh;
-              tileMesh.userData.detailedGeometry = tileMesh.geometry;
+              tileMesh.userData.isSecondaryProxyCarrier = !isPrimaryProxyCarrier;
               tileMesh.userData.proxyGeometry = isPrimaryProxyCarrier
                 ? proxyMesh.geometry
                 : new THREE.BufferGeometry();
-              tileMesh.userData.detailedMaterial = tileMesh.material;
               tileMesh.userData.proxyMaterial = proxyMesh.material;
             } else {
               this.ensurePlateauTileProxy(tileMesh);
@@ -7607,6 +8098,7 @@ export class TokyoStationMap {
 
           const isShibuyaInactive = !this.hasActiveShibuyaChunk();
           glbModel.visible = !isShibuyaInactive;
+          this.attachShibuyaPlateauGlbColliders(glbModel, !isShibuyaInactive);
 
           const hasValidLastFocus = !Number.isNaN(this.lastCulledFocusPos.x);
           if (hasValidLastFocus) {
@@ -7618,6 +8110,7 @@ export class TokyoStationMap {
         },
         undefined,
         (error) => {
+          dracoLoader.dispose();
           console.warn("Notice: Plateau Shibuya buildings GLB load skipped:", error);
           this.shibuyaPlateauGlbLoadingPromise = null;
           resolve();
@@ -7640,14 +8133,16 @@ export class TokyoStationMap {
     const matName = stdMat.name || "";
 
     if (matName.includes("PlateauGlassTower")) {
-      const tex = shibuyaTextureManager.getGlbTexture("plateauLod2Facade");
+      const tex = shibuyaTextureManager.getGlbTexture("plateauLod0Glass");
+      const emissiveTex = shibuyaTextureManager.getGlbTexture("plateauLod0GlassEmissive");
+      stdMat.color = new THREE.Color(0xffffff);
       stdMat.map = tex;
-      stdMat.roughness = 0.18;
-      stdMat.metalness = 0.45;
-      const dayIntensity = 0.05;
-      const nightIntensity = 1.25;
-      stdMat.emissive = new THREE.Color(0xa5f3fc);
-      stdMat.emissiveMap = tex;
+      stdMat.roughness = 0.2;
+      stdMat.metalness = 0.48;
+      const dayIntensity = 0.02;
+      const nightIntensity = 1.15;
+      stdMat.emissive = new THREE.Color(0xe6f1ff);
+      stdMat.emissiveMap = emissiveTex;
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
       this.shibuyaStreamEmissiveEntries.push({
         material: stdMat,
@@ -7659,14 +8154,16 @@ export class TokyoStationMap {
     }
 
     if (matName.includes("PlateauCommercialFacade")) {
-      const tex = shibuyaTextureManager.getGlbTexture("plateauLod2Facade");
+      const tex = shibuyaTextureManager.getGlbTexture("plateauLod0Commercial");
+      const emissiveTex = shibuyaTextureManager.getGlbTexture("plateauLod0CommercialEmissive");
+      stdMat.color = new THREE.Color(0xffffff);
       stdMat.map = tex;
-      stdMat.roughness = 0.35;
-      stdMat.metalness = 0.2;
-      const dayIntensity = 0.06;
-      const nightIntensity = 1.15;
-      stdMat.emissive = new THREE.Color(0xfde68a);
-      stdMat.emissiveMap = tex;
+      stdMat.roughness = 0.44;
+      stdMat.metalness = 0.18;
+      const dayIntensity = 0.02;
+      const nightIntensity = 1.14;
+      stdMat.emissive = new THREE.Color(0xfff2dc);
+      stdMat.emissiveMap = emissiveTex;
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
       this.shibuyaStreamEmissiveEntries.push({
         material: stdMat,
@@ -7678,14 +8175,16 @@ export class TokyoStationMap {
     }
 
     if (matName.includes("PlateauStorefront")) {
-      const tex = shibuyaTextureManager.getGlbTexture("plateauLod2Storefront");
+      const tex = shibuyaTextureManager.getGlbTexture("plateauLod0Storefront");
+      const emissiveTex = shibuyaTextureManager.getGlbTexture("plateauLod0StorefrontEmissive");
+      stdMat.color = new THREE.Color(0xffffff);
       stdMat.map = tex;
-      stdMat.roughness = 0.42;
-      stdMat.metalness = 0.16;
-      const dayIntensity = 0.05;
-      const nightIntensity = 1.05;
-      stdMat.emissive = new THREE.Color(0xfef08a);
-      stdMat.emissiveMap = tex;
+      stdMat.roughness = 0.34;
+      stdMat.metalness = 0.2;
+      const dayIntensity = 0.04;
+      const nightIntensity = 0.95;
+      stdMat.emissive = new THREE.Color(0xfff0d4);
+      stdMat.emissiveMap = emissiveTex;
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
       this.shibuyaStreamEmissiveEntries.push({
         material: stdMat,
@@ -7697,14 +8196,16 @@ export class TokyoStationMap {
     }
 
     if (matName.includes("PlateauAlleyCommercial")) {
-      const tex = shibuyaTextureManager.getGlbTexture("plateauLod2Storefront");
+      const tex = shibuyaTextureManager.getGlbTexture("plateauLod0Alley");
+      const emissiveTex = shibuyaTextureManager.getGlbTexture("plateauLod0AlleyEmissive");
+      stdMat.color = new THREE.Color(0xffffff);
       stdMat.map = tex;
-      stdMat.roughness = 0.42;
-      stdMat.metalness = 0.16;
-      const dayIntensity = 0.08;
-      const nightIntensity = 1.05;
-      stdMat.emissive = new THREE.Color(0xfef3c7);
-      stdMat.emissiveMap = tex;
+      stdMat.roughness = 0.5;
+      stdMat.metalness = 0.12;
+      const dayIntensity = 0.02;
+      const nightIntensity = 1.14;
+      stdMat.emissive = new THREE.Color(0xfff0d4);
+      stdMat.emissiveMap = emissiveTex;
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
       this.shibuyaStreamEmissiveEntries.push({
         material: stdMat,
@@ -7715,15 +8216,27 @@ export class TokyoStationMap {
       return;
     }
 
-    if (matName.includes("PlateauLod2Proxy")) {
-      const tex = shibuyaTextureManager.getGlbTexture("plateauLod2Facade");
+    if (matName.includes("PlateauPitchedRoof")) {
+      const tex = shibuyaTextureManager.getGlbTexture("plateauLod0PitchedRoof");
+      stdMat.color = new THREE.Color(0xffffff);
       stdMat.map = tex;
-      stdMat.roughness = 0.65;
-      stdMat.metalness = 0.15;
-      const dayIntensity = 0.05;
-      const nightIntensity = 0.45;
-      stdMat.emissive = new THREE.Color(0xffe8ba);
-      stdMat.emissiveMap = tex;
+      stdMat.roughness = 0.76;
+      stdMat.metalness = 0.06;
+      return;
+    }
+
+    if (matName.includes("PlateauMidGlass")) {
+      const tex = shibuyaTextureManager.getGlbTexture("plateauLod1Glass");
+      const emissiveTex = shibuyaTextureManager.getGlbTexture("plateauLod1GlassEmissive");
+      stdMat.color = new THREE.Color(0xffffff);
+      stdMat.vertexColors = true;
+      stdMat.map = tex;
+      stdMat.roughness = 0.28;
+      stdMat.metalness = 0.38;
+      const dayIntensity = 0.02;
+      const nightIntensity = 1.18;
+      stdMat.emissive = new THREE.Color(0xe6f1ff);
+      stdMat.emissiveMap = emissiveTex;
       stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
       this.shibuyaStreamEmissiveEntries.push({
         material: stdMat,
@@ -7733,8 +8246,100 @@ export class TokyoStationMap {
       return;
     }
 
+    if (matName.includes("PlateauMidCommercial") || matName.includes("PlateauMidLod")) {
+      const tex = shibuyaTextureManager.getGlbTexture("plateauLod1Commercial");
+      const emissiveTex = shibuyaTextureManager.getGlbTexture("plateauLod1CommercialEmissive");
+      stdMat.color = new THREE.Color(0xffffff);
+      stdMat.vertexColors = true;
+      stdMat.map = tex;
+      stdMat.roughness = 0.5;
+      stdMat.metalness = 0.16;
+      const dayIntensity = 0.02;
+      const nightIntensity = 1.16;
+      stdMat.emissive = new THREE.Color(0xfff2dc);
+      stdMat.emissiveMap = emissiveTex;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      return;
+    }
+
+    if (matName.includes("PlateauMidAlley")) {
+      const tex = shibuyaTextureManager.getGlbTexture("plateauLod1Alley");
+      const emissiveTex = shibuyaTextureManager.getGlbTexture("plateauLod1AlleyEmissive");
+      stdMat.color = new THREE.Color(0xffffff);
+      stdMat.vertexColors = true;
+      stdMat.map = tex;
+      stdMat.roughness = 0.54;
+      stdMat.metalness = 0.1;
+      const dayIntensity = 0.02;
+      const nightIntensity = 1.16;
+      stdMat.emissive = new THREE.Color(0xfff0d4);
+      stdMat.emissiveMap = emissiveTex;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      return;
+    }
+
+    if (matName.includes("PlateauMidRoof")) {
+      const tex = shibuyaTextureManager.getGlbTexture("plateauLod1Roof");
+      stdMat.color = new THREE.Color(0xffffff);
+      stdMat.vertexColors = true;
+      stdMat.map = tex;
+      stdMat.roughness = 0.84;
+      stdMat.metalness = 0.06;
+      return;
+    }
+
+    if (matName.includes("PlateauLod2Proxy")) {
+      const tex = shibuyaTextureManager.getGlbTexture("plateauLod2Proxy");
+      const emissiveTex = shibuyaTextureManager.getGlbTexture("plateauLod2ProxyEmissive");
+      stdMat.color = new THREE.Color(0xffffff);
+      stdMat.vertexColors = true;
+      stdMat.map = tex;
+      stdMat.roughness = 0.68;
+      stdMat.metalness = 0.14;
+      const dayIntensity = 0.02;
+      const nightIntensity = 1.16;
+      stdMat.emissive = new THREE.Color(0xfff0d4);
+      stdMat.emissiveMap = emissiveTex;
+      stdMat.emissiveIntensity = this.isNightActive ? nightIntensity : dayIntensity;
+      this.shibuyaStreamEmissiveEntries.push({
+        material: stdMat,
+        dayIntensity,
+        nightIntensity,
+      });
+      return;
+    }
+
+    if (matName.includes("PlateauArchTrim")) {
+      stdMat.color = new THREE.Color(0xa6acb4);
+      stdMat.roughness = 0.4;
+      stdMat.metalness = 0.26;
+      this.applyArchitecture3DTexture(stdMat, "white_granite");
+      return;
+    }
+
+    if (matName.includes("PlateauDarkFrame")) {
+      stdMat.color = new THREE.Color(0x232832);
+      stdMat.roughness = 0.36;
+      stdMat.metalness = 0.52;
+      this.applyArchitecture3DTexture(stdMat, "anodized_metal");
+      return;
+    }
+
     if (matName.includes("PlateauRooftop")) {
-      stdMat.roughness = 0.65;
+      const tex = shibuyaTextureManager.getGlbTexture("plateauLod0Roof");
+      stdMat.color = new THREE.Color(0xffffff);
+      stdMat.map = tex;
+      stdMat.roughness = 0.82;
       stdMat.metalness = 0.08;
       this.applyArchitecture3DTexture(stdMat, "white_granite");
       return;
@@ -8733,6 +9338,47 @@ export class TokyoStationMap {
     }
   }
 
+  /**
+   * 大東京 10倍大拡張（86.0km²: 28外周チャンク・125km超幹線道路・約2,200棟ビル・東京湾/隅田川・7大象徴ランドマーク）を構築し
+   * シーングラフ・チャンク管理・夜間発光同期へ統合する。
+   */
+  private buildGreaterTokyoTenfoldExpansion(world: RAPIER.World, rapier: typeof RAPIER): void {
+    const bundle = buildGreaterTokyoExpansion({
+      world,
+      rapier,
+      staticBody: this.worldOriginStaticBody,
+      sampleTerrainY: sampleShibuyaTerrainY,
+      isNightActive: this.isNightActive,
+      registerObstacleCollider: (col) => this.registerCollider(col, true),
+    });
+    this.greaterTokyoExpansion = bundle;
+
+    // 広域幹線道路・東京湾/隅田川水面・7大象徴ランドマークを直接シーングラフへ追加し遠景描画距離を拡張
+    bundle.roadNetworkGroup.userData.extendedDrawDistanceM = 4800;
+    bundle.waterGroup.userData.extendedDrawDistanceM = 5200;
+    bundle.landmarksGroup.userData.extendedDrawDistanceM = 5400;
+    this.group.add(bundle.waterGroup, bundle.roadNetworkGroup, bundle.landmarksGroup);
+
+    // 28外周チャンクの InstancedMesh ビル群を直接シーングラフ＆所属チャンクへ登録
+    for (const [chunkId, chunkGroup] of bundle.outerChunkGroups.entries()) {
+      chunkGroup.userData.extendedDrawDistanceM = 2200;
+      this.group.add(chunkGroup);
+      this.registerObjectInChunk(chunkGroup, chunkId);
+    }
+
+    // 夜間発光マテリアル（外周ビル群・街灯・東京タワー・東京スカイツリー・レインボーブリッジ・東京ドーム）を昼夜切替へ同期
+    for (let i = 0; i < bundle.emissiveEntries.length; i++) {
+      this.shibuyaStreamEmissiveEntries.push(bundle.emissiveEntries[i]);
+    }
+
+    logger.info("city", "greater_tokyo.tenfold_expansion_built", "大東京10倍拡張マップを構築完了", {
+      areaSqKm: 86.0,
+      outerChunkCount: bundle.outerChunkGroups.size,
+      totalRoadLengthKm: bundle.totalRoadLengthKm,
+      totalOuterBuildingCount: bundle.totalOuterBuildingCount,
+    });
+  }
+
   private buildStreetProps(world: RAPIER.World, rapier: typeof RAPIER): void {
     // 街路樹・街灯・ボラード・道路標識用の共有固定剛体（ワールド原点配置）
     const streetPropsBody = world.createRigidBody(
@@ -8810,6 +9456,7 @@ export class TokyoStationMap {
     for (let x = -240; x <= 240; x += 36) {
       const isNearIntersection =
         Math.abs(x) < 24 ||
+        Math.abs(x - -23.5) < 13 ||
         Math.abs(x - -156) < 18 ||
         Math.abs(x - 156) < 18 ||
         Math.abs(x - -268) < 24 ||
@@ -9357,10 +10004,21 @@ export class TokyoStationMap {
           isScramble: binding.isScramble,
           timing: { phaseOffsetSec: binding.phaseOffsetSec },
         });
-        managed.group.position.y = sampleShibuyaTerrainY(inter.x, inter.z);
+        const signalGroundY = sampleShibuyaTerrainY(inter.x, inter.z);
+        managed.group.position.y = signalGroundY;
         managed.group.userData.usesTerrainElevation = true;
         this.group.add(managed.group);
         placedShibuyaProps.push({ x: inter.x, z: inter.z });
+
+        // 渋谷交差点の信号支柱へ物理コライダーを付与（すり抜け防止）
+        const shibuyaSignalColDesc = this.createCylinderDesc(rapier, 2.5, 0.16)
+          .setTranslation(inter.x, signalGroundY + 2.5, inter.z)
+          .setFriction(0.4)
+          .setRestitution(0.12);
+        this.registerCollider(
+          world.createCollider(shibuyaSignalColDesc, this.worldOriginStaticBody),
+          true,
+        );
       }
     }
 
@@ -9631,6 +10289,7 @@ export class TokyoStationMap {
         halfZ: number;
         radius: number;
       },
+      rotationY = 0,
     ): void => {
       const desc =
         colSpec.kind === "cuboid"
@@ -9638,6 +10297,12 @@ export class TokyoStationMap {
           : this.createCylinderDesc(rapier, colSpec.halfY, colSpec.radius);
       desc
         .setTranslation(x, surfaceY + colSpec.halfY, z)
+        .setRotation({
+          x: 0,
+          y: Math.sin(rotationY * 0.5),
+          z: 0,
+          w: Math.cos(rotationY * 0.5),
+        })
         .setFriction(0.45)
         .setRestitution(0.15);
       this.registerCollider(world.createCollider(desc, streetPropsBody), true);
@@ -9701,7 +10366,7 @@ export class TokyoStationMap {
             titleJa: seg.roadName,
           });
           this.group.add(res.group);
-          attachObstacleCollider(px, surfaceY, pz, res.collider);
+          attachObstacleCollider(px, surfaceY, pz, res.collider, alongWalkYaw);
           occupiedPts.push({ x: px, z: pz });
         } else if (mod === 1) {
           // 無電柱化地上変圧器（TEPCO パッドマウント地上機器）
@@ -9715,7 +10380,7 @@ export class TokyoStationMap {
           });
           this.group.add(res.group);
           if (res.collider) {
-            attachObstacleCollider(px, surfaceY, pz, res.collider);
+            attachObstacleCollider(px, surfaceY, pz, res.collider, faceRoadYaw);
           }
           occupiedPts.push({ x: px, z: pz });
         } else if (mod === 2) {
@@ -9728,7 +10393,7 @@ export class TokyoStationMap {
             rotationY: faceRoadYaw,
           });
           this.group.add(res.group);
-          attachObstacleCollider(px, surfaceY, pz, res.collider);
+          attachObstacleCollider(px, surfaceY, pz, res.collider, faceRoadYaw);
           occupiedPts.push({ x: px, z: pz });
         } else if (mod === 3) {
           // 赤ポール消火栓標識
@@ -9742,7 +10407,7 @@ export class TokyoStationMap {
           });
           this.group.add(res.group);
           if (res.collider) {
-            attachObstacleCollider(px, surfaceY, pz, res.collider);
+            attachObstacleCollider(px, surfaceY, pz, res.collider, alongWalkYaw);
           }
           occupiedPts.push({ x: px, z: pz });
         } else if (mod === 4) {
@@ -9756,7 +10421,7 @@ export class TokyoStationMap {
             titleJa: seg.roadName,
           });
           this.group.add(res.group);
-          attachObstacleCollider(px, surfaceY, pz, res.collider);
+          attachObstacleCollider(px, surfaceY, pz, res.collider, faceRoadYaw);
           occupiedPts.push({ x: px, z: pz });
         } else if (mod === 5 && isMarunouchiOrGinza) {
           // 丸の内・銀座の時間制限駐車区間パーキングメーター
@@ -9768,7 +10433,7 @@ export class TokyoStationMap {
             rotationY: faceRoadYaw,
           });
           this.group.add(res.group);
-          attachObstacleCollider(px, surfaceY, pz, res.collider);
+          attachObstacleCollider(px, surfaceY, pz, res.collider, faceRoadYaw);
           occupiedPts.push({ x: px, z: pz });
         } else if (mod === 6 && seg.widthMeters >= 3.4) {
           // 幅広歩道の都市ベンチ
@@ -9780,7 +10445,7 @@ export class TokyoStationMap {
             rotationY: faceRoadYaw,
           });
           this.group.add(res.group);
-          attachObstacleCollider(px, surfaceY, pz, res.collider);
+          attachObstacleCollider(px, surfaceY, pz, res.collider, faceRoadYaw);
           occupiedPts.push({ x: px, z: pz });
         } else if (mod === 7) {
           // 通信・電力ハンドホール（歩道面とフラット）
@@ -9820,7 +10485,11 @@ export class TokyoStationMap {
     let mirrorCount = 0;
     let sakuraManholeCount = 0;
     for (const corner of swNetwork.segments) {
-      if (corner.kind !== "intersection_corner" || corner.polygonXZ.length < 4) {
+      if (
+        corner.kind !== "intersection_corner" ||
+        corner.id.startsWith("sw_bridge_") ||
+        corner.polygonXZ.length < 4
+      ) {
         continue;
       }
       // 外角頂点 polygonXZ[0] から円弧中央頂点方向へ 0.95m 控えた位置（隅切り歩道スラブ中央部）を算出
@@ -10448,6 +11117,35 @@ export class TokyoStationMap {
         child.userData.baseScaleY = child.scale.y || 1;
       }
 
+      const explicitOuterChunkId = child.userData?.outerChunkId as WorldChunkId | undefined;
+      if (explicitOuterChunkId) {
+        const chunkDef = WORLD_CHUNK_DEFINITIONS.find((d) => d.id === explicitOuterChunkId);
+        if (chunkDef) {
+          this.cullingBoundsCache.set(
+            child,
+            new THREE.Box3(
+              new THREE.Vector3(chunkDef.bounds.minX, -2, chunkDef.bounds.minZ),
+              new THREE.Vector3(chunkDef.bounds.maxX, 240, chunkDef.bounds.maxZ),
+            ),
+          );
+        }
+        this.registerObjectInChunk(child, explicitOuterChunkId);
+        continue;
+      }
+
+      const isGreaterWorldSpan =
+        child.name === "GreaterTokyoArterialRoadNetwork" ||
+        child.name === "GreaterTokyoBayAndSumidaWater" ||
+        child.name === "GreaterTokyoSignatureLandmarks";
+      if (isGreaterWorldSpan) {
+        this.cullingBoundsCache.set(
+          child,
+          new THREE.Box3(new THREE.Vector3(-5600, -10, -4200), new THREE.Vector3(4400, 650, 4400)),
+        );
+        this.registerObjectInChunk(child, "marunouchi-core");
+        continue;
+      }
+
       let bounds = this.cullingBoundsCache.get(child);
       if (!bounds) {
         bounds = new THREE.Box3().setFromObject(child);
@@ -10507,7 +11205,12 @@ export class TokyoStationMap {
       chunkId === "shibuya-core" ||
       chunkId === "shibuya-north" ||
       chunkId === "shibuya-south" ||
-      chunkId === "shibuya-west";
+      chunkId === "shibuya-west" ||
+      chunkId === "harajuku-yoyogi" ||
+      chunkId === "ebisu-daikanyama" ||
+      chunkId === "aoyama-west" ||
+      chunkId === "roppongi-nishiazabu" ||
+      chunkId === "omotesando-aoyama-north";
     const isMarunouchiCore = chunkId === "marunouchi-core";
 
     if (isShibuyaZone && this.glbShibuyaStreamGroup === null) {
@@ -10549,6 +11252,17 @@ export class TokyoStationMap {
       }
     }
 
+    // 大東京10倍拡張の外周28チャンク向けビル物理コライダーをオンデマンド展開
+    if (this.greaterTokyoExpansion && OUTER_GREATER_TOKYO_CHUNK_IDS.has(chunkId)) {
+      const created = this.greaterTokyoExpansion.activateOuterChunkColliders(chunkId);
+      if (created.length > 0) {
+        for (let i = 0; i < created.length; i++) {
+          this.registerCollider(created[i], true);
+        }
+        this.notifyObstacleCollidersChanged();
+      }
+    }
+
     this.syncChunkVisibilityState();
   }
 
@@ -10583,11 +11297,7 @@ export class TokyoStationMap {
       }
     }
 
-    const hasRemainingShibuyaChunks =
-      !this.unloadedChunkIds.has("shibuya-core") ||
-      !this.unloadedChunkIds.has("shibuya-north") ||
-      !this.unloadedChunkIds.has("shibuya-south") ||
-      !this.unloadedChunkIds.has("shibuya-west");
+    const hasRemainingShibuyaChunks = this.hasActiveShibuyaChunk();
 
     if (!hasRemainingShibuyaChunks && this.glbShibuyaStreamGroup) {
       this.disposeGlbHierarchy(this.glbShibuyaStreamGroup);
@@ -10602,6 +11312,9 @@ export class TokyoStationMap {
       this.objectToChunkId.delete(this.glbShibuyaStreamGroup);
       this.cullingBoundsCache.delete(this.glbShibuyaStreamGroup);
       this.glbShibuyaStreamGroup = null;
+      this.disposeGlbColliderBundle(this.shibuyaStreamGlbColliders, this.shibuyaStreamGlbBody);
+      this.shibuyaStreamGlbBody = null;
+      this.notifyObstacleCollidersChanged();
       this.setShibuyaGlbOverlappingProceduralVisible(true);
     }
 
@@ -10619,6 +11332,9 @@ export class TokyoStationMap {
       this.cullingBoundsCache.delete(this.glbShibuyaPlateauGroup);
       this.glbShibuyaPlateauGroup = null;
       this.plateauTileMeshes = [];
+      this.disposeGlbColliderBundle(this.shibuyaPlateauGlbColliders, this.shibuyaPlateauGlbBody);
+      this.shibuyaPlateauGlbBody = null;
+      this.notifyObstacleCollidersChanged();
     }
 
     // 該当チャンクの街路樹GLBクローンを解放
@@ -10633,6 +11349,22 @@ export class TokyoStationMap {
       slot.fallbackGroup.userData.permanentlyHiddenByGlb = false;
       slot.fallbackGroup.visible = false;
       this.cullingBoundsCache.delete(slot.slotGroup);
+    }
+
+    // 大東京10倍拡張の外周チャンクが退避されたら該当チャンクのビル物理コライダーを解放
+    if (this.greaterTokyoExpansion && OUTER_GREATER_TOKYO_CHUNK_IDS.has(chunkId)) {
+      const removed = this.greaterTokyoExpansion.deactivateOuterChunkColliders(chunkId);
+      if (removed.length > 0) {
+        const removedSet = new Set(removed);
+        const removedHandles = new Set(
+          removed.map((c) => c.handle).filter((h): h is number => typeof h === "number"),
+        );
+        this.colliders = this.colliders.filter((c) => !removedSet.has(c));
+        this.obstacleColliderHandles = this.obstacleColliderHandles.filter(
+          (h) => !removedHandles.has(h),
+        );
+        this.notifyObstacleCollidersChanged();
+      }
     }
 
     const objects = this.chunkObjectsMap.get(chunkId) ?? [];
@@ -10693,14 +11425,23 @@ export class TokyoStationMap {
         coreMesh.parent.userData.appliedLodTier = undefined;
       }
     }
-    // Why プロシージャル剛体・橋脚コライダーも showProcedural に連動させるか:
-    // shibuya_stream.glb が表示されている間、プロシージャル直方体コライダーが有効のままだと、
-    // GLB 側のモデル形状とプロシージャル Box の微小な差分により、何もない道路や広場空間に「見えない壁」が生じるため、
-    // GLB 表示中はプロシージャル側の物理コライダーも完全に無効化（setEnabled(false)）する。
+    // Why プロシージャル剛体コライダーと GLB Trimesh コライダーを排他連動させるか:
+    // - shibuya_stream.glb の Trimesh コライダーが存在する場合は、GLB 表示中は GLB 実体 Trimesh を有効化し
+    //   プロシージャル直方体側を無効化することで「見えない壁（形状差）」と「当たり判定消失（すり抜け）」の双方を同時に防ぐ。
+    // - もし GLB Trimesh が未生成（テスト環境や GLB ロード失敗時）の場合はプロシージャル側コライダーを常に有効維持する。
+    const hasGlbStreamColliders = this.shibuyaStreamGlbColliders.length > 0;
+    const enableProceduralColliders = showProcedural || !hasGlbStreamColliders;
     for (let i = 0; i < this.proceduralGlbOverlappingColliders.length; i++) {
       const col = this.proceduralGlbOverlappingColliders[i];
       if (col && typeof col.setEnabled === "function") {
-        col.setEnabled(showProcedural);
+        col.setEnabled(enableProceduralColliders);
+      }
+    }
+    const enableGlbColliders = !showProcedural && hasGlbStreamColliders;
+    for (let i = 0; i < this.shibuyaStreamGlbColliders.length; i++) {
+      const col = this.shibuyaStreamGlbColliders[i];
+      if (col && typeof col.setEnabled === "function") {
+        col.setEnabled(enableGlbColliders);
       }
     }
   }
@@ -10731,6 +11472,9 @@ export class TokyoStationMap {
       }
       if (mesh.userData.detailedGeometry && mesh.userData.detailedGeometry !== mesh.geometry) {
         mesh.userData.detailedGeometry.dispose();
+      }
+      if (mesh.userData.midGeometry && mesh.userData.midGeometry !== mesh.geometry) {
+        mesh.userData.midGeometry.dispose();
       }
       if (mesh.userData.proxyGeometry && mesh.userData.proxyGeometry !== mesh.geometry) {
         mesh.userData.proxyGeometry.dispose();
@@ -10783,7 +11527,12 @@ export class TokyoStationMap {
       !this.unloadedChunkIds.has("shibuya-core") ||
       !this.unloadedChunkIds.has("shibuya-north") ||
       !this.unloadedChunkIds.has("shibuya-south") ||
-      !this.unloadedChunkIds.has("shibuya-west")
+      !this.unloadedChunkIds.has("shibuya-west") ||
+      !this.unloadedChunkIds.has("harajuku-yoyogi") ||
+      !this.unloadedChunkIds.has("ebisu-daikanyama") ||
+      !this.unloadedChunkIds.has("aoyama-west") ||
+      !this.unloadedChunkIds.has("roppongi-nishiazabu") ||
+      !this.unloadedChunkIds.has("omotesando-aoyama-north")
     );
   }
 
@@ -10798,6 +11547,12 @@ export class TokyoStationMap {
     const hasActiveShibuya = this.hasActiveShibuyaChunk();
     const isShibuyaGlbActive = this.glbShibuyaStreamGroup !== null && hasActiveShibuya;
     this.setShibuyaGlbOverlappingProceduralVisible(!isShibuyaGlbActive);
+    for (let i = 0; i < this.shibuyaPlateauGlbColliders.length; i += 1) {
+      const col = this.shibuyaPlateauGlbColliders[i];
+      if (col && typeof col.setEnabled === "function") {
+        col.setEnabled(hasActiveShibuya);
+      }
+    }
 
     for (const def of WORLD_CHUNK_DEFINITIONS) {
       const isUnloaded = this.unloadedChunkIds.has(def.id);
@@ -11172,7 +11927,14 @@ export class TokyoStationMap {
         if (isChunkNotLoaded) {
           tileMesh.visible = false;
           tileMesh.userData.appliedLodTier = "culled";
+          tileMesh.userData.isMidLodActive = false;
           tileMesh.userData.isProxyActive = false;
+          if (tileMesh.userData.midGroup) {
+            tileMesh.userData.midGroup.visible = false;
+          }
+          if (tileMesh.userData.midMesh) {
+            tileMesh.userData.midMesh.visible = false;
+          }
           if (tileMesh.userData.proxyMesh) {
             tileMesh.userData.proxyMesh.visible = false;
           }
@@ -11188,7 +11950,14 @@ export class TokyoStationMap {
         if (isTileCulled) {
           tileMesh.visible = false;
           tileMesh.userData.appliedLodTier = "culled";
+          tileMesh.userData.isMidLodActive = false;
           tileMesh.userData.isProxyActive = false;
+          if (tileMesh.userData.midGroup) {
+            tileMesh.userData.midGroup.visible = false;
+          }
+          if (tileMesh.userData.midMesh) {
+            tileMesh.userData.midMesh.visible = false;
+          }
           if (tileMesh.userData.proxyMesh) {
             tileMesh.userData.proxyMesh.visible = false;
           }
@@ -11219,33 +11988,75 @@ export class TokyoStationMap {
           ) {
             tileMesh.material = tileMesh.userData.detailedMaterial;
           }
+          tileMesh.userData.isMidLodActive = false;
           tileMesh.userData.isProxyActive = false;
+          if (tileMesh.userData.midGroup) {
+            tileMesh.userData.midGroup.visible = false;
+          }
+          if (tileMesh.userData.midMesh) {
+            tileMesh.userData.midMesh.visible = false;
+          }
           if (tileMesh.userData.proxyMesh) {
             tileMesh.userData.proxyMesh.visible = false;
           }
         } else if (tileTier === "medium") {
           lod1MediumCount += 1;
           tileMesh.castShadow = false;
-          if (
-            tileMesh.userData.detailedGeometry &&
-            tileMesh.geometry !== tileMesh.userData.detailedGeometry
-          ) {
-            tileMesh.geometry = tileMesh.userData.detailedGeometry;
-          }
-          if (
-            tileMesh.userData.detailedMaterial &&
-            tileMesh.material !== tileMesh.userData.detailedMaterial
-          ) {
-            tileMesh.material = tileMesh.userData.detailedMaterial;
+          const hasMidGroup = Boolean(tileMesh.userData.midGroup);
+          const hasMidGeometry = Boolean(tileMesh.userData.midGeometry);
+          if (hasMidGroup) {
+            // マルチマテリアル LOD1（512px 3D陰影ベイク済み Glass/Commercial/Alley/Roof）グループを可視化し LOD0 サブメッシュを完全非表示化
+            tileMesh.visible = false;
+            tileMesh.userData.midGroup.visible = true;
+            tileMesh.userData.isMidLodActive = true;
+          } else if (hasMidGeometry) {
+            const isSecondaryMidCarrier = Boolean(tileMesh.userData.isSecondaryMidCarrier);
+            if (isSecondaryMidCarrier) {
+              tileMesh.visible = false;
+            }
+            if (tileMesh.geometry !== tileMesh.userData.midGeometry) {
+              tileMesh.geometry = tileMesh.userData.midGeometry;
+            }
+            if (
+              tileMesh.userData.midMaterial &&
+              tileMesh.material !== tileMesh.userData.midMaterial
+            ) {
+              tileMesh.material = tileMesh.userData.midMaterial;
+            }
+            tileMesh.userData.isMidLodActive = true;
+          } else {
+            if (
+              tileMesh.userData.detailedGeometry &&
+              tileMesh.geometry !== tileMesh.userData.detailedGeometry
+            ) {
+              tileMesh.geometry = tileMesh.userData.detailedGeometry;
+            }
+            if (
+              tileMesh.userData.detailedMaterial &&
+              tileMesh.material !== tileMesh.userData.detailedMaterial
+            ) {
+              tileMesh.material = tileMesh.userData.detailedMaterial;
+            }
+            tileMesh.userData.isMidLodActive = false;
           }
           tileMesh.userData.isProxyActive = false;
+          if (tileMesh.userData.midMesh) {
+            tileMesh.userData.midMesh.visible = false;
+          }
           if (tileMesh.userData.proxyMesh) {
             tileMesh.userData.proxyMesh.visible = false;
           }
-          simplifiedSubMeshCount += 1;
+          simplifiedSubMeshCount += hasMidGroup || hasMidGeometry ? 3 : 1;
         } else {
           lod2LowCount += 1;
           tileMesh.castShadow = false;
+          if (tileMesh.userData.midGroup) {
+            tileMesh.userData.midGroup.visible = false;
+          }
+          const isSecondaryProxyCarrier = Boolean(tileMesh.userData.isSecondaryProxyCarrier);
+          if (isSecondaryProxyCarrier) {
+            tileMesh.visible = false;
+          }
           if (
             tileMesh.userData.proxyGeometry &&
             tileMesh.geometry !== tileMesh.userData.proxyGeometry
@@ -11258,7 +12069,11 @@ export class TokyoStationMap {
           ) {
             tileMesh.material = tileMesh.userData.proxyMaterial;
           }
+          tileMesh.userData.isMidLodActive = false;
           tileMesh.userData.isProxyActive = true;
+          if (tileMesh.userData.midMesh) {
+            tileMesh.userData.midMesh.visible = false;
+          }
           if (tileMesh.userData.proxyMesh) {
             tileMesh.userData.proxyMesh.visible = false;
           }
@@ -11339,14 +12154,20 @@ export class TokyoStationMap {
       }
 
       const dist = this.computeDistanceToObject(child, focusPosition);
+      const extendedDrawDist =
+        typeof child.userData?.extendedDrawDistanceM === "number"
+          ? child.userData.extendedDrawDistanceM
+          : 0;
       const customMaxDist =
-        typeof child.userData?.maxLodDrawDistance === "number"
-          ? Math.min(maxDrawDistance, child.userData.maxLodDrawDistance)
-          : isLargeStructure
-            ? largeStructureMaxDist
-            : isRoadInfra
-              ? Math.max(maxDrawDistance + 220, 600)
-              : maxDrawDistance;
+        extendedDrawDist > 0
+          ? Math.max(maxDrawDistance, extendedDrawDist)
+          : typeof child.userData?.maxLodDrawDistance === "number"
+            ? Math.min(maxDrawDistance, child.userData.maxLodDrawDistance)
+            : isLargeStructure
+              ? largeStructureMaxDist
+              : isRoadInfra
+                ? Math.max(maxDrawDistance + 220, 600)
+                : maxDrawDistance;
       const isWithinDrawDistance = dist <= customMaxDist;
       child.visible = isWithinDrawDistance;
       if (!isWithinDrawDistance) {
